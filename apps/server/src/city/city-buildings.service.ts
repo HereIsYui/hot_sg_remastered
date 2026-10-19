@@ -58,15 +58,34 @@ export class CityBuildingsService {
         where state = '1' and cid = ${cid} and state_endtime <= unix_timestamp()`.execute(db)
     ).rows;
     if (done.length === 0) return;
-    await sql`update sys_building set state = '0', level = (level + '1')
-      where state = '1' and cid = ${cid} and state_endtime <= unix_timestamp()`.execute(db);
+    // startChangeBuilding queues its field at the level it already has; the original levelled it
+    // up all the same.
+    const changed = new Set(
+      (
+        await sql<Row>`select b.id from sys_building b
+          join mem_building_upgrading m on m.id = b.id and m.level = b.level
+          where b.state = '1' and b.cid = ${cid} and b.state_endtime <= unix_timestamp()`.execute(
+          db,
+        )
+      ).rows.map((row) => String(row.id)),
+    );
+    const levelUp = done.filter((b) => !changed.has(String(b.id)));
+    if (levelUp.length > 0) {
+      await sql`update sys_building set state = '0', level = (level + '1')
+        where id in (${sql.join(levelUp.map((b) => b.id))})`.execute(db);
+    }
+    if (changed.size > 0) {
+      await sql`update sys_building set state = '0'
+        where id in (${sql.join([...changed])})`.execute(db);
+    }
     await sql`delete from mem_building_upgrading
       where cid = ${cid} and state_endtime <= unix_timestamp()`.execute(db);
     for (const building of done) {
       const bid = phpNum(building.bid);
-      const level = phpNum(building.level) + 1;
       if (bid < 5) await this.production.updateUsersCityResource(uid, cid);
-      await this.onLevelUp(uid, cid, bid, level);
+      if (!changed.has(String(building.id))) {
+        await this.onLevelUp(uid, cid, bid, phpNum(building.level) + 1);
+      }
     }
   }
 

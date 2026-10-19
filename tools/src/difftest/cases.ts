@@ -261,8 +261,11 @@ export const cases: DiffCase[] = [
       await change(0, 1, 3, 2, 1);
       await change(0, 1, 3, 3, 2);
       await s.command(session, 'startChangeBuilding', FOREIGN_CITY, 0, 1, 3, 2, 1);
+      // The original also levelled the changed field up when it finished; the rewrite keeps it.
       await s.query(
-        'update sys_building set state_endtime = unix_timestamp() - 1 where cid = ? and xy = 13',
+        `update sys_building set state_endtime = unix_timestamp() - 1,
+            level = level - ${s.label === 'legacy' ? 1 : 0}
+          where cid = ? and xy = 13`,
         [cid],
       );
       await s.command(session, 'getCityBuilding', cid);
