@@ -20,6 +20,7 @@ import GovernmentDialog from '../government/GovernmentDialog.vue';
 import ResourceProductDialog from '../government/ResourceProductDialog.vue';
 import ModifyPasswordDialog from '../system/ModifyPasswordDialog.vue';
 import OpenLockDialog from '../system/OpenLockDialog.vue';
+import TaskDialog from '../task/TaskDialog.vue';
 import WallDialog from '../wall/WallDialog.vue';
 
 /** DialogManager: the dialogs over the scene panels (only one shown at a time). */
@@ -62,6 +63,7 @@ function choose(action: 'all' | 'level') {
     <CityFieldDialog v-else-if="dialog?.name === 'cityField'" />
     <OpenLockDialog v-else-if="dialog?.name === 'openLock'" :type="dialog.type" />
     <ModifyPasswordDialog v-else-if="dialog?.name === 'modifyPassword'" />
+    <TaskDialog v-else-if="dialog?.name === 'task'" />
     <GovernmentDialog
       v-else-if="dialog?.name === 'building' && ownDialog(dialog.building, BUILDING_GOVERNMENT)"
       :key="`government ${buildingKey}`"

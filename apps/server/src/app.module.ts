@@ -10,6 +10,7 @@ import { GatewayModule } from './gateway/gateway.module';
 import { HealthController } from './health/health.controller';
 import { PushModule } from './push/push.module';
 import { RankModule } from './rank/rank.module';
+import { TaskModule } from './task/task.module';
 import { TickModule } from './tick/tick.module';
 import { UserModule } from './user/user.module';
 
@@ -27,6 +28,7 @@ import { UserModule } from './user/user.module';
     CityModule,
     RankModule,
     BufferModule,
+    TaskModule,
   ],
   controllers: [HealthController],
 })

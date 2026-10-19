@@ -65,7 +65,7 @@ const session = useSessionStore();
     <FxButton :x="436" :y="4" style-name="TopButtonHero" />
     <FxButton :x="500" :y="4" style-name="TopButtonArmy" />
     <FxButton :x="565" :y="4" style-name="TopButtonUnion" />
-    <FxButton :x="630" :y="4" style-name="TopButtonMission" />
+    <FxButton :x="630" :y="4" style-name="TopButtonMission" @click="game.showDialog('task')" />
     <FxButton :x="692" :y="4" style-name="LotteryBoxBtn" />
   </FxCanvas>
 </template>

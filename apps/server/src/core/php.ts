@@ -60,6 +60,28 @@ export function phpLooseEquals(a: unknown, b: unknown): boolean {
   return nx === ny;
 }
 
+/**
+ * The sign of `$a <=> $b` under PHP 5 loose comparison of scalars: null against a string compares
+ * as "", bools and null compare as bools, two numeric strings compare as numbers, other strings
+ * lexically, and a string against a number by its numeric prefix.
+ */
+export function phpCompare(a: unknown, b: unknown): number {
+  let x = a === undefined ? null : a;
+  let y = b === undefined ? null : b;
+  if (x === null && typeof y === 'string') x = '';
+  else if (y === null && typeof x === 'string') y = '';
+  if (x === null || y === null || typeof x === 'boolean' || typeof y === 'boolean') {
+    return Number(phpBool(x)) - Number(phpBool(y));
+  }
+  if (typeof x === 'string' && typeof y === 'string') {
+    if (isPhpNumeric(x) && isPhpNumeric(y)) return Math.sign(Number(x.trim()) - Number(y.trim()));
+    return x < y ? -1 : x > y ? 1 : 0;
+  }
+  const nx = typeof x === 'number' ? x : phpToNumber(String(x));
+  const ny = typeof y === 'number' ? y : phpToNumber(String(y));
+  return Math.sign(nx - ny);
+}
+
 /** `empty()`: false for "0", 0, "", null, false and empty arrays. */
 export function phpEmpty(value: unknown): boolean {
   if (value === null || value === undefined || value === false) return true;

@@ -25,8 +25,11 @@ const props = withDefaults(
     rows: T[];
     rowHeight?: number;
     headerHeight?: number;
+    /** `selectable`: rows highlight under the pointer; `selectedIndex` is drawn selected. */
+    selectable?: boolean;
+    selectedIndex?: number;
   }>(),
-  { rowHeight: 22, headerHeight: undefined },
+  { rowHeight: 22, headerHeight: undefined, selectable: false, selectedIndex: -1 },
 );
 const emit = defineEmits<{ itemClick: [row: T, index: number] }>();
 defineSlots<{
@@ -45,10 +48,24 @@ const colors = computed(() => {
   return Array.isArray(list) ? list.map((c) => cssColor(c as number)) : [];
 });
 const line = computed(() => cssColor(decl.value.horizontalGridLineColor));
+const rollOver = computed(() => ({
+  '--rollover': cssColor(decl.value.rollOverColor),
+  '--rollover-text': cssColor(decl.value.textRollOverColor),
+}));
+
+function rowBackground(i: number) {
+  if (i === props.selectedIndex) {
+    return {
+      background: cssColor(decl.value.selectionColor),
+      color: cssColor(decl.value.textSelectedColor),
+    };
+  }
+  return { background: colors.value[i % colors.value.length] };
+}
 </script>
 
 <template>
-  <div class="grid" :style="{ ...boxStyle(props), ...textStyle(decl) }">
+  <div class="grid" :style="{ ...boxStyle(props), ...textStyle(decl), ...rollOver }">
     <div class="row" :style="header">
       <div v-for="(c, j) in columns" :key="j" class="cell" :style="{ width: `${c.width}px` }">
         {{ c.header }}
@@ -58,9 +75,10 @@ const line = computed(() => cssColor(decl.value.horizontalGridLineColor));
       v-for="(row, i) in rows"
       :key="i"
       class="row"
+      :class="{ selectable: selectable && i !== selectedIndex }"
       :style="{
         height: `${rowHeight}px`,
-        background: colors[i % colors.length],
+        ...rowBackground(i),
         borderBottom: `1px solid ${line}`,
       }"
       @click="emit('itemClick', row, i)"
@@ -98,6 +116,11 @@ const line = computed(() => cssColor(decl.value.horizontalGridLineColor));
   display: flex;
   align-items: center;
   box-sizing: border-box;
+}
+
+.row.selectable:hover {
+  background: var(--rollover) !important;
+  color: var(--rollover-text);
 }
 
 .cell {

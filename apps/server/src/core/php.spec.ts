@@ -5,6 +5,7 @@ import {
   addslashes,
   isPhpNumeric,
   mbStrlen,
+  phpCompare,
   phpEmpty,
   phpFloatString,
   phpIntval,
@@ -45,6 +46,17 @@ describe('php scalars', () => {
     expect(phpLooseEquals(undefined, 0)).toBe(true);
     expect(isPhpNumeric('1e3')).toBe(true);
     expect(isPhpNumeric('12 ')).toBe(false);
+  });
+
+  it('orders loosely', () => {
+    expect(phpCompare('100', '20')).toBe(1);
+    expect(phpCompare('abc', 'abd')).toBe(-1);
+    expect(phpCompare(150, '150')).toBe(0);
+    expect(phpCompare(null, '0')).toBe(-1);
+    expect(phpCompare(null, 0)).toBe(0);
+    expect(phpCompare(false, '0')).toBe(0);
+    expect(phpCompare(false, '5')).toBe(-1);
+    expect(phpCompare('7', null)).toBe(1);
   });
 
   it('prints floats with precision 14', () => {

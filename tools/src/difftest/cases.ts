@@ -665,6 +665,62 @@ export const cases: DiffCase[] = [
       await s.command(session, 'getCityProduct', cid);
     },
   },
+  {
+    name: 'task dialog lists tasks and pays rewards',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      // Type 7 is left out: the original's lord-task query does not parse.
+      for (const type of [0, 1, 2, 3, 4, 5, 6, 9]) {
+        await s.command(session, 'getTaskTypeGroupList', type);
+      }
+      await s.command(session, 'getTaskList', 1);
+      await s.command(session, 'getTaskList', 80);
+      await s.command(session, 'getTaskDetail', 2);
+      await s.command(session, 'getTaskDetail', 999999);
+
+      await s.command(session, 'getReward', 2);
+      await s.query('insert into sys_user_goal (uid, gid) values (?, 2)', [uid]);
+      await s.command(session, 'getTaskList', 1);
+      await s.command(session, 'getReward', 2);
+      await s.command(session, 'getReward', 2);
+      await s.command(session, 'getTaskTypeGroupList', 0);
+
+      const things = `insert into sys_things (uid, tid, count) values (?, ?, ?)
+        on duplicate key update count = values(count)`;
+      await s.query(things, [uid, 10400, 100]);
+      await s.command(session, 'getTaskDetail', 801);
+      await s.command(session, 'getReward', 801);
+      await s.command(session, 'getReward', 801);
+      await s.command(session, 'getMultiReward', 801, 2);
+      await s.command(session, 'getMultiReward', 801, 0);
+
+      for (const [tid, count] of [
+        [11001, 5],
+        [12001, 40],
+        [13001, 5],
+      ]) {
+        await s.query(things, [uid, tid, count]);
+      }
+      await s.command(session, 'getMultiReward', 10101, 10);
+      await s.command(session, 'getMultiReward', 10101, 3);
+
+      await s.query('insert into sys_user_task (uid, tid, state) values (?, 250, 0)', [uid]);
+      await s.command(session, 'getReward', 250);
+      await s.query('update sys_user set officepos = 1 where uid = ?', [uid]);
+      await s.command(session, 'getTaskDetail', 250);
+      await s.command(session, 'getReward', 250);
+
+      await s.query('update sys_user_task_num set num = maxnum where uid = ?', [uid]);
+      await s.command(session, 'getReward', 86001);
+
+      await s.command(session, 'dropSysTask', 999999);
+      await s.command(session, 'dropSysTask', 2);
+      await s.query('insert into sys_user_task (uid, tid, state) values (?, 80000, 0)', [uid]);
+      await s.command(session, 'dropSysTask', 80000);
+      await s.command(session, 'dropTask', 20010);
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {
