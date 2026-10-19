@@ -18,6 +18,7 @@ import {
 } from '../../game/task';
 import { i18n } from '../../i18n';
 import { useGlobalStore } from '../../stores/global';
+import { useUserStore } from '../../stores/user';
 import { gameAlert, showAlert } from '../../ui/alert';
 import FxButton from '../../ui/FxButton.vue';
 import FxCanvas from '../../ui/FxCanvas.vue';
@@ -29,11 +30,12 @@ import MultiRewardCanvas from './MultiRewardCanvas.vue';
 
 /**
  * Task.TaskDialog: task kinds as tabs, the kind's groups and their tasks, and the selected
- * one's description. The 任务进度 and 刷新任务 dialogs, and picking a hero or gear for a reward,
- * are not ported.
+ * one's description. The 任务进度 dialog, commission tasks, and picking a hero or gear for a
+ * reward are not ported.
  */
 const game = useGame();
 const global = useGlobalStore();
+const user = useUserStore();
 const t = (n: number) => i18n(`Task_TaskDialog_${n}_1`);
 const src = (n: number | string) => i18n(`Task_TaskDialogSrc_${n}`);
 
@@ -73,6 +75,8 @@ const taskId = ref(0);
 const canGetReward = ref(false);
 const showMulti = ref(false);
 const multiOpen = ref(false);
+/** `randomTaskRefreshTime`: lord task refreshes today. */
+let refreshCount = 0;
 
 const droppable = computed(() => DROPPABLE_TYPES.includes(taskType.value));
 /** `checkDropEnable`: lord tasks drop a task, the others a group. */
@@ -97,6 +101,7 @@ function onGetTaskGroupList(data: unknown) {
   const d = Array.isArray(data) ? (data as unknown[]) : [];
   canGetReward.value = false;
   groups.value = parseGroups(d[0]);
+  if (taskType.value === 7) refreshCount = Number(d.at(-1) ?? 0) || 0;
   if (taskType.value !== lastTaskType && groups.value.length > 0) lastGroupId = -1;
   const pick = pickGroup(groups.value, lastGroupId);
   if (pick.id !== lastGroupId) lastTaskIndex = -1;
@@ -203,6 +208,20 @@ function getMultiReward(count: number) {
   game.sendGlobalCommand('task', 'getMultiReward', [taskId.value, count]);
 }
 
+/** `onClickMoreRewardTask`: only the lord tasks can be refreshed here. */
+async function onClickMoreRewardTask() {
+  if (taskType.value !== 7) return;
+  const question = i18n('Hotel_HotelRecruitPanelSrc_8')
+    .replace('x', String(refreshCount + 1))
+    .replace('X*20', String(refreshCount > 0 ? 20 : 0));
+  if ((await showAlert(question, '', ['yes', 'no'])) !== 'yes') return;
+  if (refreshCount * 20 > user.money) {
+    void showAlert(i18n('Hotel_HotelRecruitPanelSrc_7'));
+    return;
+  }
+  game.sendGlobalCommand('task', 'refreshSysTask', [taskType.value]);
+}
+
 async function onClickDropTask() {
   const type = taskType.value;
   const question =
@@ -304,7 +323,7 @@ const remembered = { type: 0 };
         style-name="ButtonRed"
         :fx="BOTTOM_BUTTON"
         :label="t(12)"
-        :enabled="false"
+        @click="onClickMoreRewardTask"
       />
     </template>
     <FxButton

@@ -697,6 +697,33 @@ export const cases: DiffCase[] = [
     },
   },
   {
+    name: 'lord tasks refresh, free once a day',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      // Ten candidates, so every refresh deals all of them whatever the draw.
+      await s.query('update cfg_systask_rate set nobility = 99 where tid >= 86010 and tid < 86300');
+      try {
+        await s.query('update sys_user set money = 10 where uid = ?', [session.uid]);
+        await s.query('update mem_user_schedule set last_reset_sys_task = 0 where uid = ?', [
+          session.uid,
+        ]);
+        // The original's lord task list does not parse, so only the effects are compared.
+        await s.command(session, 'getTaskTypeGroupList', 7);
+        s.mask();
+        await s.command(session, 'refreshSysTask', 7);
+        s.mask();
+        await s.command(session, 'refreshSysTask', 7);
+        await s.query('update sys_user set money = 100 where uid = ?', [session.uid]);
+        await s.command(session, 'refreshSysTask', 7);
+        s.mask();
+      } finally {
+        await s.query(
+          'update cfg_systask_rate set nobility = 0 where tid >= 86010 and tid < 86300',
+        );
+      }
+    },
+  },
+  {
     name: 'task dialog lists tasks and pays rewards',
     run: async (s) => {
       const session = await s.login(EXISTING_PLAYER);

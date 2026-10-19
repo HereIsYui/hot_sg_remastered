@@ -3,6 +3,7 @@ import { sql, type RawBuilder } from 'kysely';
 import { GameError } from '../common/game-error';
 import { LangService } from '../common/lang.service';
 import { phpEmpty, phpIntval, phpLooseEquals, phpNum, phpString } from '../core/php';
+import { TaskRules } from '../core/task-rules.service';
 import { UserRules } from '../core/user-rules.service';
 import { DbScope } from '../db/database.module';
 import { GlobalCommand, type CommandContext } from '../gateway/decorators';
@@ -24,6 +25,13 @@ const TaskType = {
 const COMMISSION_BASE = 200000;
 /** 君主将 tasks, limited per day by sys_user_task_num. */
 const LORD_HERO_TASKS = { min: 86000, max: 86300 };
+/** refreshSysTask: tasks dealt, and the price of every refresh after the day's first. */
+const SYS_TASK_COUNT = 10;
+const SYS_TASK_REFRESH_COST = 20;
+/** log_money.type of refreshSysTask. */
+const MONEY_LOG_SYS_TASK = 81;
+/** 接受随机任务, completed whenever a 君主将 task is dealt. */
+const TASK_RECEIVE_SYS_TASK = 332;
 /** 强化所需 .. 开孔之钻: the daily tasks every player keeps. */
 const DAILY_TASKS = [801, 802, 803, 804, 805];
 /** 食君之禄 / 采食封邑 / 共享利益: salaries computed instead of read from cfg_task_reward. */
@@ -82,8 +90,8 @@ async function canRecomplete(tid: number, defaultState: () => Promise<unknown>):
 
 /**
  * The TaskDialog commands of TaskFunc.php. Not ported: the world-event rewards (黄巾 / 董卓
- * donations, 备战洛阳), the 名将 hero tasks' rewards, commission tasks' lists and rewards, and
- * HotelFunc.php::refreshSysTask; those answer with an error.
+ * donations, 备战洛阳), the 名将 hero tasks' rewards, and commission tasks' lists and rewards;
+ * those answer with an error.
  */
 @Injectable()
 export class TaskCommands {
@@ -93,6 +101,7 @@ export class TaskCommands {
     private readonly users: UserRules,
     private readonly goals: TaskGoals,
     private readonly rewards: TaskRewards,
+    private readonly tasks: TaskRules,
   ) {}
 
   /**
@@ -318,6 +327,73 @@ export class TaskCommands {
       );
       return this.allTasksByType(uid, TaskType.Lord);
     });
+  }
+
+  /**
+   * HotelFunc.php::refreshSysTask: deals ten new 君主将 tasks, the first refresh of the day free
+   * and every further one 20 元宝, and answers with the lord task list.
+   */
+  @GlobalCommand()
+  async refreshSysTask(ctx: CommandContext): Promise<unknown[]> {
+    const uid = ctx.uid;
+    return this.scope.transaction(async () => {
+      const money = await this.cell(sql`select money from sys_user where uid = ${uid}`);
+      const count = await this.cell(sql`select count from mem_user_systask_num where uid = ${uid}`);
+      const cost = phpNum(count) > 0 ? SYS_TASK_REFRESH_COST : 0;
+      if (cost > phpNum(money)) throw GameError.lang('sysTask.money_error');
+      await this.generateSysTask(uid, SYS_TASK_COUNT);
+      await sql`update mem_user_systask_num set count = count + 1 where uid = ${uid}`.execute(
+        this.scope.db,
+      );
+      await this.rewards.addMoney(uid, -cost, MONEY_LOG_SYS_TASK);
+      return this.getTaskTypeGroupList(ctx, [TaskType.Lord]);
+    });
+  }
+
+  /** HotelFunc.php::generateSysTask: replaces the 君主将 tasks with `times` drawn by rate. */
+  private async generateSysTask(uid: number, times: number): Promise<void> {
+    const db = this.scope.db;
+    const { min, max } = LORD_HERO_TASKS;
+    const nobility = await this.cell(sql`select nobility from sys_user where uid = ${uid}`);
+    await sql`delete from sys_user_goal where uid = ${uid} and gid in (select a.id
+        from cfg_task_goal a, sys_user_task b
+        where a.tid = b.tid and b.tid between ${min} and ${max} and b.uid = ${uid})`.execute(db);
+    await sql`delete from sys_user_task where tid between ${min} and ${max}
+      and uid = ${uid}`.execute(db);
+    const rows = await this.rows(sql`select tid, rate from cfg_systask_rate
+      where tid >= ${min} and tid < ${max} and nobility <= ${nobility}`);
+    if (rows.length === 0) return;
+    let sumRate = rows.reduce((sum, row) => sum + phpNum(row.rate), 0);
+    for (let i = 0; i < times; i++) {
+      const rate = 1 + Math.floor(Math.random() * sumRate);
+      let curRate = 0;
+      for (let j = 0; j < rows.length - i; j++) {
+        const row = rows[j]!;
+        curRate += phpNum(row.rate);
+        if (curRate >= rate) {
+          await this.receiveSysTask(uid, phpIntval(row.tid));
+          rows[j] = rows[rows.length - i - 1]!;
+          sumRate -= phpNum(row.rate);
+          break;
+        }
+      }
+    }
+  }
+
+  /** HotelFunc.php::receiveSysTask */
+  private async receiveSysTask(uid: number, tid: number): Promise<void> {
+    const db = this.scope.db;
+    await sql`delete from sys_user_sys_task where uid = ${uid} and tid = ${tid}`.execute(db);
+    await sql`insert into sys_user_task (uid, tid, state) values (${uid}, ${tid}, 0)
+      on duplicate key update state = 0`.execute(db);
+    const goals = await this.rows(sql`select * from cfg_task_goal where tid = ${tid}`);
+    for (const goal of goals) {
+      await sql`delete from sys_user_goal where gid = ${goal.id} and uid = ${uid}`.execute(db);
+      if (!phpLooseEquals(goal.sort, GoalSort.Accumulated)) continue;
+      await sql`insert into sys_user_goal (gid, uid, currentcount)
+        values (${goal.id}, ${uid}, 0)`.execute(db);
+    }
+    await this.tasks.completeTaskWithTaskid(uid, TASK_RECEIVE_SYS_TASK);
   }
 
   private async reward(uid: number, param: unknown[]): Promise<unknown[]> {
