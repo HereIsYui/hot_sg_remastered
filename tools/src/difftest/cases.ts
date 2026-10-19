@@ -466,6 +466,83 @@ export const cases: DiffCase[] = [
       if (Number(left?.count) !== 80) throw new Error('the curse did not take the deserters');
     },
   },
+  {
+    name: 'government sets tax, renames, levies and pacifies',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      // `null` clears the cooldown; a fixed time keeps the row out of the clock-window rules.
+      const schedule = (column: string, ago: number | null) =>
+        ago === null
+          ? s.query(`update mem_city_schedule set ${column} = 0 where cid = ?`, [cid])
+          : s.query(`update mem_city_schedule set ${column} = unix_timestamp() - ? where cid = ?`, [
+              ago,
+              cid,
+            ]);
+      await s.query('update sys_city set chiefhid = 80213 where cid = ?', [cid]);
+      await s.query('insert into sys_user_task (uid, tid, state) values (?, 410263, 0)', [uid]);
+
+      for (const tax of [-1, 101, 20, 5]) await s.command(session, 'changeTax', cid, tax);
+      await s.command(session, 'changeTax', FOREIGN_CITY, 10);
+
+      for (const name of ['一二三四五六七八九', "新'城", '新<城', '新@城', '城&']) {
+        await s.command(session, 'changeCityName', cid, name);
+      }
+      await s.command(session, 'changeCityName', FOREIGN_CITY, '新城');
+      await s.command(session, 'changeCityName', cid, '新城');
+      await s.command(session, 'changeCityName', cid, '又城');
+      await s.query('update mem_city_schedule set last_change_name = 1 where cid = ?', [cid]);
+      await s.query('update sys_city set type = 1 where cid = ?', [cid]);
+      await s.command(session, 'changeCityName', cid, '又城');
+      await s.query('update sys_city set type = 5 where cid = ?', [cid]);
+      await s.query('insert into cfg_soldier_special_city (cid, sid, type) values (?, 45, 1)', [
+        cid,
+      ]);
+      await s.command(session, 'changeCityName', cid, '又城');
+      await s.query('delete from cfg_soldier_special_city where cid = ?', [cid]);
+
+      for (const resid of [0, 1, 2, 3, 4, 9]) {
+        await schedule('last_levy_resource', null);
+        await s.query('update mem_city_resource set morale = 80 where cid = ?', [cid]);
+        await s.command(session, 'levyResource', cid, resid);
+      }
+      await schedule('last_levy_resource', 300);
+      await s.command(session, 'levyResource', cid, 0);
+      s.mask(1); // the wait counts down
+      await schedule('last_levy_resource', null);
+      await s.query('update mem_city_resource set morale = 20 where cid = ?', [cid]);
+      await s.command(session, 'levyResource', cid, 0);
+      await s.command(session, 'levyResource', FOREIGN_CITY, 0);
+
+      // 祭天 moves the next disaster by a random amount and may bring a blessing.
+      await s.query('update mem_city_resource set morale = 50, complaint = 30 where cid = ?', [
+        cid,
+      ]);
+      for (const action of [0, 1, 2, 3, 7]) {
+        await schedule('last_pacify_people', null);
+        await s.command(session, 'pacifyPeople', cid, action);
+      }
+      await schedule('last_pacify_people', 300);
+      await s.command(session, 'pacifyPeople', cid, 0);
+      s.mask(1);
+      await s.query('update mem_city_resource set food = 100, gold = 100 where cid = ?', [cid]);
+      for (const action of [0, 1, 2, 3]) {
+        await schedule('last_pacify_people', null);
+        await s.command(session, 'pacifyPeople', cid, action);
+      }
+      await s.query('update mem_city_resource set food = 1e9 where cid = ?', [cid]);
+      await s.command(session, 'pacifyPeople', cid, 2);
+      await s.query(
+        `insert into sys_troops (id, uid, cid, hid, targetcid, state, pathtime, endtime,
+            soldiers, resource)
+          values (900001, 1, 1, 0, ?, 2, 600, unix_timestamp() - 1, '', '')`,
+        [cid],
+      );
+      await s.command(session, 'pacifyPeople', cid, 0);
+      await s.command(session, 'pacifyPeople', FOREIGN_CITY, 0);
+    },
+  },
 ];
 
 /** A 城墙 reply: `[current, next, defences, queue, space, used]`; the built entry's time runs. */

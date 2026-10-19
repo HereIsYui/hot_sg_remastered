@@ -113,10 +113,14 @@ export const useCityStore = defineStore('city', {
     technicLevel: (s) => (tid: number) => s.technics[tid] ?? 0,
   },
   actions: {
-    /** `City.getGoldAdd`: hourly tax income before hero wages. */
-    goldIncome(): number {
-      const base = this.tax * this.people_all * 0.01 * GAME_SPEED_RATE * this.gold_rate * 0.01;
-      const skill = this.people_all * this.tax * 0.01 * this.skillGoldAdd * 0.01;
+    /**
+     * `City.getGoldAdd`: hourly tax income before hero wages; at another `tax` it is the
+     * 调整税率 dialog's estimate.
+     */
+    goldIncome(rate?: number): number {
+      const tax = rate ?? this.tax;
+      const base = tax * this.people_all * 0.01 * GAME_SPEED_RATE * this.gold_rate * 0.01;
+      const skill = this.people_all * tax * 0.01 * this.skillGoldAdd * 0.01;
       return Math.floor(base * (this.technicLevel(TECHNIC_TAX) * 0.05 + 1) + skill);
     },
 

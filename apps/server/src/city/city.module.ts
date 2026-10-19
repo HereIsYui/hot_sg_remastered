@@ -11,6 +11,7 @@ import { CurseTick } from './curse.tick';
 import { DefenceRules } from './defence-rules.service';
 import { DefenceCommands } from './defence.commands';
 import { DefenceTick } from './defence.tick';
+import { GovernmentCommands } from './government.commands';
 import { SoldierRules } from './soldier-rules.service';
 import { SoldierCommands } from './soldier.commands';
 import { SoldierTick } from './soldier.tick';
@@ -38,6 +39,7 @@ import { TechnicTick } from './technic.tick';
     DefenceCommands,
     DefenceRules,
     DefenceTick,
+    GovernmentCommands,
     SoldierCommands,
     SoldierRules,
     SoldierTick,

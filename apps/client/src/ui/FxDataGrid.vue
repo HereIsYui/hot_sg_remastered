@@ -21,6 +21,7 @@ const props = defineProps<{
   }[];
   rows: T[];
 }>();
+const emit = defineEmits<{ itemClick: [row: T, index: number] }>();
 
 const ROW_HEIGHT = 22;
 
@@ -53,6 +54,7 @@ const line = computed(() => cssColor(decl.value.horizontalGridLineColor));
         background: colors[i % colors.length],
         borderBottom: `1px solid ${line}`,
       }"
+      @click="emit('itemClick', row, i)"
     >
       <div
         v-for="c in columns"

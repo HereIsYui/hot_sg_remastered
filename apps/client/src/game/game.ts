@@ -264,7 +264,14 @@ export class Game {
   }
 
   private onCityCommand(command: string, data: unknown): void {
-    if (command === 'getUserCities') {
+    if (command === 'changeTax') {
+      gameAlert(i18n('_BloodWarSrc_11'));
+    } else if (command === 'changeCityName') {
+      gameAlert(String((data as unknown[] | undefined)?.[0] ?? ''));
+      this.loadUserInfo();
+    } else if (command === 'levyResource' || command === 'pacifyPeople') {
+      gameAlert(String((data as unknown[] | undefined)?.[0] ?? ''));
+    } else if (command === 'getUserCities') {
       this.user.cities = parseCities(data);
     } else if (BUILDING_COMMANDS.has(command)) {
       this.city.applyBuildings(data, this.global.buildingDescriptions);
@@ -401,6 +408,12 @@ export class Game {
     this.session.dialog = building
       ? { name: 'building', building }
       : { name: 'createBuilding', kind };
+  }
+
+  /** `DialogManager.showBuildingDialog`: switches to another building's dialog. */
+  showBuildingDialog(building: BuildingState): void {
+    this.session.currentSlot = { inner: building.inner === 1, x: building.x, y: building.y };
+    this.session.dialog = { name: 'building', building };
   }
 
   closeDialog(): void {
