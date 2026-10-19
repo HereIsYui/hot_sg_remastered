@@ -1,0 +1,79 @@
+# Reference environment running the original PHP code against the original data.
+# Used as the oracle for differential tests; never deployed.
+#
+#   pnpm legacy:extract && pnpm legacy:dump-db   # once
+#   pnpm legacy:up                               # http://127.0.0.1:8090/server/amfphp/json.php
+#
+# Set HOT_DOCKER_MIRROR (e.g. docker.m.daocloud.io/library/) when Docker Hub is slow.
+name: hot-legacy
+
+services:
+  db:
+    image: ${HOT_DOCKER_MIRROR:-}mysql:5.7
+    platform: linux/amd64
+    environment:
+      MYSQL_ROOT_PASSWORD: legacy
+      MYSQL_DATABASE: bloodwar
+      MYSQL_USER: legacy
+      MYSQL_PASSWORD: legacy
+      TZ: Asia/Shanghai
+    command:
+      - --lower-case-table-names=1
+      - --sql-mode=
+      - --innodb-strict-mode=OFF
+      - --character-set-server=utf8
+      - --collation-server=utf8_general_ci
+      - --default-time-zone=+08:00
+      - --max-allowed-packet=64M
+      - --max-connections=500
+    volumes:
+      - ../../legacy/db/bloodwar_full.sql:/docker-entrypoint-initdb.d/10-bloodwar.sql:ro
+      - db-data:/var/lib/mysql
+    ports:
+      - 127.0.0.1:${HOT_LEGACY_DB_PORT:-3317}:3306
+    healthcheck:
+      # TCP on purpose: the entrypoint's temporary init server only listens on the socket.
+      test: ['CMD', 'mysql', '-h127.0.0.1', '-ulegacy', '-plegacy', '-e', 'select 1 from bloodwar.sys_user limit 1']
+      interval: 5s
+      timeout: 5s
+      retries: 120
+      start_period: 30s
+
+  php:
+    build:
+      context: ./php
+      args:
+        HOT_DOCKER_MIRROR: ${HOT_DOCKER_MIRROR:-}
+    image: hot-legacy-php:5.6
+    platform: linux/amd64
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - ../../legacy/raw/APMServ5.2.6/www/htdocs:/src:ro
+    ports:
+      - 127.0.0.1:${HOT_LEGACY_HTTP_PORT:-8090}:80
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Stands in for the closed-source backend's 3-second request to cfg_js.php.
+  tick:
+    build:
+      context: ./php
+      args:
+        HOT_DOCKER_MIRROR: ${HOT_DOCKER_MIRROR:-}
+    image: hot-legacy-php:5.6
+    platform: linux/amd64
+    entrypoint: ['sh', '-c']
+    command:
+      - |
+        while :; do
+          php -r '@file_get_contents("http://php/server/game/cfg_js.php");'
+          sleep ${HOT_LEGACY_TICK_SECONDS:-3}
+        done
+    depends_on:
+      - php
+    profiles: ['tick']
+
+volumes:
+  db-data:

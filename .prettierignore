@@ -1,0 +1,7 @@
+legacy/
+dist/
+coverage/
+pnpm-lock.yaml
+apps/client/public/assets/
+design/
+docs/

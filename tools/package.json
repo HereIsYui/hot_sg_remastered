@@ -1,0 +1,24 @@
+{
+  "name": "@hot/tools",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "extract": "node src/extract.ts",
+    "decompile": "node src/decompile.ts",
+    "assets": "node src/assets.ts",
+    "dump-db": "node src/dump-db.ts",
+    "inventory": "node src/inventory/index.ts",
+    "smoke": "node src/smoke.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "node-unrar-js": "^2.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "~5.9.3",
+    "vitest": "^5.0.5"
+  }
+}

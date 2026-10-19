@@ -2,7 +2,7 @@
 start.exe
 *.exe
 *.rar
-legacy/
+/legacy/
 docs/网页热三单机修改器*/
 apps/client/public/assets/
 
