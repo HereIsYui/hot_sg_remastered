@@ -280,7 +280,75 @@ export const cases: DiffCase[] = [
       await s.dialog(session, FOREIGN_CITY, 7, 44, 'startUpgradeTechnic', 2);
     },
   },
+  {
+    name: 'army drafts soldiers',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const cid = await lastCity(s, session.uid);
+      // A level 15 兵营 sits at inner (2, 2); its dialog is addressed by bid 9 and y * 10 + x.
+      const army = async (func: string, ...args: unknown[]) => {
+        await s.dialog(session, cid, 9, 22, func, ...args);
+        draftTimes(s);
+      };
+      const queued = async (state: number) => {
+        const [row] = await s.query<{ id: string }>(
+          'select id from sys_city_draftqueue where cid = ? and state = ? order by id limit 1',
+          [cid, state],
+        );
+        return Number(row?.id ?? 0);
+      };
+      // A non-lord 主将 speeds drafting up and gains exp when a batch finishes.
+      await s.query('update sys_city_hero set herotype = 0, bravery_base = 60 where hid = 80213');
+      await s.query('update sys_city set generalid = 80213 where cid = ?', [cid]);
+      await army('getBuildingInfo', 1, 2, 2, 9);
+      await army('startDraftQueue', 1, 2, 2, 1, 10);
+      await army('startDraftQueue', 1, 2, 2, 2, 5, 1);
+      await army('startDraftQueue', 1, 2, 2, 1, 7);
+      await army('stopDraftQueue', 1, 2, 2, await queued(0));
+      await army('startDraftQueue', 1, 2, 2, 1, 0);
+      await army('startDraftQueue', 1, 2, 2, 99, 1);
+      await army('startDraftQueue', 1, 2, 2, 4, 1);
+      await army('startDraftQueue', 1, 2, 2, 46, 1);
+      await army('startDraftQueue', 1, 0, 0, 1, 1);
+      await army('dissolveSoldier', 1, 2, 2, 7, 40);
+      await army('dissolveSoldier', 1, 2, 2, 7, 100000);
+      await s.command(session, 'changeSoldierInfo', 1, cid, 2);
+      await s.command(session, 'changeSoldierInfo', 0, cid, 7);
+      // 轻骑兵 convert to 民夫 at 1:10.
+      await army('soldierConvert', 1, 2, 2, 7, 10, 1, 280);
+      await army('soldierConvert', 1, 2, 2, 7, 10, 1, 100);
+      await s.query('insert into sys_soldier_convert (cid, value, `convert`) values (?, 5000, 0)', [
+        cid,
+      ]);
+      await army('soldierConvert', 1, 2, 2, 7, 10, 1, 100);
+      await s.query('insert into sys_goods (uid, gid, count) values (?, 125, 1), (?, 63, 1)', [
+        session.uid,
+        session.uid,
+      ]);
+      await army('useHanXinShangBu', 1, 2, 2, await queued(0));
+      await army('useHanXinXiaBu', 1, 2, 2, await queued(1));
+      await army('useHanXinXiaBu', 1, 2, 2, await queued(1));
+      await s.query('update mem_city_draft set state_endtime = unix_timestamp() - 1');
+      await s.tick('UpdateUsersSoldier');
+      const [done] = await s.query<{ count: string }>(
+        'select count from sys_city_soldier where cid = ? and sid = 1',
+        [cid],
+      );
+      if (Number(done?.count) !== 110) throw new Error('the tick did not finish the batch');
+      await army('getBuildingInfo', 1, 2, 2, 9);
+      await s.dialog(session, FOREIGN_CITY, 9, 22, 'startDraftQueue', 1, 2, 2, 1, 1);
+    },
+  },
 ];
+
+/**
+ * A 兵营 reply: `[current, next, soldiers, queue, conversions]`, wrapped with a message by
+ * dissolveSoldier; the trainee's time runs.
+ */
+function draftTimes(s: Side): void {
+  s.mask(6, 3, '*', 'time_left');
+  s.mask(6, 0, 3, '*', 'time_left');
+}
 
 /**
  * A 书院 reply: `[current, next, [technics, colleges]]` inside the dialog envelope. The legacy

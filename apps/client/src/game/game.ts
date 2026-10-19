@@ -37,6 +37,9 @@ export interface DialogReceiver {
   onData(data: unknown, ttype: number): void;
 }
 
+/** A dialog's handler for the global replies of its action (`onCommand` of the original). */
+export type GlobalReceiver = (command: string, data: unknown) => void;
+
 const asRow = (v: unknown): Row | null =>
   v && typeof v === 'object' && !Array.isArray(v) ? (v as Row) : null;
 const int = (v: unknown) => parseInt(String(v), 10) || 0;
@@ -58,6 +61,7 @@ export class Game {
   private buildingWait = { seconds: 0, slot: '' };
   private showingFault = false;
   private readonly dialogReceivers = new Set<DialogReceiver>();
+  private readonly globalReceivers = new Map<string, Set<GlobalReceiver>>();
 
   constructor(pinia: Pinia, loginService = new LoginService(), cmd?: CommandClient) {
     this.user = useUserStore(pinia);
@@ -224,9 +228,23 @@ export class Game {
     void this.cmd.sendDialogCommand(command, receiverId, receiverParam, args);
   }
 
+  /** `sendGlobalCommand` whose reply goes to whoever registered for `action`. */
+  sendGlobalCommand(action: string, command: string, args: CommandArg[] = []): void {
+    void this.cmd.sendGlobalCommand(action, command, args);
+  }
+
+  /** Lets an open dialog handle the global replies of its own action (e.g. `armyDraft`). */
+  addGlobalReceiver(action: string, onData: GlobalReceiver): () => void {
+    const receivers = this.globalReceivers.get(action) ?? new Set<GlobalReceiver>();
+    receivers.add(onData);
+    this.globalReceivers.set(action, receivers);
+    return () => receivers.delete(onData);
+  }
+
   onGlobalCommand(action: string, command: string, data: unknown): void {
     if (action === 'user') this.onUserCommand(command, data);
     else if (action === 'city') this.onCityCommand(command, data);
+    for (const receiver of [...(this.globalReceivers.get(action) ?? [])]) receiver(command, data);
   }
 
   private onUserCommand(command: string, data: unknown): void {

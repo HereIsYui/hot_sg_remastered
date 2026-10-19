@@ -2,14 +2,16 @@
  * Differential test: runs each case against the legacy PHP server and the NestJS server, then
  * compares their responses and the database rows each side changed.
  *
- *   pnpm difftest [name filter] [--resnapshot]
+ *   pnpm difftest [name filter] [--resnapshot] [--dump]
+ *
+ * `--dump` writes each case's normalized responses and row changes to the cache directory.
  *
  * Both databases must start from the same dump (pnpm legacy:reset && pnpm legacy:up,
  * pnpm db:migrate). The first run copies every table into __snap_* twins on both sides; each
  * case's changes are rolled back from them, so runs are repeatable.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
-import { createWriteStream, existsSync, mkdirSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cases } from './difftest/cases.ts';
 import { tableRules } from './difftest/tables.ts';
@@ -37,6 +39,7 @@ const MAX_REPORT_LINES = 40;
 
 const args = process.argv.slice(2);
 const resnapshot = args.includes('--resnapshot');
+const dump = args.includes('--dump');
 const filter = args.find((a) => !a.startsWith('--'));
 const selected = cases.filter((c) => !filter || c.name.includes(filter));
 if (selected.length === 0) throw new Error(`no case matches "${filter}"`);
@@ -64,6 +67,12 @@ try {
     const legacy = await runSide('legacy', legacyTarget(), legacyDb, testCase.run);
     const fresh = await runSide('new', target, newDb, testCase.run);
     const problems = compareSides(legacy, fresh);
+    if (dump) {
+      const file = join(paths.cache, `difftest-${testCase.name.replace(/\W+/g, '-')}.json`);
+      const plain = (r: SideResult) => ({ ...r, deltas: Object.fromEntries(r.deltas) });
+      writeFileSync(file, JSON.stringify({ legacy: plain(legacy), new: plain(fresh) }, null, 1));
+      log('difftest', `dumped ${file}`);
+    }
     if (problems.length === 0) {
       log('difftest', `ok    ${testCase.name}`);
     } else {

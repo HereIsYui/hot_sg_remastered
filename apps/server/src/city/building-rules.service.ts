@@ -12,6 +12,11 @@ type Row = Record<string, unknown>;
 /** sys_city.type of a player's main city (主城). */
 export const CITY_TYPE_BIG = 5;
 
+/** utils.php::encodeBuildingPosition */
+export function encodeXy(inner: number, x: number, y: number): number {
+  return inner * 100 + x * 10 + y;
+}
+
 /** cfg_building_condition.pre_type */
 const PreType = { Building: 0, Technic: 1, Goods: 2 } as const;
 

@@ -6,6 +6,7 @@ import { parseBuildingInfo, type BuildingInfo } from '../../game/buildings';
 import { useGame } from '../../game/game';
 import { i18n } from '../../i18n';
 import { useCityStore, type BuildingState } from '../../stores/city';
+import { showAlert } from '../../ui/alert';
 import FxButton from '../../ui/FxButton.vue';
 import FxCanvas from '../../ui/FxCanvas.vue';
 import FxImage from '../../ui/FxImage.vue';
@@ -25,6 +26,8 @@ defineSlots<{
   default(props: {
     /** The reply elements after the two levels (e.g. the 书院's technic list). */
     extra: unknown[];
+    /** The level of the reply's current-level info. */
+    level: number;
     now: number;
     /** `sendDialogCommand` addressed to this dialog, as the special dialogs' commands are. */
     send: (cmd: string, args: CommandArg[]) => void;
@@ -70,8 +73,14 @@ function reloadBuildingInfo() {
 
 const unregister = game.addDialogReceiver({
   isTarget: (id, p) => id === state.value.bid && p === param.value,
-  onData(data) {
-    if (!Array.isArray(data)) return;
+  onData(reply) {
+    if (!Array.isArray(reply)) return;
+    let data: unknown[] = reply;
+    // `ArmyDialog.onBuildingInfo`: dissolveSoldier wraps the reply as `[info, message]`.
+    if (data.length === 2 && Array.isArray(data[0])) {
+      void showAlert(String(data[1]));
+      data = data[0] as unknown[];
+    }
     current.value = parseBuildingInfo(data[0]);
     next.value = parseBuildingInfo(data[1]);
     extra.value = data.slice(2);
@@ -130,6 +139,12 @@ onUnmounted(() => {
       @hide="game.closeDialog()"
       @destroy-panel="emit('destroyPanel', $event)"
     />
-    <slot :extra="extra" :now="now" :send="send" :reload="reloadBuildingInfo" />
+    <slot
+      :extra="extra"
+      :level="current?.level ?? 0"
+      :now="now"
+      :send="send"
+      :reload="reloadBuildingInfo"
+    />
   </FxCanvas>
 </template>

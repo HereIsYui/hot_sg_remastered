@@ -30,6 +30,12 @@ export class LangService {
     return typeof node === 'string' ? sprintf(node, ...args) : key;
   }
 
+  /** Like `t`, but null for a missing key, as PHP reads an unset `$GLOBALS` entry. */
+  tOrNull(key: string): string | null {
+    const text = this.t(key);
+    return text === key ? null : text;
+  }
+
   /** The raw value of a top-level `$GLOBALS` entry, e.g. `openfunc`. */
   value<T = unknown>(group: string): T | undefined {
     return this.table[group] as T | undefined;

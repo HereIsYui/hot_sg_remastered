@@ -117,6 +117,57 @@ export class CityRules {
     );
   }
 
+  /** utils.php::getCityPeopleFreeCount: people neither working nor building. */
+  async cityPeopleFree(cid: number): Promise<unknown> {
+    const row = (
+      await sql<{ free: unknown }>`select people - people_working - people_building as free
+        from mem_city_resource where cid = ${cid}`.execute(this.scope.db)
+    ).rows[0];
+    return row ? row.free : false;
+  }
+
+  /** utils.php::addCityPeople */
+  async addCityPeople(cid: number, count: number): Promise<void> {
+    await sql`update mem_city_resource set people = people + ${phpFloatString(count)}
+      where cid = ${cid}`.execute(this.scope.db);
+  }
+
+  /** utils.php::addCitySoldier: also logged as type 9 in log_city_soldier. */
+  async addCitySoldier(cid: number, sid: number, count: number): Promise<void> {
+    const db = this.scope.db;
+    const n = phpFloatString(count);
+    await sql`insert into sys_city_soldier (cid, sid, count) values (${cid}, ${sid}, ${n})
+      on duplicate key update count = count + ${n}`.execute(db);
+    await sql`insert into log_city_soldier (cid, sid, uid, count, type)
+      values (${cid}, ${sid}, 0, ${n}, 9)
+      on duplicate key update count = count + ${n}`.execute(db);
+    await this.updateCityResourceAdd(cid);
+  }
+
+  /**
+   * utils.php::refreshFoodArmyUsers: food eaten by the city's soldiers, plus twice that of the
+   * troops stationed on its last owned field (the original keeps only the last field's cid).
+   */
+  async refreshFoodArmyUsers(cid: number): Promise<void> {
+    const db = this.scope.db;
+    const cell = async (query: ReturnType<typeof sql<{ v: unknown }>>) =>
+      phpNum((await query.execute(db)).rows[0]?.v);
+    let use = 0;
+    const fields = (
+      await sql<{ wid: number }>`select wid from mem_world where ownercid = ${cid}`.execute(db)
+    ).rows;
+    const last = fields.at(-1);
+    if (last) {
+      use = await cell(sql<{ v: unknown }>`select sum(fooduse) * 2 as v from sys_troops
+        where targetcid in (${wid2cid(last.wid)}) and state in (2, 3, 4, 5, 6) and uid > 1000`);
+    }
+    use += await cell(sql<{ v: unknown }>`select sum(c.food_use * s.count) as v
+      from sys_city_soldier s, cfg_soldier c where s.cid = ${cid} and s.sid = c.sid`);
+    use *= 2 / 3;
+    await sql`update mem_city_resource set food_army_use = ${phpFloatString(use)}
+      where cid = ${cid}`.execute(db);
+  }
+
   /** utils.php::updateCityPeopleStable: people_max * morale%. */
   async updateCityPeopleStable(cid: number): Promise<void> {
     await sql`update mem_city_resource

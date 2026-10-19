@@ -9,7 +9,12 @@ import { UserRules } from '../core/user-rules.service';
 import { DbScope } from '../db/database.module';
 import { DialogCommand, GlobalCommand, type CommandContext } from '../gateway/decorators';
 import { BuildingInfoService } from './building-info.service';
-import { BuildingRules, CITY_TYPE_BIG, type BuildingInfo } from './building-rules.service';
+import {
+  BuildingRules,
+  CITY_TYPE_BIG,
+  encodeXy,
+  type BuildingInfo,
+} from './building-rules.service';
 import { CityBuildingsService } from './city-buildings.service';
 
 type Row = Record<string, unknown>;
@@ -60,11 +65,6 @@ function intParams<N extends 4 | 5>(
   count: N,
 ): N extends 4 ? [number, number, number, number] : [number, number, number, number, number] {
   return Array.from({ length: count }, (_, i) => phpIntval(param[i])) as never;
-}
-
-/** utils.php::encodeBuildingPosition */
-function encodeXy(inner: number, x: number, y: number): number {
-  return inner * 100 + x * 10 + y;
 }
 
 /** The commands of BuildingFunc.php: create, upgrade and demolish buildings. */

@@ -39,4 +39,7 @@ export const tableRules: Record<string, TableRule> = {
   mem_building_destroying: { offsets: ['state_endtime'] },
   sys_technic: { offsets: ['state_starttime', 'state_endtime'] },
   mem_technic_upgrading: { offsets: ['state_endtime'] },
+  sys_city_draftqueue: { offsets: ['queuetime', 'state_starttime'] },
+  mem_city_draft: { offsets: ['state_endtime'] },
+  log_soldier_convert: { offsets: ['time'] },
 };

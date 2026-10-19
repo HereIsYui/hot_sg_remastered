@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, shallowRef, watch } from 'vue';
-import { BUILDING_COLLEGE } from '../../game/cityGrid';
+import { BUILDING_ARMY, BUILDING_COLLEGE } from '../../game/cityGrid';
 import type { BuildingState } from '../../stores/city';
 import { useSessionStore } from '../../stores/session';
+import ArmyDialog from '../army/ArmyDialog.vue';
 import CreateBuildingDialog from '../building/CreateBuildingDialog.vue';
 import DestroyPanel from '../building/DestroyPanel.vue';
 import UpgradeBuildingDialog from '../building/UpgradeBuildingDialog.vue';
@@ -45,6 +46,14 @@ function choose(action: 'all' | 'level') {
     <CollegeDialog
       v-else-if="dialog?.name === 'building' && ownDialog(dialog.building, BUILDING_COLLEGE)"
       :key="`college ${buildingKey}`"
+      :x="0"
+      :y="0"
+      :building="dialog.building"
+      @destroy-panel="destroy = $event"
+    />
+    <ArmyDialog
+      v-else-if="dialog?.name === 'building' && ownDialog(dialog.building, BUILDING_ARMY)"
+      :key="`army ${buildingKey}`"
       :x="0"
       :y="0"
       :building="dialog.building"

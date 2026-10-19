@@ -6,13 +6,16 @@ import { CityBuildingsService } from './city-buildings.service';
 import { CityCommandService, CityCommands } from './city.commands';
 import { CityInfoService } from './city-info.service';
 import { CityProductionService } from './city-production.service';
+import { SoldierRules } from './soldier-rules.service';
+import { SoldierCommands } from './soldier.commands';
+import { SoldierTick } from './soldier.tick';
 import { TechnicRules } from './technic-rules.service';
 import { TechnicCommands } from './technic.commands';
 import { TechnicTick } from './technic.tick';
 
 /**
- * CityFunc.php, CityCommand.php, BuildingFunc.php, TechnicFunc.php, the city parts of
- * utils.php / global.php and the matching ReportCron.php settlements.
+ * CityFunc.php, CityCommand.php, BuildingFunc.php, TechnicFunc.php, SoldierFunc.php, the city
+ * parts of utils.php / global.php and the matching ReportCron.php settlements.
  */
 @Module({
   providers: [
@@ -24,6 +27,9 @@ import { TechnicTick } from './technic.tick';
     CityCommandService,
     CityInfoService,
     CityProductionService,
+    SoldierCommands,
+    SoldierRules,
+    SoldierTick,
     TechnicCommands,
     TechnicRules,
     TechnicTick,
