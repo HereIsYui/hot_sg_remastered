@@ -16,6 +16,7 @@ import { tableRules } from './difftest/tables.ts';
 import {
   compareTrees,
   diffMultisets,
+  maskAt,
   normalizeRow,
   normalizeTree,
   sortAt,
@@ -199,7 +200,7 @@ async function runSide(
   return {
     responses: side.responses.map((r) => ({
       label: r.label,
-      value: r.unordered.reduce(sortAt, normalizeTree(r.value, ctx)),
+      value: r.unordered.reduce(sortAt, r.masked.reduce(maskAt, normalizeTree(r.value, ctx))),
     })),
     error,
     deltas,

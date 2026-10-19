@@ -112,22 +112,7 @@ export class UserCommands {
       user.nobility = nobility;
     }
     user.openIndex = await this.state.value(GameState.MinorityRegionOpen);
-    user.designations = (
-      await sql`select * from cfg_designation a left join sys_user_designation b on a.did = b.did
-        where b.uid = ${uid}`.execute(db)
-    ).rows;
-    const current = await sql<{ name: string }>`select a.name from cfg_designation a
-      left join sys_user_designation b on a.did = b.did
-      where b.uid = ${uid} and b.ison = '1' and b.state = '1'`.execute(db);
-    user.curDesigName = current.rows[0] ? current.rows[0].name : false;
-    const currentId = await db
-      .selectFrom('sys_user_designation')
-      .select('did')
-      .where('uid', '=', uid)
-      .where('ison', '=', 1)
-      .where('state', '=', 1)
-      .executeTakeFirst();
-    user.curDesigid = cellOf(currentId, 'did');
+    Object.assign(user, await this.users.designationFields(uid));
 
     const userState = await db
       .selectFrom('sys_user_state')
@@ -162,7 +147,7 @@ export class UserCommands {
       phpEmpty(cellOf(level, 'level')) ? 0 : cellOf(level, 'level'),
       cellOf(lord, 'level'),
       await dbNow(db),
-      await this.currentLuoyangYear(),
+      await this.users.currentYear(),
     ];
   }
 
@@ -415,26 +400,6 @@ export class UserCommands {
       this.scope.db,
     );
     return result.rows;
-  }
-
-  /**
-   * UserFunc.php::dogetCurYear: the current holder of 洛阳 this week, which starts on
-   * Wednesday 23:00.
-   */
-  private async currentLuoyangYear(): Promise<unknown> {
-    const db = this.scope.db;
-    const clock = await sql<{ now: number; today: number }>`select unix_timestamp() as now,
-      unix_timestamp(curdate()) as today`.execute(db);
-    const now = Number(clock.rows[0]!.now);
-    const cur23 = Number(clock.rows[0]!.today) + 82800;
-    const weekday = Number(phpDate('N', now));
-    let start: number;
-    if (weekday < 3) start = cur23 - (weekday + 4) * 86400;
-    else if (weekday > 3) start = cur23 - (weekday - 3) * 86400;
-    else start = now >= cur23 ? cur23 : cur23 - (weekday + 4) * 86400;
-    const holder = await sql`select u.name, b.count from sys_user u, log_luoyang_belong b
-      where u.uid = b.uid and b.time >= ${start} limit 1`.execute(db);
-    return holder.rows[0] ?? { count: 0 };
   }
 
   /** UserFunc.php::logWaigUserInfo: sessions of clients that did not send the sign. */

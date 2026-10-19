@@ -99,6 +99,35 @@ export function stripcslashes(value: string): string {
   });
 }
 
+/**
+ * `(string)$float` under PHP 5's `precision=14`: how computed numbers were written into SQL and
+ * JSON. Integral values print without a fraction; exponents below -4 or from 14 up use `1.5E+20`.
+ */
+export function phpFloatString(n: number): string {
+  if (Number.isNaN(n)) return 'NAN';
+  if (!Number.isFinite(n)) return n > 0 ? 'INF' : '-INF';
+  if (n === 0) return Object.is(n, -0) ? '-0' : '0';
+  const rounded = Number(n.toPrecision(14));
+  const exp = Math.floor(Math.log10(Math.abs(rounded)));
+  if (exp >= -4 && exp < 14) return String(rounded);
+  const [mantissa = '', e = ''] = n.toExponential(13).split('e');
+  const digits = mantissa.replace(/\.?0+$/, '');
+  return `${digits.includes('.') ? digits : `${digits}.0`}E${e.startsWith('-') ? '-' : '+'}${e.replace(/^[+-]/, '')}`;
+}
+
+/** A computed number as PHP would have serialized it (precision 14), e.g. in a JSON reply. */
+export function phpFloat(n: number): number {
+  return Number(phpFloatString(n));
+}
+
+/** PHP arithmetic on a fetched cell: numeric prefix of strings, false/null as 0. */
+export function phpNum(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') return phpToNumber(value);
+  if (value === true) return 1;
+  return 0;
+}
+
 /** `floor($a / $b)` on PHP numbers. */
 export function phpFloorDiv(a: number, b: number): number {
   return Math.floor(a / b);

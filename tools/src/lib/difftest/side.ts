@@ -40,6 +40,8 @@ export interface RecordedResponse {
   value: unknown;
   /** Arrays inside the response whose order the original query left undefined. */
   unordered: TreePath[];
+  /** Values that depend on the moment of the call (e.g. seconds left); `'*'` = any element. */
+  masked: TreePath[];
 }
 
 /** What a test case drives: records every response and the values to alias before comparing. */
@@ -65,7 +67,12 @@ export class Side {
     label?: string,
   ): Promise<unknown> {
     const value = await this.target.call(service, method, args);
-    this.responses.push({ label: label ?? `${service}.${method}`, value, unordered: [] });
+    this.responses.push({
+      label: label ?? `${service}.${method}`,
+      value,
+      unordered: [],
+      masked: [],
+    });
     return value;
   }
 
@@ -92,11 +99,30 @@ export class Side {
     );
   }
 
+  /** CityCommand.sendCommand: the main screen's polling of city data. */
+  cityCommand(session: Session, cid: number, type: number): Promise<unknown> {
+    return this.service(
+      'CityCommand',
+      'sendCommand',
+      [session.uid, cid, session.sid, type],
+      `CityCommand ${type}`,
+    );
+  }
+
   /** Compares the array at `path` in the last response as a multiset. */
   unordered(...path: TreePath): void {
+    this.last('unordered').unordered.push(path);
+  }
+
+  /** Leaves the values at `path` in the last response out of the comparison. */
+  mask(...path: TreePath): void {
+    this.last('mask').masked.push(path);
+  }
+
+  private last(caller: string): RecordedResponse {
     const last = this.responses.at(-1);
-    if (!last) throw new Error('unordered() needs a recorded response');
-    last.unordered.push(path);
+    if (!last) throw new Error(`${caller}() needs a recorded response`);
+    return last;
   }
 
   alias(value: unknown, placeholder: string): void {

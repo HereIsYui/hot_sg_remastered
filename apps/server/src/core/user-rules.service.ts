@@ -4,6 +4,7 @@ import type { LangService } from '../common/lang.service';
 import { DbScope } from '../db/database.module';
 import { cellOf, unixNow } from '../db/sql-fragments';
 import { phpEmpty, phpIntval } from './php';
+import { phpDate } from './php-time';
 
 /** utils.php::MakeTimeLeft, e.g. "1小时2分3秒". */
 export function makeTimeLeft(lang: LangService, seconds: number): string {
@@ -57,6 +58,50 @@ export class UserRules {
       if (nobility > real) return nobility;
     }
     return real;
+  }
+
+  /**
+   * utils.php::dogetCurYear: the current holder of 洛阳 this week, which starts on
+   * Wednesday 23:00.
+   */
+  async currentYear(): Promise<unknown> {
+    const db = this.scope.db;
+    const clock = await sql<{ now: number; today: number }>`select unix_timestamp() as now,
+      unix_timestamp(curdate()) as today`.execute(db);
+    const now = Number(clock.rows[0]!.now);
+    const cur23 = Number(clock.rows[0]!.today) + 82800;
+    const weekday = Number(phpDate('N', now));
+    let start: number;
+    if (weekday < 3) start = cur23 - (weekday + 4) * 86400;
+    else if (weekday > 3) start = cur23 - (weekday - 3) * 86400;
+    else start = now >= cur23 ? cur23 : cur23 - (weekday + 4) * 86400;
+    const holder = await sql`select u.name, b.count from sys_user u, log_luoyang_belong b
+      where u.uid = b.uid and b.time >= ${start} limit 1`.execute(db);
+    return holder.rows[0] ?? { count: 0 };
+  }
+
+  /** The `designations` / `curDesigName` / `curDesigid` fields added to the user row. */
+  async designationFields(uid: number): Promise<Record<string, unknown>> {
+    const db = this.scope.db;
+    const designations = (
+      await sql`select * from cfg_designation a left join sys_user_designation b on a.did = b.did
+        where b.uid = ${uid}`.execute(db)
+    ).rows;
+    const current = await sql<{ name: string }>`select a.name from cfg_designation a
+      left join sys_user_designation b on a.did = b.did
+      where b.uid = ${uid} and b.ison = '1' and b.state = '1'`.execute(db);
+    const currentId = await db
+      .selectFrom('sys_user_designation')
+      .select('did')
+      .where('uid', '=', uid)
+      .where('ison', '=', 1)
+      .where('state', '=', 1)
+      .executeTakeFirst();
+    return {
+      designations,
+      curDesigName: current.rows[0] ? current.rows[0].name : false,
+      curDesigid: cellOf(currentId, 'did'),
+    };
   }
 
   /** utils.php::updateUnionRank */

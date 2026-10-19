@@ -62,6 +62,13 @@ export const useUserStore = defineStore('user', {
     nobilityPos: 0,
     curDesigName: '',
     curDesigId: 0,
+    /** sys_user_designation rows; state 2 marks one just earned. */
+    designations: [] as Record<string, unknown>[],
+    money: 0,
+    gift: 0,
+    openLottery: 0,
+    /** Seconds online today, for the anti-addiction check. */
+    onLineTime: 0,
     locked: false,
     isAdult: 0,
     userCardId: '',

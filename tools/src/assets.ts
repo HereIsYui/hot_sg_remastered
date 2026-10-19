@@ -15,7 +15,7 @@ import { parseLocale } from './lib/locale.ts';
 import { paths, requireExtracted } from './lib/paths.ts';
 import { log } from './lib/run.ts';
 import { buildManifest, MAIN_SWFS, SKIN_SWFS } from './lib/swf.ts';
-import { readScalingGrids, type ScalingGrid } from './lib/swf-grid.ts';
+import { readScalingGrids, readSymbolNames, type ScalingGrid } from './lib/swf-grid.ts';
 
 requireExtracted();
 const force = process.argv.includes('--force');
@@ -82,8 +82,22 @@ const embedClasses = MAIN_SWFS.flatMap((name) => {
 });
 if (embedClasses.length === 0)
   log('assets', 'no decompiled scripts; run "pnpm legacy:decompile" first');
+const BARE_EXPORT = /^embedded\/([^/]+)\/(\d+)\.png$/;
+const symbolNames = new Map<string, Map<number, string[]>>(
+  MAIN_SWFS.map((name) => [name, readSymbolNames(readFileSync(join(paths.htdocs, `${name}.swf`)))]),
+);
+const bitmapNames: Record<string, string[]> = {};
+for (const p of filePaths) {
+  const m = BARE_EXPORT.exec(p);
+  const names = m && symbolNames.get(m[1]!)?.get(Number(m[2]));
+  if (names) bitmapNames[p] = names;
+}
 const index = buildEmbedIndex({
-  exportedBitmaps: filePaths.filter((p) => p.startsWith('embedded/')),
+  // The game SWF wins when the battle SWFs embed the same source.
+  exportedBitmaps: MAIN_SWFS.flatMap((name) =>
+    filePaths.filter((p) => p.startsWith(`embedded/${name}/`)),
+  ),
+  bitmapNames,
   embedClasses,
   spriteFrames: filePaths.filter((p) => /\/sprites\/[^/]+\/1\.png$/.test(p)),
   files: new Set(filePaths),

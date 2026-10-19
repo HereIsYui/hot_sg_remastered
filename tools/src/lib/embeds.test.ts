@@ -66,6 +66,23 @@ describe('buildEmbedIndex', () => {
     });
     expect(index.unresolved).toEqual(['images/gone.png']);
   });
+
+  it('names bare exports of shared bitmaps through their symbol classes', () => {
+    const shared = 'embedded/BloodWar/12.png';
+    const index = buildEmbedIndex({
+      exportedBitmaps: [shared],
+      bitmapNames: {
+        [shared]: [
+          'UserInfo.InfoPanel__embed_mxml_images_title_png_1099526159',
+          'Mail.MailDialog__embed_mxml_images_title_png_1099526159',
+        ],
+      },
+      embedClasses: ['InfoPanel__embed_mxml_images_title_png_1099526159'],
+      spriteFrames: [],
+      files: new Set([shared, 'images/title.png']),
+    });
+    expect(index.entries).toEqual({ 'images/title.png': shared });
+  });
 });
 
 describe('parseLocale', () => {

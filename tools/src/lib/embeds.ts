@@ -39,6 +39,8 @@ export function decodeSource(mangled: string, exists: (path: string) => boolean)
 export interface EmbedIndexInput {
   /** Asset paths of FFDec bitmap exports, e.g. `embedded/BloodWar/847_Login.LoginDialog__embed_...png`. */
   exportedBitmaps: string[];
+  /** Qualified class names of bare `<id>.png` exports (bitmaps shared by several classes). */
+  bitmapNames?: Record<string, string[]>;
   /** Embed class names found in the decompiled scripts (without package). */
   embedClasses: string[];
   /** Asset paths of sprite frames, e.g. `swf/UIParts/sprites/DefineSprite_27_board_listdown/1.png`. */
@@ -75,14 +77,15 @@ export function buildEmbedIndex(input: EmbedIndexInput): EmbedIndex {
 
   const exportedBySource = new Map<string, string>();
   for (const path of input.exportedBitmaps) {
-    const qualified = EXPORT_NAME.exec(path.slice(path.lastIndexOf('/') + 1))?.[1];
-    if (!qualified) continue;
-    const mangled = embedSource(qualified);
-    if (mangled === null) {
-      add(`symbol:${qualified}`, path);
-    } else {
-      const source = decodeSource(mangled, exists);
-      if (!exportedBySource.has(source)) exportedBySource.set(source, path);
+    const named = EXPORT_NAME.exec(path.slice(path.lastIndexOf('/') + 1))?.[1];
+    for (const qualified of named ? [named] : (input.bitmapNames?.[path] ?? [])) {
+      const mangled = embedSource(qualified);
+      if (mangled === null) {
+        add(`symbol:${qualified}`, path);
+      } else {
+        const source = decodeSource(mangled, exists);
+        if (!exportedBySource.has(source)) exportedBySource.set(source, path);
+      }
     }
   }
 

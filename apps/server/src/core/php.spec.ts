@@ -6,8 +6,10 @@ import {
   isPhpNumeric,
   mbStrlen,
   phpEmpty,
+  phpFloatString,
   phpIntval,
   phpLooseEquals,
+  phpNum,
   phpString,
   phpTrim,
   stripcslashes,
@@ -43,6 +45,19 @@ describe('php scalars', () => {
     expect(phpLooseEquals(undefined, 0)).toBe(true);
     expect(isPhpNumeric('1e3')).toBe(true);
     expect(isPhpNumeric('12 ')).toBe(false);
+  });
+
+  it('prints floats with precision 14', () => {
+    expect(phpFloatString(0.1 + 0.2)).toBe('0.3');
+    expect(phpFloatString(25)).toBe('25');
+    expect(phpFloatString(1 / 3)).toBe('0.33333333333333');
+    expect(phpFloatString(123456.78901234567)).toBe('123456.78901235');
+    expect(phpFloatString(0.00001)).toBe('1.0E-5');
+    expect(phpFloatString(1.5e20)).toBe('1.5E+20');
+    expect(phpFloatString(-2.5)).toBe('-2.5');
+    expect(phpNum('1.5000')).toBe(1.5);
+    expect(phpNum(false)).toBe(0);
+    expect(phpNum(null)).toBe(0);
   });
 
   it('counts code points and escapes like mb_strlen / addslashes / stripcslashes', () => {

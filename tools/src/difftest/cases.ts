@@ -100,4 +100,67 @@ export const cases: DiffCase[] = [
       }
     },
   },
+  {
+    name: 'existing player loads the city screen',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const cid = await lastCity(s, session.uid);
+      await s.command(session, 'getCityInfo', cid, 1);
+      s.mask(4, 2, '*', 'state_timeleft');
+      for (const type of [0, 1, 2, 3, 4, 9]) await s.cityCommand(session, cid, type);
+      await s.command(session, 'getCityProduct', cid);
+      await s.cityCommand({ ...session, sid: 'wrong' }, cid, 0);
+      await s.cityCommand(session, FOREIGN_CITY, 0);
+      await s.cityCommand(session, FOREIGN_CITY, 1);
+      await s.command(session, 'getCityInfo', FOREIGN_CITY, 1);
+      await s.command(session, 'getCityInfo', cid, 1);
+      s.mask(4, 2, '*', 'state_timeleft');
+    },
+  },
+  {
+    name: 'city load finishes due upgrades and demolitions',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const cid = await lastCity(s, session.uid);
+      await s.query(
+        'update sys_building set state = 1, state_endtime = unix_timestamp() - 1 where cid = ?',
+        [cid],
+      );
+      await s.query(
+        `update sys_building set state = 2, state_endtime = unix_timestamp() - 1
+          where cid = ? and bid = 20`,
+        [cid],
+      );
+      await s.command(session, 'getCityBuilding', cid);
+      s.mask(4, '*', 'state_timeleft');
+      await s.command(session, 'getCityInfo', cid, 1);
+      s.mask(4, 2, '*', 'state_timeleft');
+      await s.cityCommand(session, cid, 0);
+    },
+  },
+  {
+    name: 'new role opens its city',
+    run: async (s) => {
+      const session = await s.login('difftest_city');
+      await s.command(session, 'createRole', '城主', '新城', 5, '城', 0, 3, 0);
+      await aliasNewCity(s, session.uid);
+      const cid = await lastCity(s, session.uid);
+      await s.command(session, 'getCityInfo', cid, 1);
+      s.mask(4, 2, '*', 'state_timeleft');
+      s.mask(4, 4, 0, 'jun'); // random tile
+      await s.cityCommand(session, cid, 0);
+      await s.command(session, 'getCityProduct', cid);
+    },
+  },
 ];
+
+/** A city that belongs to someone else in the shipped save. */
+const FOREIGN_CITY = 1;
+
+async function lastCity(side: Side, uid: number): Promise<number> {
+  const [row] = await side.query<{ lastcid: string }>(
+    'select lastcid from sys_user where uid = ?',
+    [uid],
+  );
+  return Number(row?.lastcid ?? 0);
+}

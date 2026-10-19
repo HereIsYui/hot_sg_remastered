@@ -12,6 +12,13 @@ export class TaskRules {
     private readonly users: UserRules,
   ) {}
 
+  /** utils.php::completeTask: marks one goal reached. */
+  async completeTask(uid: number, goalId: number): Promise<void> {
+    await sql`replace into sys_user_goal (uid, gid) values (${uid}, ${goalId})`.execute(
+      this.scope.db,
+    );
+  }
+
   /** utils.php::completeTaskWithTaskid: marks every goal of the task reached. */
   async completeTaskWithTaskid(uid: number, taskId: number): Promise<void> {
     const goals = await this.scope.db

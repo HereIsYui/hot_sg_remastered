@@ -7,13 +7,28 @@ import { LoginService, type LoginResult } from '../net/login';
 import { useCityStore } from '../stores/city';
 import { useGlobalStore } from '../stores/global';
 import { useSessionStore } from '../stores/session';
-import { parseCities, useUserStore } from '../stores/user';
+import { cityPosition, parseCities, useUserStore } from '../stores/user';
 import { gameAlert, setAlertLabels, showAlert } from '../ui/alert';
 import { loadLoginPrefs, saveLoginPrefs, type LoginPrefs } from './loginPrefs';
+import { HERO_TYPE_KING } from './units';
 
 type Row = Record<string, unknown>;
 
 const QUEUE_POLL_MS = 30_000;
+
+/** CityCommand poll types (`Command.sendCityCommand`). */
+const CityInfoType = { Resource: 0, Hero: 1, Army: 2, Defence: 3, Time: 4 } as const;
+
+/** City commands whose reply is the refreshed building list. */
+const BUILDING_COMMANDS = new Set([
+  'getCityBuilding',
+  'startUpgradeBuilding',
+  'startDestroyBuilding',
+  'stopDestroyBuilding',
+  'stopUpgradeBuilding',
+  'startDestroyBuildingAll',
+  'startChangeBuilding',
+]);
 
 const asRow = (v: unknown): Row | null =>
   v && typeof v === 'object' && !Array.isArray(v) ? (v as Row) : null;
@@ -31,6 +46,9 @@ export class Game {
   readonly city;
   readonly session;
   private queueTimer: ReturnType<typeof setInterval> | undefined;
+  private secondTimer: ReturnType<typeof setInterval> | undefined;
+  private pollCountdown = { resource: 15, units: 60, time: 600 };
+  private buildingWait = { seconds: 0, slot: '' };
   private showingFault = false;
 
   constructor(pinia: Pinia, loginService = new LoginService(), cmd?: CommandClient) {
@@ -51,7 +69,7 @@ export class Game {
         {
           global: (action, command, data) => this.onGlobalCommand(action, command, data),
           dialog: () => {},
-          city: () => {},
+          city: (type, data) => this.onCityInfoCommand(type, data),
           failure: (f) => this.onFailure(f),
           malformed: (source) =>
             void showAlert(i18n(source === 'city' ? '_CommandSrc_5' : '_CommandSrc_1')),
@@ -64,6 +82,8 @@ export class Game {
   // ---- login (LoginDialog / BloodWar.doLogin / onLogin / onCheckQueue) ----
 
   async showLogin(): Promise<void> {
+    this.stopTimer();
+    this.city.$reset();
     this.session.screen = 'login';
     setAlertLabels({
       ok: i18n('Login_LoginDialogSrc_4'),
@@ -195,15 +215,149 @@ export class Game {
   private onCityCommand(command: string, data: unknown): void {
     if (command === 'getUserCities') {
       this.user.cities = parseCities(data);
+    } else if (BUILDING_COMMANDS.has(command)) {
+      this.city.applyBuildings(data, this.global.buildingDescriptions);
     } else if (command === 'getCityInfo' && Array.isArray(data)) {
-      const base = asRow(data[0]);
-      if (!base) return;
-      this.city.cid = int(base.cid);
-      this.city.name = String(base.name ?? '');
-      this.city.type = int(base.type);
-      this.city.position = `(${this.city.cid % 1000},${Math.floor(this.city.cid / 1000)})`;
-      this.user.cid = this.city.cid;
+      this.session.screen = 'game';
+      this.onGetCityInfo([...(data as unknown[])]);
     }
+  }
+
+  /** `BloodWar.onGetCityInfo`. */
+  private onGetCityInfo(d: unknown[]): void {
+    const base = asRow(d.shift());
+    if (!base) return;
+    const city = this.city;
+    city.cid = int(base.cid);
+    city.name = String(base.name ?? '');
+    city.type = int(base.type);
+    city.spacialSid = int(base.spacialSid);
+    city.position = cityPosition(city.cid);
+    this.user.cid = city.cid;
+    const info = Array.isArray(d[0]) ? [...(d.shift() as unknown[])] : [];
+    this.onLoadUser(asRow(info.shift()));
+    city.applyResource(asRow(info.shift()));
+    this.onLoadHeroList(info.shift());
+    city.applySoldiers(info.shift());
+    city.applyDefences(info.shift());
+    city.alarm = asRow(info.shift());
+    city.applyBuildings(d.shift(), this.global.buildingDescriptions);
+    city.applyTechnics(d.shift());
+    const where = asRow((d.shift() as unknown[] | undefined)?.[0]);
+    city.provinceId = int(where?.province);
+    city.junId = int(where?.jun);
+  }
+
+  /** `BloodWar.onGetCityInfoCommand`: replies of the CityCommand poll. */
+  private onCityInfoCommand(type: number, data: unknown): void {
+    const d = Array.isArray(data) ? [...(data as unknown[])] : [];
+    if (type === CityInfoType.Resource) {
+      this.onLoadUser(asRow(d.shift()));
+      this.city.applyResource(asRow(d.shift()));
+      this.city.alarm = asRow(d.shift());
+      this.city.skillGoldAdd = int(d.shift());
+      d.shift(); // server time for the clock widget, which follows the synchronized offset
+      const infoCount = int(d.shift());
+      const info = asRow(d.shift());
+      if (infoCount > 0 && info && int(info.type) === 0) gameAlert(String(info.info ?? ''), false);
+    } else if (type === CityInfoType.Hero) {
+      this.onLoadHeroList(d);
+    } else if (type === CityInfoType.Army) {
+      this.city.applySoldiers(d.shift());
+    } else if (type === CityInfoType.Defence) {
+      this.city.applyDefences(d.shift());
+    } else if (type === CityInfoType.Time) {
+      syncServerTime(int(d.shift()));
+    }
+  }
+
+  /** `BloodWar.onLoadUser`: the user fields refreshed with every city load and poll. */
+  private onLoadUser(u: Row | null): void {
+    if (!u) return;
+    const user = this.user;
+    user.prestige = int(u.prestige);
+    user.ustate = int(u.state);
+    user.money = int(u.money);
+    user.gift = int(u.gift);
+    user.rank = int(u.rank);
+    user.honour = int(u.honour);
+    user.openLottery = int(u.openLottery);
+    user.officepos = this.officeposName(String(u.officepos ?? '0'));
+    user.nobilityPos = int(u.nobility);
+    user.nobility = this.nobilityName(String(u.nobility ?? '0'));
+    const real = u.real_nobility;
+    if (real !== '' && real != null && String(real) !== String(u.nobility)) {
+      user.nobility += `(${this.nobilityName(String(real))})`;
+    }
+    user.isAdult = int(u.isAdult);
+    user.onLineTime = int(u.onLineTime);
+    this.global.openMapIndex = int(u.openIndex);
+    user.designations = Array.isArray(u.designations) ? (u.designations as Row[]) : [];
+    const year = asRow(u.currentYear);
+    user.yearText = this.yearText(year);
+  }
+
+  /** `BloodWar.onLoadHeroList`: the king's level also shows on the portrait. */
+  private onLoadHeroList(rows: unknown): void {
+    this.city.applyHeroes(rows);
+    const king = this.city.heroes.find((h) => int(h.herotype) === HERO_TYPE_KING);
+    if (king) this.user.kingHeroLevel = int(king.level);
+  }
+
+  /** `BloodWar.getCityBuilding`. */
+  refreshBuildings(): void {
+    void this.cmd.sendGlobalCommand('city', 'getCityBuilding', [this.user.cid]);
+  }
+
+  // ---- main screen timer (InfoPanel.startTimer / onTimer) ----
+
+  private startTimer(): void {
+    if (this.secondTimer) return;
+    this.pollCountdown = { resource: 15, units: 60, time: 600 };
+    this.secondTimer = setInterval(() => this.onSecond(), 1000);
+  }
+
+  private stopTimer(): void {
+    clearInterval(this.secondTimer);
+    this.secondTimer = undefined;
+  }
+
+  private onSecond(): void {
+    // Before a city is loaded (role creation) every poll would fail the ownership check.
+    if (this.user.locked || !this.cmd.open || this.city.cid === 0) return;
+    const visible = typeof document === 'undefined' || document.visibilityState === 'visible';
+    const c = this.pollCountdown;
+    if (--c.resource < 0) {
+      c.resource = 15;
+      if (visible) void this.cmd.sendCityCommand(CityInfoType.Resource);
+    }
+    if (--c.units < 0) {
+      c.units = 60;
+      if (visible) {
+        void this.cmd.sendCityCommand(CityInfoType.Hero);
+        void this.cmd.sendCityCommand(CityInfoType.Army);
+        void this.cmd.sendCityCommand(CityInfoType.Defence);
+      }
+    }
+    if (--c.time < 0) {
+      c.time = 600;
+      if (visible) void this.cmd.sendCityCommand(CityInfoType.Time);
+    }
+    this.city.accrue();
+    this.checkBuildingsDue();
+  }
+
+  /** A finished upgrade or demolition reloads the buildings, at most once per 5s per slot. */
+  private checkBuildingsDue(): void {
+    if (this.buildingWait.seconds > 0) this.buildingWait.seconds--;
+    const now = serverTime();
+    const due = this.city.buildings.find((b) => b.state > 0 && b.state_endtime <= now);
+    if (!due) return;
+    const slot = `${due.inner}:${due.x}:${due.y}`;
+    if (this.buildingWait.seconds > 0 && this.buildingWait.slot === slot) return;
+    this.refreshBuildings();
+    due.state = 0;
+    this.buildingWait = { seconds: 5, slot };
   }
 
   /** `BloodWar.onLoadUserInfo`. */
@@ -247,11 +401,8 @@ export class Game {
     user.kingLevel = int(d.shift());
     user.kingHeroLevel = int(d.shift());
     syncServerTime(int(d.shift()));
-    const year = asRow(d.shift());
-    user.yearText =
-      year && int(year.count) > 0
-        ? `${String(year.name ?? '')}${this.luoyangYear(int(year.count))}${i18n('_Utils_1')}`
-        : i18n('Report_Announcement_12_1');
+    user.yearText = this.yearText(asRow(d.shift()));
+    this.startTimer();
 
     if (vacation && int(vacation.vacend) !== 0) {
       // Vacation (休假) dialog is not ported yet; the account stays locked.
@@ -353,6 +504,13 @@ export class Game {
     const keys = ['_Utils_11', '_Utils_41', '_Utils_15', '_Utils_14', '_Utils_13', '_Utils_12'];
     const key = keys[this.user.unionpos];
     return key ? i18n(key) : '';
+  }
+
+  /** `mCurYearStr` from the Luoyang campaign year row. */
+  private yearText(year: Row | null): string {
+    return year && int(year.count) > 0
+      ? `${String(year.name ?? '')}${this.luoyangYear(int(year.count))}${i18n('_Utils_1')}`
+      : i18n('Report_Announcement_12_1');
   }
 
   /** `Utils.doParseYear`. */

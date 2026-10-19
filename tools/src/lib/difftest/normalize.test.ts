@@ -3,11 +3,34 @@ import {
   canonicalScalar,
   compareTrees,
   diffMultisets,
+  maskAt,
   normalizeRow,
   normalizeTree,
   sortAt,
   type SideContext,
 } from './normalize.ts';
+
+describe('maskAt', () => {
+  it('masks values under wildcard array paths', () => {
+    const tree = [
+      1,
+      [
+        { a: 1, t: -5 },
+        { a: 2, t: -6 },
+      ],
+      { t: 3 },
+    ];
+    expect(maskAt(tree, [1, '*', 't'])).toEqual([
+      1,
+      [
+        { a: 1, t: '<masked>' },
+        { a: 2, t: '<masked>' },
+      ],
+      { t: 3 },
+    ]);
+    expect(maskAt(tree, [5, 't'])).toEqual(tree);
+  });
+});
 
 const ctx = (aliases: Record<string, string> = {}): SideContext => ({
   start: 1700000000,

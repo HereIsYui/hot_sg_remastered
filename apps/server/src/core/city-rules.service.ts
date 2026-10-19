@@ -6,8 +6,26 @@ import { phpIntval } from './php';
 
 /** Building ids (common.php ID_BUILDING_*). */
 export const Building = {
+  Farmland: 1,
+  Wood: 2,
+  Rock: 3,
+  Iron: 4,
   House: 5,
   Government: 6,
+  College: 7,
+  Ground: 8,
+  Army: 9,
+  Hotel: 10,
+  Office: 11,
+  Honglu: 12,
+  Market: 13,
+  Blacksmith: 14,
+  Workshop: 15,
+  Barn: 16,
+  Store: 17,
+  Dak: 18,
+  Balefire: 19,
+  Wall: 20,
 } as const;
 
 /**

@@ -159,8 +159,7 @@ function union(a: Rect | null, b: Rect): Rect {
   };
 }
 
-/** Returns symbol name -> scaling grid for every named symbol that has one. */
-export function readScalingGrids(file: Buffer): Map<string, ScalingGrid> {
+function readSwfTags(file: Buffer): Tag[] {
   const signature = file.toString('ascii', 0, 3);
   let buf: Buffer;
   if (signature === 'FWS') buf = file;
@@ -170,7 +169,34 @@ export function readScalingGrids(file: Buffer): Map<string, ScalingGrid> {
 
   const header = new Bits(buf, 8);
   header.rect();
-  const tags = readTags(buf, header.end() + 4, buf.length);
+  return readTags(buf, header.end() + 4, buf.length);
+}
+
+function addNames(names: Map<number, string[]>, b: Buffer): void {
+  let pos = 2;
+  for (let i = 0, n = b.readUInt16LE(0); i < n; i++) {
+    const id = b.readUInt16LE(pos);
+    let name: string;
+    [name, pos] = cString(b, pos + 2);
+    names.set(id, [...(names.get(id) ?? []), name]);
+  }
+}
+
+/**
+ * Character id -> names from `ExportAssets` / `SymbolClass`. A bitmap embedded by several Flex
+ * classes carries all their names; FFDec then exports it as a bare `<id>.png`.
+ */
+export function readSymbolNames(file: Buffer): Map<number, string[]> {
+  const names = new Map<number, string[]>();
+  for (const tag of readSwfTags(file)) {
+    if (tag.code === TAG_EXPORT || tag.code === TAG_SYMBOL_CLASS) addNames(names, tag.body);
+  }
+  return names;
+}
+
+/** Returns symbol name -> scaling grid for every named symbol that has one. */
+export function readScalingGrids(file: Buffer): Map<string, ScalingGrid> {
+  const tags = readSwfTags(file);
 
   const shapeBounds = new Map<number, Rect>();
   const sprites = new Map<number, { id: number; matrix: Matrix }[]>();
@@ -205,13 +231,7 @@ export function readScalingGrids(file: Buffer): Map<string, ScalingGrid> {
     } else if (tag.code === TAG_GRID) {
       grids.set(b.readUInt16LE(0), new Bits(b, 2).rect());
     } else if (tag.code === TAG_EXPORT || tag.code === TAG_SYMBOL_CLASS) {
-      let pos = 2;
-      for (let i = 0, n = b.readUInt16LE(0); i < n; i++) {
-        const id = b.readUInt16LE(pos);
-        let name: string;
-        [name, pos] = cString(b, pos + 2);
-        names.set(id, [...(names.get(id) ?? []), name]);
-      }
+      addNames(names, b);
     }
   }
 

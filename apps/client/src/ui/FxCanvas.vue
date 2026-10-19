@@ -21,6 +21,8 @@ const props = defineProps<{
   tip?: TipValue;
   /** `buttonMode`/`useHandCursor`. */
   hand?: boolean;
+  /** `verticalScrollPolicy="auto"` with horizontal scrolling off. */
+  scrollY?: boolean;
 }>();
 
 const decl = computed(() => assets.style('Canvas', props.styleName, props.fx));
@@ -38,6 +40,7 @@ const style = computed(() => {
     ...boxStyle(props),
     ...textStyle(d),
     overflow: sized.value ? 'hidden' : 'visible',
+    ...(props.scrollY ? { overflowY: 'auto' as const } : {}),
     backgroundColor: alpha > 0 ? cssColor(d.backgroundColor, alpha) : undefined,
     cursor: props.hand ? 'pointer' : undefined,
   };

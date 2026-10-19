@@ -88,6 +88,23 @@ export function sortAt(tree: unknown, path: (string | number)[]): unknown {
   return tree;
 }
 
+/** Replaces the values found at `path` (`'*'` matches every array element) with `<masked>`. */
+export function maskAt(tree: unknown, path: (string | number)[]): unknown {
+  if (path.length === 0) return '<masked>';
+  const [head, ...rest] = path;
+  if (Array.isArray(tree)) {
+    if (head === '*') return tree.map((v) => maskAt(v, rest));
+    if (typeof head === 'number' && head < tree.length) {
+      return tree.map((v, i) => (i === head ? maskAt(v, rest) : v));
+    }
+    return tree;
+  }
+  if (tree !== null && typeof tree === 'object' && String(head) in tree) {
+    return { ...(tree as Row), [String(head)]: maskAt((tree as Row)[String(head)], rest) };
+  }
+  return tree;
+}
+
 function offsetOf(value: unknown, ctx: SideContext): unknown {
   const canonical = canonicalScalar(value);
   if (typeof canonical !== 'string' || !/^\d+$/.test(canonical)) return canonical;
