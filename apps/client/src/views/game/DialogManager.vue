@@ -14,8 +14,11 @@ import CreateBuildingDialog from '../building/CreateBuildingDialog.vue';
 import DestroyPanel from '../building/DestroyPanel.vue';
 import UpgradeBuildingDialog from '../building/UpgradeBuildingDialog.vue';
 import CollegeDialog from '../college/CollegeDialog.vue';
+import CityListDialog from '../government/CityListDialog.vue';
 import GovernmentDialog from '../government/GovernmentDialog.vue';
 import ResourceProductDialog from '../government/ResourceProductDialog.vue';
+import ModifyPasswordDialog from '../system/ModifyPasswordDialog.vue';
+import OpenLockDialog from '../system/OpenLockDialog.vue';
 import WallDialog from '../wall/WallDialog.vue';
 
 /** DialogManager: the dialogs over the scene panels (only one shown at a time). */
@@ -54,6 +57,9 @@ function choose(action: 'all' | 'level') {
     />
     <BuildingListDialog v-else-if="dialog?.name === 'buildingList'" />
     <ResourceProductDialog v-else-if="dialog?.name === 'resourceProduct'" />
+    <CityListDialog v-else-if="dialog?.name === 'cityList'" />
+    <OpenLockDialog v-else-if="dialog?.name === 'openLock'" :type="dialog.type" />
+    <ModifyPasswordDialog v-else-if="dialog?.name === 'modifyPassword'" />
     <GovernmentDialog
       v-else-if="dialog?.name === 'building' && ownDialog(dialog.building, BUILDING_GOVERNMENT)"
       :key="`government ${buildingKey}`"

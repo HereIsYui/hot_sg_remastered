@@ -4,6 +4,7 @@ import { BuildingInfoService } from './building-info.service';
 import { BuildingRules } from './building-rules.service';
 import { BuildingCommands } from './building.commands';
 import { CityBuildingsService } from './city-buildings.service';
+import { CityListCommands } from './city-list.commands';
 import { CityCommandService, CityCommands } from './city.commands';
 import { CityInfoService } from './city-info.service';
 import { CityProductionService } from './city-production.service';
@@ -33,6 +34,7 @@ import { TechnicTick } from './technic.tick';
     CityBuildingsService,
     CityCommands,
     CityCommandService,
+    CityListCommands,
     CityInfoService,
     CityProductionService,
     CurseTick,

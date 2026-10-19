@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { assets, type StyleDecl } from '../assets/registry';
 import { boxStyle, cssColor, styleNumber, textStyle } from './skin';
 
@@ -14,6 +14,8 @@ const props = withDefaults(
     fx?: StyleDecl;
     password?: boolean;
     maxChars?: number;
+    /** Allowed characters as the body of a regex character class, e.g. `a-zA-Z0-9`. */
+    restrict?: string;
     editable?: boolean;
     tabindex?: number;
   }>(),
@@ -23,6 +25,12 @@ const props = withDefaults(
 const model = defineModel<string>({ default: '' });
 const emit = defineEmits<{ enter: []; keydown: [KeyboardEvent] }>();
 const input = ref<HTMLInputElement>();
+
+watch(model, (value) => {
+  if (!props.restrict) return;
+  const kept = value.replace(new RegExp(`[^${props.restrict}]`, 'g'), '');
+  if (kept !== value) model.value = kept;
+});
 
 const decl = computed(() => assets.style('TextInput', props.styleName, props.fx));
 const style = computed(() => {

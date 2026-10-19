@@ -8,13 +8,17 @@ export type View = 'cityInner' | 'city' | 'world' | 'battle';
 
 /**
  * `DialogManager.showCreateBuildingDialog(kind)` (0 fields, 1 inner, 2 wall), `showBuildingDialog`,
- * `showBuildingListDialog` and `showResourceProductDialog`.
+ * `showBuildingListDialog`, `showResourceProductDialog`, `showCityListDialog`,
+ * `showOpenLockDialog(type)` and `showModifySecondPassword`.
  */
 export type DialogState =
   | { name: 'createBuilding'; kind: number }
   | { name: 'building'; building: BuildingState }
   | { name: 'buildingList' }
-  | { name: 'resourceProduct' };
+  | { name: 'resourceProduct' }
+  | { name: 'cityList' }
+  | { name: 'openLock'; type: string }
+  | { name: 'modifyPassword' };
 
 /** Client-side flow state of BloodWar.as (which top-level view is shown, busy cursor). */
 export const useSessionStore = defineStore('session', {

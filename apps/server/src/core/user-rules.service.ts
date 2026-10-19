@@ -38,6 +38,17 @@ export interface SysInform {
 export class UserRules {
   constructor(private readonly scope: DbScope) {}
 
+  /** UserFunc.php::getUserCities: the cities with population, government hall level and heroes. */
+  async userCities(uid: number): Promise<unknown[]> {
+    const result = await sql`select c.*, m.people,
+        (select level from sys_building sb where sb.cid = c.cid and bid = 6) as level,
+        (select count(*) from sys_city_hero h where h.cid = c.cid) as heroes
+      from sys_city c, mem_city_resource m where c.uid = ${uid} and c.cid = m.cid`.execute(
+      this.scope.db,
+    );
+    return result.rows;
+  }
+
   /** utils.php::getBufferNobility: nobility raised by an active 推恩令 buff (types 16/18). */
   async bufferNobility(uid: number, realNobility: unknown): Promise<number> {
     const row = await this.scope.db

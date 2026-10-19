@@ -565,7 +565,64 @@ export const cases: DiffCase[] = [
       await s.command(session, 'getYaoYiLinTime');
     },
   },
+  {
+    name: 'city list discards a city behind the second password',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const wid = cid2wid(cid);
+      await s.command(session, 'getCityList');
+
+      await s.query('delete from sys_user_password where uid = ?', [uid]);
+      await s.command(session, 'openLock', 'discardCityType', 'sanguo', 'abc12');
+      await s.command(session, 'modifyPassword', 'any', 'sanguo', 'abc12');
+      await s.command(session, 'openLock', 'discardCityType', 'sanguo', 'abc');
+      await s.command(session, 'openLock', 'discardCityType', 'sanguo', ' abc12 ');
+      await s.command(session, 'modifyPassword', 'wrong', 'sanguo', 'pw2');
+      await s.command(session, 'modifyPassword', 'abc12', 'sanguo', 'pw2');
+
+      await s.command(session, 'discardCity', FOREIGN_CITY);
+      await s.query('update mem_world set state = 1 where wid = ?', [wid]);
+      await s.command(session, 'discardCity', cid);
+      await s.query('update mem_world set state = 0 where wid = ?', [wid]);
+      const troop = `insert into sys_troops (id, uid, cid, hid, targetcid, state, pathtime,
+          endtime, soldiers, resource) values (900002, ?, ?, 0, ?, ?, 600, 0, '', '')`;
+      await s.query(troop, [uid, cid, FOREIGN_CITY, 0]);
+      await s.command(session, 'discardCity', cid);
+      await s.query('delete from sys_troops where id = 900002');
+      await s.query('update sys_city set type = 5 where cid = ?', [cid]);
+      await s.command(session, 'discardCity', cid);
+      await s.query('update sys_city set type = 1 where cid = ?', [cid]);
+      await s.query('insert into cfg_soldier_special_city (cid, sid, type) values (?, 45, 1)', [
+        cid,
+      ]);
+      await s.command(session, 'discardCity', cid);
+      await s.query('delete from cfg_soldier_special_city where cid = ?', [cid]);
+
+      const [field] = await s.query<{ wid: string }>(
+        'select wid from mem_world where ownercid = 0 and type > 1 order by wid limit 1',
+      );
+      const fieldWid = Number(field?.wid);
+      await s.query('update mem_world set ownercid = ? where wid = ?', [cid, fieldWid]);
+      await s.query(troop, [1, FOREIGN_CITY, wid2cid(fieldWid), 4]);
+      await s.command(session, 'discardCity', cid);
+      await s.query('update sys_troops set uid = ? where id = 900002', [uid]);
+      await s.command(session, 'discardCity', cid);
+      await s.query('delete from sys_troops where id = 900002');
+
+      await s.query('update sys_user set officepos = 7 where uid = ?', [uid]);
+      await s.command(session, 'discardCity', cid);
+      await s.command(session, 'getCityList');
+    },
+  },
 ];
+
+function wid2cid(wid: number): number {
+  const y = Math.floor(wid / 10000) * 10 + Math.floor((wid % 100) / 10);
+  const x = Math.floor((wid % 10000) / 100) * 10 + (wid % 10);
+  return y * 1000 + x;
+}
 
 /** A 城墙 reply: `[current, next, defences, queue, space, used]`; the built entry's time runs. */
 function reinforceTimes(s: Side): void {

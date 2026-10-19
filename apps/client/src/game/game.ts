@@ -62,6 +62,8 @@ export class Game {
   private showingFault = false;
   private readonly dialogReceivers = new Set<DialogReceiver>();
   private readonly globalReceivers = new Map<string, Set<GlobalReceiver>>();
+  /** The action guarded by the open 2级密码 dialog (`BloodWar.unLockType` dispatch). */
+  private pendingUnlock: { type: string; action: () => void } | null = null;
 
   constructor(pinia: Pinia, loginService = new LoginService(), cmd?: CommandClient) {
     this.user = useUserStore(pinia);
@@ -244,6 +246,12 @@ export class Game {
   onGlobalCommand(action: string, command: string, data: unknown): void {
     if (action === 'user') this.onUserCommand(command, data);
     else if (action === 'city') this.onCityCommand(command, data);
+    else if (action === 'openlock') this.onOpenLock(data);
+    else if (action === 'modifypassword') {
+      const type = int((data as unknown[] | undefined)?.[0]);
+      if (type === 1) gameAlert(i18n('ModifySecondaryPassword_set_succ'));
+      else if (type === 2) gameAlert(i18n('ModifySecondaryPassword_update_succ'));
+    }
     for (const receiver of [...(this.globalReceivers.get(action) ?? [])]) receiver(command, data);
   }
 
@@ -275,6 +283,8 @@ export class Game {
       gameAlert(String((data as unknown[] | undefined)?.[0] ?? ''));
     } else if (command === 'getUserCities') {
       this.user.cities = parseCities(data);
+    } else if (command === 'discardCity') {
+      this.user.cities = parseCities((data as unknown[] | undefined)?.[1]);
     } else if (BUILDING_COMMANDS.has(command)) {
       this.city.applyBuildings(data, this.global.buildingDescriptions);
     } else if (command === 'getCityInfo' && Array.isArray(data)) {
@@ -412,9 +422,34 @@ export class Game {
       : { name: 'createBuilding', kind };
   }
 
-  /** `DialogManager.showBuildingListDialog` / `showResourceProductDialog`: replaces any dialog. */
-  showDialog(name: 'buildingList' | 'resourceProduct'): void {
+  /** `DialogManager.showBuildingListDialog` / `showResourceProductDialog` / ...: replaces any dialog. */
+  showDialog(name: 'buildingList' | 'resourceProduct' | 'cityList' | 'modifyPassword'): void {
     this.session.dialog = { name };
+  }
+
+  /** `DialogManager.showOpenLockDialog`: `action` runs once the server accepts the 2级密码. */
+  requestUnlock(type: string, action: () => void): void {
+    this.pendingUnlock = { type, action };
+    this.session.dialog = { name: 'openLock', type };
+  }
+
+  /** `[type, notSetYet, matches]`: an unset password has to be changed first. */
+  private onOpenLock(data: unknown): void {
+    const d = Array.isArray(data) ? data : [];
+    const type = String(d[0] ?? '');
+    if (d[1]) {
+      void showAlert(i18n('OpenLock_title_no_password'), '', ['yes', 'no']).then((button) => {
+        if (button === 'yes') this.showDialog('modifyPassword');
+      });
+      return;
+    }
+    if (!d[2]) {
+      void showAlert(i18n('OpenLock_title_password_wrong'));
+      return;
+    }
+    const pending = this.pendingUnlock;
+    this.pendingUnlock = null;
+    if (pending?.type === type) pending.action();
   }
 
   /** `DialogManager.showBuildingDialog`: switches to another building's dialog. */

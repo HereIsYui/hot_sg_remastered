@@ -18,13 +18,13 @@ const t = (n: number) => i18n(`Government_GovernmentPanel_${n}_1`);
 
 /**
  * `action` opens a pop-up of the 官府, `dialog` another dialog; buttons with neither
- * (附属野地, 所有城池) open unported dialogs.
+ * (附属野地) open unported dialogs.
  */
 const buttons: {
   x: number;
   label: number;
   action?: GovernmentAction;
-  dialog?: 'buildingList' | 'resourceProduct';
+  dialog?: 'buildingList' | 'resourceProduct' | 'cityList';
 }[] = [
   { x: 1, label: 1, dialog: 'buildingList' },
   { x: 83, label: 5, dialog: 'resourceProduct' },
@@ -33,7 +33,7 @@ const buttons: {
   { x: 329, label: 4, action: 'levy' },
   { x: 411, label: 6, action: 'rename' },
   { x: 493, label: 16 },
-  { x: 575, label: 17 },
+  { x: 575, label: 17, dialog: 'cityList' },
 ];
 
 function onButton(b: (typeof buttons)[number]) {

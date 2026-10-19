@@ -45,4 +45,5 @@ export const tableRules: Record<string, TableRule> = {
   sys_city_reinforcequeue: { offsets: ['queuetime', 'state_starttime'] },
   mem_city_reinforce: { offsets: ['state_endtime'] },
   sys_troops: { offsets: ['endtime'] },
+  sys_city: { offsets: ['discardtime'] },
 };

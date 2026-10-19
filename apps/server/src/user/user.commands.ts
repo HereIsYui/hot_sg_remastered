@@ -119,7 +119,7 @@ export class UserCommands {
       .selectAll()
       .where('uid', '=', uid)
       .executeTakeFirst();
-    const cities = await this.userCities(uid);
+    const cities = await this.users.userCities(uid);
 
     const reward = await sql<{ last: string | null; today: string }>`select
         (select substr(from_unixtime(getrewardtime), 1, 10) from sys_user_level where uid = ${uid}) as last,
@@ -389,17 +389,7 @@ export class UserCommands {
   /** The player's cities with population, government hall level and hero count. */
   @GlobalCommand()
   async getUserCities(ctx: CommandContext): Promise<unknown[]> {
-    return this.userCities(ctx.uid);
-  }
-
-  private async userCities(uid: number): Promise<unknown[]> {
-    const result = await sql`select c.*, m.people,
-        (select level from sys_building sb where sb.cid = c.cid and bid = 6) as level,
-        (select count(*) from sys_city_hero h where h.cid = c.cid) as heroes
-      from sys_city c, mem_city_resource m where c.uid = ${uid} and c.cid = m.cid`.execute(
-      this.scope.db,
-    );
-    return result.rows;
+    return this.users.userCities(ctx.uid);
   }
 
   /** UserFunc.php::logWaigUserInfo: sessions of clients that did not send the sign. */
