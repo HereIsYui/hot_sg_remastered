@@ -4,6 +4,7 @@ import { useGame } from '../../game/game';
 import { upgradingRows, type GovernmentAction, type UpgradingRow } from '../../game/government';
 import { i18n } from '../../i18n';
 import { useCityStore } from '../../stores/city';
+import type { PlainDialog } from '../../stores/session';
 import FxButton from '../../ui/FxButton.vue';
 import FxCanvas from '../../ui/FxCanvas.vue';
 import FxDataGrid from '../../ui/FxDataGrid.vue';
@@ -17,14 +18,13 @@ const city = useCityStore();
 const t = (n: number) => i18n(`Government_GovernmentPanel_${n}_1`);
 
 /**
- * `action` opens a pop-up of the 官府, `dialog` another dialog; buttons with neither
- * (附属野地) open unported dialogs.
+ * `action` opens a pop-up of the 官府, `dialog` another dialog.
  */
 const buttons: {
   x: number;
   label: number;
   action?: GovernmentAction;
-  dialog?: 'buildingList' | 'resourceProduct' | 'cityList';
+  dialog?: PlainDialog;
 }[] = [
   { x: 1, label: 1, dialog: 'buildingList' },
   { x: 83, label: 5, dialog: 'resourceProduct' },
@@ -32,7 +32,7 @@ const buttons: {
   { x: 247, label: 3, action: 'pacify' },
   { x: 329, label: 4, action: 'levy' },
   { x: 411, label: 6, action: 'rename' },
-  { x: 493, label: 16 },
+  { x: 493, label: 16, dialog: 'cityField' },
   { x: 575, label: 17, dialog: 'cityList' },
 ];
 
@@ -77,7 +77,6 @@ function onItemClick(row: UpgradingRow) {
       :h="37"
       style-name="ButtonYellow"
       :label="t(b.label)"
-      :enabled="b.action !== undefined || b.dialog !== undefined"
       @click="onButton(b)"
     />
     <FxDataGrid

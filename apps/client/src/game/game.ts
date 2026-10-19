@@ -7,7 +7,7 @@ import { CommandClient, type CommandFailure, type DialogResult } from '../net/co
 import { LoginService, type LoginResult } from '../net/login';
 import { useCityStore, type BuildingState } from '../stores/city';
 import { useGlobalStore } from '../stores/global';
-import { useSessionStore, type View } from '../stores/session';
+import { useSessionStore, type PlainDialog, type View } from '../stores/session';
 import { cityPosition, parseCities, useUserStore } from '../stores/user';
 import { gameAlert, setAlertLabels, showAlert } from '../ui/alert';
 import { loadLoginPrefs, saveLoginPrefs, type LoginPrefs } from './loginPrefs';
@@ -423,7 +423,7 @@ export class Game {
   }
 
   /** `DialogManager.showBuildingListDialog` / `showResourceProductDialog` / ...: replaces any dialog. */
-  showDialog(name: 'buildingList' | 'resourceProduct' | 'cityList' | 'modifyPassword'): void {
+  showDialog(name: PlainDialog): void {
     this.session.dialog = { name };
   }
 

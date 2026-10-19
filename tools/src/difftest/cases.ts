@@ -616,6 +616,55 @@ export const cases: DiffCase[] = [
       await s.command(session, 'getCityList');
     },
   },
+  {
+    name: 'government inspects, clears and discards its fields',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const free = await s.query<{ wid: string }>(
+        'select wid from mem_world where ownercid = 0 and type > 1 order by wid limit 3',
+      );
+      const [a, b, c] = free.map((f) => Number(f.wid)) as [number, number, number];
+      await s.query('update mem_world set ownercid = ?, level = 3 where wid in (?, ?)', [
+        cid,
+        a,
+        b,
+      ]);
+      await s.command(session, 'getCityField', cid);
+      s.unordered(4); // no ORDER BY: MyISAM vs InnoDB row order
+      await s.command(session, 'getCityField', FOREIGN_CITY);
+
+      const troop = `insert into sys_troops (id, uid, cid, hid, targetcid, task, state, starttime,
+          pathtime, endtime, soldiers, resource) values (?, ?, ?, 0, ?, 1, ?, 0, 600, 0, '', '')`;
+      await s.query(troop, [900003, uid, cid, wid2cid(a), 4]);
+      await s.query(troop, [900004, 1, FOREIGN_CITY, wid2cid(a), 4]);
+      await s.command(session, 'getFieldDetail', a);
+      await s.query(
+        'insert into sys_gather (wid, troopid, fooduse, level, starttime) values (?, 900003, 0, 3, 1)',
+        [a],
+      );
+      await s.command(session, 'getCityField', cid);
+      s.unordered(4);
+      await s.command(session, 'getFieldDetail', a);
+      await s.command(session, 'callBackFieldTroop', 900003, a);
+      await s.query('delete from sys_gather where wid = ?', [a]);
+      await s.command(session, 'callBackFieldTroop', 900003, a);
+      s.mask(4); // the original answers with the field numbered like the troop
+      await s.command(session, 'callBackFieldTroop', 900003, a);
+      await s.command(session, 'callBackFieldTroop', 900004, a);
+      await s.command(session, 'kickBackFieldTroop', cid, 900004, a);
+      await s.command(session, 'kickBackFieldTroop', cid, 900004, a);
+
+      await s.command(session, 'discardField', FOREIGN_CITY, a);
+      await s.command(session, 'discardField', cid, c);
+      await s.query(troop, [900005, 1, FOREIGN_CITY, wid2cid(b), 2]);
+      await s.command(session, 'discardField', cid, b);
+      await s.query('delete from sys_troops where id = 900005');
+      await s.command(session, 'discardField', cid, a);
+      await s.command(session, 'getCityProduct', cid);
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {

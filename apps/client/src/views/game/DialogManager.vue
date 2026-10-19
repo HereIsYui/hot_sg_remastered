@@ -14,6 +14,7 @@ import CreateBuildingDialog from '../building/CreateBuildingDialog.vue';
 import DestroyPanel from '../building/DestroyPanel.vue';
 import UpgradeBuildingDialog from '../building/UpgradeBuildingDialog.vue';
 import CollegeDialog from '../college/CollegeDialog.vue';
+import CityFieldDialog from '../government/CityFieldDialog.vue';
 import CityListDialog from '../government/CityListDialog.vue';
 import GovernmentDialog from '../government/GovernmentDialog.vue';
 import ResourceProductDialog from '../government/ResourceProductDialog.vue';
@@ -58,6 +59,7 @@ function choose(action: 'all' | 'level') {
     <BuildingListDialog v-else-if="dialog?.name === 'buildingList'" />
     <ResourceProductDialog v-else-if="dialog?.name === 'resourceProduct'" />
     <CityListDialog v-else-if="dialog?.name === 'cityList'" />
+    <CityFieldDialog v-else-if="dialog?.name === 'cityField'" />
     <OpenLockDialog v-else-if="dialog?.name === 'openLock'" :type="dialog.type" />
     <ModifyPasswordDialog v-else-if="dialog?.name === 'modifyPassword'" />
     <GovernmentDialog

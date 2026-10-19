@@ -6,19 +6,19 @@ export type Screen = 'loading' | 'login' | 'createRole' | 'game';
 /** Main scene selected in the top bar. */
 export type View = 'cityInner' | 'city' | 'world' | 'battle';
 
+/** Dialogs opened without arguments (`showBuildingListDialog`, `showCityFieldDialog`, ...). */
+export type PlainDialog =
+  'buildingList' | 'resourceProduct' | 'cityList' | 'cityField' | 'modifyPassword';
+
 /**
  * `DialogManager.showCreateBuildingDialog(kind)` (0 fields, 1 inner, 2 wall), `showBuildingDialog`,
- * `showBuildingListDialog`, `showResourceProductDialog`, `showCityListDialog`,
- * `showOpenLockDialog(type)` and `showModifySecondPassword`.
+ * `showOpenLockDialog(type)` and the plain dialogs.
  */
 export type DialogState =
   | { name: 'createBuilding'; kind: number }
   | { name: 'building'; building: BuildingState }
-  | { name: 'buildingList' }
-  | { name: 'resourceProduct' }
-  | { name: 'cityList' }
   | { name: 'openLock'; type: string }
-  | { name: 'modifyPassword' };
+  | { name: PlainDialog };
 
 /** Client-side flow state of BloodWar.as (which top-level view is shown, busy cursor). */
 export const useSessionStore = defineStore('session', {

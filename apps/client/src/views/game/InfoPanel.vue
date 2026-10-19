@@ -276,7 +276,13 @@ const cityIndex = computed({
         :tip="i18n('UserInfo_InfoPanel_21_1')"
         @click="game.showDialog('resourceProduct')"
       />
-      <FxButton :x="218" :y="73" style-name="MyCityField" :tip="i18n('UserInfo_InfoPanel_22_1')" />
+      <FxButton
+        :x="218"
+        :y="73"
+        style-name="MyCityField"
+        :tip="i18n('UserInfo_InfoPanel_22_1')"
+        @click="game.showDialog('cityField')"
+      />
     </FxCanvas>
 
     <FxCanvas style-name="PanelGreyGrey" :top="312" :bottom="6" :left="6" :right="6">
