@@ -39,11 +39,23 @@ pnpm legacy:up          # JSON 网关 http://127.0.0.1:8090/server/amfphp/json.p
 pnpm legacy:smoke       # 登录并调用命令，确认对照环境可用
 pnpm legacy:down        # 停止（legacy:reset 会同时删除数据卷，下次启动重新导入）
 
+# 开发库：MySQL 8.4，127.0.0.1:3318（hot/hot）
+pnpm legacy:lang        # 用原版 PHP 求值 lang.php，生成 legacy/lang/zh_CN.json（服务端文案）
+pnpm db:up              # 启动开发库
+pnpm db:migrate         # 把 legacy/db/bloodwar_full.sql 转成 8.4 语法并导入（会重建库）
+pnpm db:codegen         # 表结构变化后重新生成 apps/server/src/db/schema.generated.ts
+
 # 开发
 pnpm dev:server         # http://localhost:3000/api/health
 pnpm dev:client         # http://localhost:5173
 pnpm test && pnpm typecheck && pnpm lint
+
+# 差分测试：同一组请求分别发给原版与新服务端，比对返回值和数据库变更
+pnpm difftest                 # 全部用例；pnpm difftest createRole 只跑名称包含该词的用例
+pnpm difftest --resnapshot    # 两边数据库重新导入后，重建快照
 ```
+
+差分测试要求两边数据库从同一份导出开始：先 `pnpm legacy:reset && pnpm legacy:up`、`pnpm db:migrate`，再立即运行（原版的结算进程会改动数据，`difftest` 启动时会先停掉它）。首次运行会把每张表复制成 `__snap_*` 快照表，每个用例结束后按快照回滚，因此可以重复运行。新服务端由脚本以 `TICK_ENABLED=false` 在 3998 端口启动，日志在 `legacy/.cache/difftest-server.log`。
 
 Docker Hub 访问慢时设置镜像前缀，例如 `export HOT_DOCKER_MIRROR=docker.m.daocloud.io/library/`；脚本和 `docker compose` 都会读取它。FFDec 首次使用时会自动下载到 `legacy/.cache/`，本机没有 Java 时通过 Docker 运行。
 

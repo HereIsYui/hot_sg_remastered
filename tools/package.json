@@ -10,10 +10,14 @@
     "dump-db": "node src/dump-db.ts",
     "inventory": "node src/inventory/index.ts",
     "smoke": "node src/smoke.ts",
+    "migrate-db": "node src/migrate-db.ts",
+    "lang": "node src/lang.ts",
+    "difftest": "node src/difftest.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
+    "mysql2": "^3.24.6",
     "node-unrar-js": "^2.0.2"
   },
   "devDependencies": {

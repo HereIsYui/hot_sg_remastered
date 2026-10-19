@@ -1,0 +1,38 @@
+# Development database for the NestJS server (MySQL 8.4).
+#
+#   pnpm db:up        # start
+#   pnpm db:migrate   # import legacy/db/bloodwar_full.sql converted to utf8mb4 / InnoDB
+name: hot-dev
+
+services:
+  db:
+    image: ${HOT_DOCKER_MIRROR:-}mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: hot
+      MYSQL_DATABASE: bloodwar
+      MYSQL_USER: hot
+      MYSQL_PASSWORD: hot
+      TZ: Asia/Shanghai
+    command:
+      # lower_case_table_names can only be chosen when the data directory is initialised.
+      - --lower-case-table-names=1
+      - --sql-mode=
+      - --character-set-server=utf8mb4
+      # PAD SPACE collation, like the original utf8_general_ci (0900 collations are NO PAD).
+      - --collation-server=utf8mb4_general_ci
+      - --default-time-zone=+08:00
+      - --max-allowed-packet=64M
+      - --innodb-buffer-pool-size=512M
+      - --skip-log-bin
+    volumes:
+      - db-data:/var/lib/mysql
+    ports:
+      - 127.0.0.1:${HOT_DB_PORT:-3318}:3306
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h127.0.0.1', '-uhot', '-phot']
+      interval: 3s
+      timeout: 5s
+      retries: 60
+
+volumes:
+  db-data:

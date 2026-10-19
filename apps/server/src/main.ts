@@ -1,14 +1,22 @@
 import 'reflect-metadata';
-import { Logger } from '@nestjs/common';
+import { ConsoleLogger, Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { WsAdapter } from '@nestjs/platform-ws';
 import { AppModule } from './app.module';
+import { AllExceptionsFilter } from './common/all-exceptions.filter';
+import { loadConfig } from './config/app-config';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const config = loadConfig();
+  const app = await NestFactory.create(AppModule, {
+    logger: new ConsoleLogger({ json: config.LOG_JSON }),
+  });
   app.enableCors();
-  const port = Number(process.env.PORT ?? 3000);
-  await app.listen(port);
-  Logger.log(`server listening on http://localhost:${port}`, 'Bootstrap');
+  app.enableShutdownHooks();
+  app.useWebSocketAdapter(new WsAdapter(app));
+  app.useGlobalFilters(new AllExceptionsFilter());
+  await app.listen(config.PORT);
+  Logger.log(`server listening on http://localhost:${config.PORT}`, 'Bootstrap');
 }
 
 void bootstrap();

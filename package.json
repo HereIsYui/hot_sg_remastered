@@ -21,10 +21,16 @@
     "legacy:assets": "pnpm --filter @hot/tools assets",
     "legacy:dump-db": "pnpm --filter @hot/tools dump-db",
     "legacy:inventory": "pnpm --filter @hot/tools inventory",
+    "legacy:lang": "pnpm --filter @hot/tools lang",
     "legacy:up": "docker compose -f docker/legacy/docker-compose.yml --profile tick up -d --build --wait",
     "legacy:down": "docker compose -f docker/legacy/docker-compose.yml --profile tick down",
     "legacy:reset": "docker compose -f docker/legacy/docker-compose.yml --profile tick down -v",
-    "legacy:smoke": "pnpm --filter @hot/tools smoke"
+    "legacy:smoke": "pnpm --filter @hot/tools smoke",
+    "db:up": "docker compose -f docker/dev/docker-compose.yml up -d --wait",
+    "db:down": "docker compose -f docker/dev/docker-compose.yml down",
+    "db:migrate": "pnpm --filter @hot/tools migrate-db",
+    "db:codegen": "pnpm --filter @hot/server db:codegen",
+    "difftest": "pnpm build:shared && pnpm --filter @hot/server build && pnpm --filter @hot/tools difftest"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

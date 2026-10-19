@@ -6,7 +6,13 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['**/dist/**', '**/coverage/**', 'legacy/**', 'apps/client/public/assets/**'],
+    ignores: [
+      '**/dist/**',
+      '**/coverage/**',
+      'legacy/**',
+      'apps/client/public/assets/**',
+      'apps/server/src/db/schema.generated.ts',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
