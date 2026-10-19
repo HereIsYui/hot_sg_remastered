@@ -9,14 +9,12 @@ import {
   Param,
   Post,
 } from '@nestjs/common';
-import { COMMAND_ENDPOINT } from '@hot/shared';
+import { COMMAND_ENDPOINT, SERVICE_ENDPOINT } from '@hot/shared';
 import { GameError } from '../common/game-error';
 import { LangService } from '../common/lang.service';
 import { clientAddress, type ClientAddress } from './client-ip';
 import { CommandService } from './command.service';
 import { HandlerRegistry } from './handler-registry';
-
-export const SERVICE_ENDPOINT = '/api/service';
 
 /** amfphp answers an exception thrown by a service method with HTTP 200 and this fault code. */
 export const AMF_RUNTIME_ERROR = 'AMFPHP_RUNTIME_ERROR';

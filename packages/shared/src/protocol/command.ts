@@ -56,6 +56,21 @@ export type CommandResponse = CommandSuccess | CommandFailure;
 
 export const COMMAND_ENDPOINT = '/api/command';
 
+/** amfphp-style service calls: `POST {SERVICE_ENDPOINT}/{Service}/{method}` with the args array. */
+export const SERVICE_ENDPOINT = '/api/service';
+
+/** Fault object returned by a service method that raised a game error (amfphp runtime error). */
+export interface ServiceFault {
+  faultCode: string;
+  faultString: string;
+}
+
+export function isServiceFault(value: unknown): value is ServiceFault {
+  return (
+    typeof value === 'object' && value !== null && 'faultCode' in value && 'faultString' in value
+  );
+}
+
 export function isCommandFailure(res: CommandResponse): res is CommandFailure {
   return res[0] === 0;
 }

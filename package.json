@@ -19,6 +19,7 @@
     "legacy:extract": "pnpm --filter @hot/tools extract",
     "legacy:decompile": "pnpm --filter @hot/tools decompile",
     "legacy:assets": "pnpm --filter @hot/tools assets",
+    "legacy:ui": "pnpm --filter @hot/tools ui",
     "legacy:dump-db": "pnpm --filter @hot/tools dump-db",
     "legacy:inventory": "pnpm --filter @hot/tools inventory",
     "legacy:lang": "pnpm --filter @hot/tools lang",

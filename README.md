@@ -31,7 +31,9 @@ pnpm install
 pnpm legacy:extract     # 解包到 legacy/raw/
 pnpm legacy:dump-db     # 用临时 MySQL 5.7 容器把原库导出为 legacy/db/*.sql
 pnpm legacy:decompile   # FFDec 反编译四个 SWF 到 legacy/decompiled/
-pnpm legacy:assets      # 导出图片与 SWF 位图、精灵到 apps/client/public/assets/
+pnpm legacy:assets      # 导出图片、SWF 位图与精灵、客户端文案到 apps/client/public/assets/，
+                        # 并生成 embeds.json（原 Embed 路径 -> 文件）、slices.json（九宫格）
+pnpm legacy:ui          # 界面结构提纲写到 legacy/ui/，全局 Flex 样式表写到 assets/styles.json
 pnpm legacy:inventory   # 重新生成 design/ 下的接口清单、界面清单、数据字典
 
 # 原版对照环境：PHP 5.6 + MySQL 5.7 + 每 3 秒一次结算
@@ -47,7 +49,7 @@ pnpm db:codegen         # 表结构变化后重新生成 apps/server/src/db/sche
 
 # 开发
 pnpm dev:server         # http://localhost:3000/api/health
-pnpm dev:client         # http://localhost:5173
+pnpm dev:client         # http://localhost:5173，/api 代理到 3000；需先运行 legacy:assets 与 legacy:ui
 pnpm test && pnpm typecheck && pnpm lint
 
 # 差分测试：同一组请求分别发给原版与新服务端，比对返回值和数据库变更
@@ -56,6 +58,8 @@ pnpm difftest --resnapshot    # 两边数据库重新导入后，重建快照
 ```
 
 差分测试要求两边数据库从同一份导出开始：先 `pnpm legacy:reset && pnpm legacy:up`、`pnpm db:migrate`，再立即运行（原版的结算进程会改动数据，`difftest` 启动时会先停掉它）。首次运行会把每张表复制成 `__snap_*` 快照表，每个用例结束后按快照回滚，因此可以重复运行。新服务端由脚本以 `TICK_ENABLED=false` 在 3998 端口启动，日志在 `legacy/.cache/difftest-server.log`。
+
+客户端登录页的“注册”“官网”按钮默认隐藏，在 `apps/client/.env.local` 中设置 `VITE_REGISTER_URL`、`VITE_HOME_LABEL`、`VITE_HOME_URL` 后显示。
 
 Docker Hub 访问慢时设置镜像前缀，例如 `export HOT_DOCKER_MIRROR=docker.m.daocloud.io/library/`；脚本和 `docker compose` 都会读取它。FFDec 首次使用时会自动下载到 `legacy/.cache/`，本机没有 Java 时通过 Docker 运行。
 

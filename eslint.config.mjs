@@ -22,10 +22,18 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: { parser: tseslint.parser },
     },
+    rules: {
+      'vue/require-default-prop': 'off',
+    },
   },
   {
     files: ['apps/client/**', 'apps/gm/**'],
     languageOptions: { globals: globals.browser },
+  },
+  {
+    // Server and game HTML only reaches v-html through flexHtml(), which whitelists Flex tags.
+    files: ['apps/client/**/*.vue'],
+    rules: { 'vue/no-v-html': 'off' },
   },
   {
     files: ['apps/server/**', 'tools/**', 'packages/**', '*.mjs'],

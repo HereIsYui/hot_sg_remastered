@@ -1,7 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
-import { COMMAND_ENDPOINT, PUSH_ENDPOINT } from '@hot/shared';
+import { COMMAND_ENDPOINT, PUSH_ENDPOINT, SERVICE_ENDPOINT } from '@hot/shared';
 import { DatabaseHealth } from '../db/database.module';
-import { SERVICE_ENDPOINT } from '../gateway/gateway.controller';
 
 @Controller('api/health')
 export class HealthController {

@@ -7,6 +7,7 @@
     "extract": "node src/extract.ts",
     "decompile": "node src/decompile.ts",
     "assets": "node src/assets.ts",
+    "ui": "node src/ui.ts",
     "dump-db": "node src/dump-db.ts",
     "inventory": "node src/inventory/index.ts",
     "smoke": "node src/smoke.ts",

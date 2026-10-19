@@ -46,6 +46,7 @@ export const cases: DiffCase[] = [
       await s.command(session, 'loadGlobalData');
       s.unordered(4, 6); // cfg_things without ORDER BY: MyISAM insertion order vs InnoDB key order
       await s.command(session, 'loadProvinceInfo');
+      await s.command(session, 'getUserCities');
       await s.command({ ...session, sid: 'wrong' }, 'loadUserInfo', 1);
       await s.command(session, 'noSuchCommand');
       await s.command(session, 'createCity', '另城', 3);

@@ -401,6 +401,12 @@ export class UserCommands {
     }
   }
 
+  /** The player's cities with population, government hall level and hero count. */
+  @GlobalCommand()
+  async getUserCities(ctx: CommandContext): Promise<unknown[]> {
+    return this.userCities(ctx.uid);
+  }
+
   private async userCities(uid: number): Promise<unknown[]> {
     const result = await sql`select c.*, m.people,
         (select level from sys_building sb where sb.cid = c.cid and bid = 6) as level,
