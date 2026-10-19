@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { sql } from 'kysely';
 import { DbScope } from '../db/database.module';
 import { cellOf } from '../db/sql-fragments';
-import { phpIntval } from './php';
+import { phpFloatString, phpIntval, phpNum } from './php';
 
 /** Building ids (common.php ID_BUILDING_*). */
 export const Building = {
@@ -75,6 +75,46 @@ export class CityRules {
       .set({ resource_changing: 1 })
       .where('cid', '=', ownercid)
       .execute();
+  }
+
+  /** utils.php::addCityResources: negative amounts spend. */
+  async addCityResources(
+    cid: number,
+    wood: number,
+    rock: number,
+    iron: number,
+    food: number,
+    gold: number,
+  ): Promise<void> {
+    const [w, r, i, f, g] = [wood, rock, iron, food, gold].map(phpFloatString);
+    await sql`update mem_city_resource set wood = wood + ${w}, rock = rock + ${r},
+      iron = iron + ${i}, food = food + ${f}, gold = gold + ${g} where cid = ${cid}`.execute(
+      this.scope.db,
+    );
+  }
+
+  /** utils.php::checkCityResource */
+  async checkCityResource(
+    cid: number,
+    wood: unknown,
+    rock: unknown,
+    iron: unknown,
+    food: unknown,
+    gold: unknown,
+  ): Promise<boolean> {
+    const res = (
+      await sql<Record<string, unknown>>`select * from mem_city_resource
+        where cid = ${cid}`.execute(this.scope.db)
+    ).rows[0];
+    if (!res) return false;
+    const short = (have: unknown, want: unknown) => phpNum(have) < phpNum(want);
+    return !(
+      short(res.wood, wood) ||
+      short(res.rock, rock) ||
+      short(res.iron, iron) ||
+      short(res.food, food) ||
+      short(res.gold, gold)
+    );
   }
 
   /** utils.php::updateCityPeopleStable: people_max * morale%. */

@@ -84,6 +84,13 @@ export class TickService implements OnApplicationBootstrap, OnApplicationShutdow
     return this.running;
   }
 
+  /** Runs only the handlers of one `TickOrder` slot, letting their errors through. */
+  async runSlot(order: number): Promise<string[]> {
+    const slot = this.handlers.filter((h) => h.order === order);
+    for (const h of slot) await h.run();
+    return slot.map((h) => h.name);
+  }
+
   register(entry: TickHandlerEntry): void {
     this.handlers = [...this.handlers, entry].sort((a, b) => a.order - b.order);
   }

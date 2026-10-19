@@ -8,6 +8,9 @@ import { phpIntval } from './php';
 /** Hero type of the player's own lord hero (君主将). */
 export const LORD_HERO_TYPE = 1000;
 
+/** common.php HERO_EXP_RATE */
+const HERO_EXP_RATE = 0.1;
+
 /** ActFunc.php::isActHero: heroes handed out by events. */
 export function isActHero(heroType: unknown): boolean {
   const t = phpIntval(heroType);
@@ -44,6 +47,13 @@ type RecruitSource = Omit<ThrownHero, 'hid' | 'herotype'>;
 @Injectable()
 export class HeroRules {
   constructor(private readonly scope: DbScope) {}
+
+  /** utils.php::addHeroExp: HERO_EXP_RATE of `exp`; lord heroes gain none. */
+  async addHeroExp(hid: number, exp: number): Promise<void> {
+    const expadd = Math.floor(exp * HERO_EXP_RATE);
+    await sql`update sys_city_hero set exp = exp + ${expadd}
+      where herotype != ${LORD_HERO_TYPE} and hid = ${hid}`.execute(this.scope.db);
+  }
 
   /**
    * utils.php::throwHeroToField: strips the hero's gear and moves it to a random free wild

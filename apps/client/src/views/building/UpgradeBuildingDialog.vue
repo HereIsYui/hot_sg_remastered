@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import type { CommandArg } from '@hot/shared';
+import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue';
 import { serverTime } from '../../core/clock';
 import { parseBuildingInfo, type BuildingInfo } from '../../game/buildings';
 import { useGame } from '../../game/game';
@@ -11,9 +12,25 @@ import FxImage from '../../ui/FxImage.vue';
 import FxLabel from '../../ui/FxLabel.vue';
 import UpgradeBuildingItem from './UpgradeBuildingItem.vue';
 
-/** Building.UpgradeBuildingDialog: the dialog of a building without its own (houses, fields...). */
-const props = defineProps<{ x: number; y: number; building: BuildingState }>();
+/**
+ * Building.UpgradeBuildingDialog: the dialog of a building without its own (houses, fields...),
+ * and the base of those that have one, which fill the slot with what follows the two levels.
+ */
+const props = withDefaults(
+  defineProps<{ x: number; y: number; h?: number; building: BuildingState }>(),
+  { h: 166 },
+);
 const emit = defineEmits<{ destroyPanel: [handlers: { all: () => void; level: () => void }] }>();
+defineSlots<{
+  default(props: {
+    /** The reply elements after the two levels (e.g. the 书院's technic list). */
+    extra: unknown[];
+    now: number;
+    /** `sendDialogCommand` addressed to this dialog, as the special dialogs' commands are. */
+    send: (cmd: string, args: CommandArg[]) => void;
+    reload: () => void;
+  }): unknown;
+}>();
 
 const game = useGame();
 const city = useCityStore();
@@ -21,6 +38,7 @@ const city = useCityStore();
 const state = ref<BuildingState>({ ...props.building });
 const current = ref<BuildingInfo | null>(null);
 const next = ref<BuildingInfo | null>(null);
+const extra = shallowRef<unknown[]>([]);
 const now = ref(serverTime());
 let waitSeconds = 0;
 
@@ -41,9 +59,13 @@ watch(
   },
 );
 
+function send(cmd: string, args: CommandArg[]) {
+  game.sendDialogCommand(cmd, state.value.bid, param.value, args);
+}
+
 function reloadBuildingInfo() {
   const s = state.value;
-  game.sendDialogCommand('getBuildingInfo', s.bid, param.value, [s.inner, s.x, s.y, s.bid]);
+  send('getBuildingInfo', [s.inner, s.x, s.y, s.bid]);
 }
 
 const unregister = game.addDialogReceiver({
@@ -52,6 +74,7 @@ const unregister = game.addDialogReceiver({
     if (!Array.isArray(data)) return;
     current.value = parseBuildingInfo(data[0]);
     next.value = parseBuildingInfo(data[1]);
+    extra.value = data.slice(2);
   },
 });
 
@@ -80,7 +103,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <FxCanvas :x="x" :y="y" :w="682" :h="166" style-name="PanelGreyGreen">
+  <FxCanvas :x="x" :y="y" :w="682" :h="h" style-name="PanelGreyGreen">
     <FxImage :x="218" :y="11" source="images/title.png" />
     <FxLabel
       :x="266"
@@ -107,5 +130,6 @@ onUnmounted(() => {
       @hide="game.closeDialog()"
       @destroy-panel="emit('destroyPanel', $event)"
     />
+    <slot :extra="extra" :now="now" :send="send" :reload="reloadBuildingInfo" />
   </FxCanvas>
 </template>

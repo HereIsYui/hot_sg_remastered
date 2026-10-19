@@ -136,6 +136,7 @@ async function startServer(): Promise<string> {
       PORT: String(SERVER_PORT),
       DATABASE_URL: NEW_DB_URL,
       TICK_ENABLED: 'false',
+      TICK_DEBUG_ENDPOINT: 'true',
       // Same identity as docker/legacy/php/db.php, echoed by loadGlobalData.
       SERVER_MARK: 'legacy',
       SERVER_NAME: 'legacy',

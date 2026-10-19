@@ -13,6 +13,8 @@ const schema = z.object({
   LANG_FILE: z.string().default(resolve(repoRoot, 'legacy/lang/zh_CN.json')),
   TICK_ENABLED: bool.default(true),
   TICK_INTERVAL_MS: z.coerce.number().int().positive().default(3000),
+  /** POST /api/debug/tick/:order runs one settlement slot; for the differential tests only. */
+  TICK_DEBUG_ENDPOINT: bool.default(false),
   LOG_JSON: bool.default(false),
   /** Server identity and chat endpoints handed to the client by loadGlobalData (config/db.php). */
   SERVER_MARK: z.string().default('hot'),

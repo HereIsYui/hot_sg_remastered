@@ -1,19 +1,61 @@
+import { join } from 'node:path';
 import { LegacyClient } from '../legacy-client.ts';
+import { repoRoot } from '../paths.ts';
+import { capture } from '../run.ts';
 import { canonicalScalar } from './normalize.ts';
 import type { SideDb } from './side-db.ts';
+
+/** cfg_js.php's settlement functions and the server's TickOrder slot porting each. */
+export const TICK_SLOTS = {
+  UpdateUsersCurse: 40,
+  UpdateUsersTechnic: 50,
+  UpdateUsersSoldier: 60,
+  UpdateUsersDeinforce: 70,
+} as const;
+
+export type TickFunction = keyof typeof TICK_SLOTS;
 
 /** An amfphp-style endpoint: `Service.method` called with an argument array. */
 export interface Target {
   call(service: string, method: string, args: unknown[]): Promise<unknown>;
+  /** Runs one settlement function of cfg_js.php now. */
+  tick(fn: TickFunction): Promise<void>;
 }
 
+const LEGACY_COMPOSE = join(repoRoot, 'docker/legacy/docker-compose.yml');
+
 export function legacyTarget(client = new LegacyClient()): Target {
-  return { call: (service, method, args) => client.call(`${service}.${method}`, args) };
+  return {
+    call: (service, method, args) => client.call(`${service}.${method}`, args),
+    async tick(fn) {
+      // cfg_js.php's includes, without the other handlers it calls at the top level.
+      const script = `require_once "BattleFunc.php"; require_once "UtilsExtend.php";
+        require_once "ReportCron.php"; ${fn}();`;
+      const out = capture('docker', [
+        'compose',
+        '-f',
+        LEGACY_COMPOSE,
+        'exec',
+        '-T',
+        '-w',
+        '/var/www/html/server/game',
+        'php',
+        'php',
+        '-r',
+        script,
+      ]);
+      if (/Fatal error|Uncaught/.test(out)) throw new Error(`${fn}: ${out.trim()}`);
+    },
+  };
 }
 
 /** The NestJS gateway mirrors json.php at /api/service/:service/:method. */
 export function newTarget(baseUrl: string): Target {
   return {
+    async tick(fn) {
+      const res = await fetch(`${baseUrl}/api/debug/tick/${TICK_SLOTS[fn]}`, { method: 'POST' });
+      if (!res.ok) throw new Error(`tick ${fn}: HTTP ${res.status} ${await res.text()}`);
+    },
     async call(service, method, args) {
       const res = await fetch(`${baseUrl}/api/service/${service}/${method}`, {
         method: 'POST',
@@ -152,6 +194,11 @@ export class Side {
 
   alias(value: unknown, placeholder: string): void {
     this.aliases.set(String(canonicalScalar(value)), placeholder);
+  }
+
+  /** Runs a cfg_js.php settlement function; its effects show up in the table deltas. */
+  tick(fn: TickFunction): Promise<void> {
+    return this.target.tick(fn);
   }
 
   query<T extends Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {

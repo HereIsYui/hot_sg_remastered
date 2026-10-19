@@ -240,7 +240,57 @@ export const cases: DiffCase[] = [
       await s.command(session, 'startDestroyBuilding', FOREIGN_CITY, 1, 2, 0, 6);
     },
   },
+  {
+    name: 'college researches technics',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const cid = await lastCity(s, session.uid);
+      // The 书院 sits at inner (4, 4); its dialog is addressed by bid 7 and y * 10 + x.
+      const college = async (func: string, ...args: unknown[]) => {
+        await s.dialog(session, cid, 7, 44, func, ...args);
+        technicTimes(s);
+      };
+      // A non-lord 军师 speeds research up and gains exp when it finishes.
+      await s.query('update sys_city_hero set herotype = 0, wisdom_base = 60 where hid = 80213');
+      await s.query('update sys_city set counsellorid = 80213 where cid = ?', [cid]);
+      await college('getBuildingInfo', 1, 4, 4, 7);
+      await college('startUpgradeTechnic', 1);
+      await college('startUpgradeTechnic', 2);
+      await college('stopUpgradeTechnic', 2);
+      await college('stopUpgradeTechnic', 1);
+      await college('startUpgradeTechnic', 99);
+      await college('startUpgradeTechnic', 1);
+      await s.query('update mem_technic_upgrading set state_endtime = unix_timestamp() - 1');
+      await s.tick('UpdateUsersTechnic');
+      const [done] = await s.query<{ level: string }>(
+        'select level from sys_technic where uid = ? and tid = 1 and state = 0',
+        [session.uid],
+      );
+      if (Number(done?.level) !== 1) throw new Error('the tick did not finish the research');
+      await college('getBuildingInfo', 1, 4, 4, 7);
+      await s.query(
+        `insert into sys_technic (cid, tid, uid, level, state) values (?, 21, ?, 6, 0)`,
+        [cid, session.uid],
+      );
+      await s.query('update sys_technic set level = 10 where uid = ? and tid = 1', [session.uid]);
+      await college('startUpgradeTechnic', 1);
+      await college('startUpgradeTechnic', 21);
+      await s.query('update mem_city_resource set gold = 0 where cid = ?', [cid]);
+      await college('startUpgradeTechnic', 3);
+      await s.dialog(session, FOREIGN_CITY, 7, 44, 'startUpgradeTechnic', 2);
+    },
+  },
 ];
+
+/**
+ * A 书院 reply: `[current, next, [technics, colleges]]` inside the dialog envelope. The legacy
+ * technics come in MyISAM row order (11 and 16 swapped on disk), the new ones by tid.
+ */
+function technicTimes(s: Side): void {
+  s.mask(6, 2, 0, '*', 'state_timeleft');
+  s.offset(6, 2, 0, '*', 'state_endtime');
+  s.unordered(6, 2, 0);
+}
 
 /** A city that belongs to someone else in the shipped save. */
 const FOREIGN_CITY = 1;

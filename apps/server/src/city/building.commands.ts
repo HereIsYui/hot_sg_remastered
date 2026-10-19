@@ -1,13 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { sql } from 'kysely';
 import { GameError } from '../common/game-error';
-import { Building } from '../core/city-rules.service';
+import { Building, CityRules } from '../core/city-rules.service';
 import { GoodsRules } from '../core/goods-rules.service';
 import { OwnershipService } from '../core/ownership.service';
 import { phpEmpty, phpFloatString, phpIntval, phpLooseEquals, phpNum } from '../core/php';
 import { UserRules } from '../core/user-rules.service';
 import { DbScope } from '../db/database.module';
 import { DialogCommand, GlobalCommand, type CommandContext } from '../gateway/decorators';
+import { BuildingInfoService } from './building-info.service';
 import { BuildingRules, CITY_TYPE_BIG, type BuildingInfo } from './building-rules.service';
 import { CityBuildingsService } from './city-buildings.service';
 
@@ -76,6 +77,8 @@ export class BuildingCommands {
     private readonly ownership: OwnershipService,
     private readonly users: UserRules,
     private readonly goods: GoodsRules,
+    private readonly cityRules: CityRules,
+    private readonly info: BuildingInfoService,
   ) {}
 
   private async rows(query: ReturnType<typeof sql<Row>>): Promise<Row[]> {
@@ -121,27 +124,16 @@ export class BuildingCommands {
     return ret;
   }
 
-  /**
-   * `[inner, x, y, bid]`: the current and the next level of a building. The extra data of the
-   * buildings with their own dialogs (书院, 兵营, 城墙, ...) is added by those dialogs' ports.
-   */
+  /** `[inner, x, y, bid]`: the current and the next level of a building, plus its dialog's data. */
   @DialogCommand()
-  async getBuildingInfo(ctx: CommandContext, param: unknown[]): Promise<BuildingInfo[]> {
+  async getBuildingInfo(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
     const { uid, cid } = ctx;
     const [inner, x, y, bid] = intParams(param, 4);
     const xy = encodeXy(inner, x, y);
     const current = await this.one(sql<Row>`select * from sys_building
       where cid = ${cid} and xy = ${xy} and bid = ${bid}`);
     if (!current) throw GameError.lang('getBuildingInfo.nobuilding');
-    const level = phpNum(current.level);
-    const building =
-      (await this.one(sql<Row>`select * from cfg_building where bid = ${bid}`)) || {};
-    const hasKaoGongJi = await this.rules.isUsingKaoGongJi(uid, level + 1);
-    const cityType = await this.rules.cityType(cid);
-    return [
-      await this.rules.simpleInfo(uid, cid, building, level, false, cityType),
-      await this.rules.simpleInfo(uid, cid, building, level + 1, hasKaoGongJi, cityType),
-    ];
+    return this.info.buildingInfo(uid, cid, xy, bid, phpNum(current.level));
   }
 
   /** How many buildings may be under construction at once: 2, 5 with 徭役令, 7 with the 高级 one. */
@@ -159,21 +151,6 @@ export class BuildingCommands {
   private async upgradingCount(cid: number): Promise<number> {
     return phpNum(
       await this.cell(sql<Row>`select count(*) from sys_building where cid = ${cid} and state > 0`),
-    );
-  }
-
-  private async addCityResources(
-    cid: number,
-    wood: number,
-    rock: number,
-    iron: number,
-    food: number,
-    gold: number,
-  ): Promise<void> {
-    const [w, r, i, f, g] = [wood, rock, iron, food, gold].map(phpFloatString);
-    await sql`update mem_city_resource set wood = wood + ${w}, rock = rock + ${r},
-      iron = iron + ${i}, food = food + ${f}, gold = gold + ${g} where cid = ${cid}`.execute(
-      this.scope.db,
     );
   }
 
@@ -306,7 +283,7 @@ export class BuildingCommands {
       const timeNeed = phpFloatString(
         (phpNum(need.upgrade_time) * (await this.rules.speedRate(cid))) / GAME_SPEED_RATE,
       );
-      await this.addCityResources(cid, -wood, -rock, -iron, -food, -gold);
+      await this.cityRules.addCityResources(cid, -wood, -rock, -iron, -food, -gold);
       let lastid: unknown;
       if (existing) {
         await sql`update sys_building set bid = ${bid}, state = '1',
@@ -355,7 +332,7 @@ export class BuildingCommands {
         await this.users.logActionCountback(uid, Action.Upgrade);
       }
       await sql`delete from mem_building_upgrading where id = ${building.id}`.execute(db);
-      await this.addCityResources(
+      await this.cityRules.addCityResources(
         cid,
         phpNum(need.upgrade_wood) * 0.66,
         phpNum(need.upgrade_rock) * 0.66,

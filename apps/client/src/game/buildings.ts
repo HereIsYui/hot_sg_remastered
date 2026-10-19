@@ -100,7 +100,7 @@ export function maxBuildingLevel(bid: number, cityType: number, kingLevel: numbe
 }
 
 /** `ResourceRelatedToolTip.setUpgradeTime`: the duration goes through an int. */
-function duration(seconds: number): string {
+export function duration(seconds: number): string {
   return timeLeftText(Math.trunc(Math.trunc(seconds) / GAME_SPEED_RATE), i18n);
 }
 

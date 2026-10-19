@@ -117,6 +117,8 @@ export function maskAt(tree: unknown, path: (string | number)[]): unknown {
 export function offsetOf(value: unknown, ctx: SideContext): unknown {
   const canonical = canonicalScalar(value);
   if (typeof canonical !== 'string' || !/^\d+$/.test(canonical)) return canonical;
+  // 0 stands for "no time set" (e.g. state_endtime of an idle queue).
+  if (Number(canonical) === 0) return canonical;
   const minutes = Math.round((Number(canonical) - ctx.start) / 60);
   return `<now${minutes >= 0 ? '+' : ''}${minutes}m>`;
 }

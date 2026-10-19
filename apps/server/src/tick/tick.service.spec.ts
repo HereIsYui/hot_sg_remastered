@@ -62,4 +62,12 @@ describe('TickService', () => {
     expect(second).toBeNull();
     expect(order.filter((x) => x === 'battle')).toHaveLength(1);
   });
+
+  it('runs a single slot and lets its failure through', async () => {
+    const tick = await tickService();
+    order.length = 0;
+    await expect(tick.runSlot(TickOrder.Trade)).resolves.toEqual(['Handlers.trade']);
+    await expect(tick.runSlot(TickOrder.Troop)).rejects.toThrow('troop exploded');
+    expect(order).toEqual(['trade', 'troop']);
+  });
 });
