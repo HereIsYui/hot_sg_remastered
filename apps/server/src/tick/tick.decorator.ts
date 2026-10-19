@@ -28,6 +28,9 @@ export interface TickHandlerMeta {
   order: number;
 }
 
-/** Runs the decorated method (no arguments, may be async) on every settlement tick. */
+/**
+ * Runs the decorated method (may be async) on every settlement tick; it receives a `TickClock`
+ * only when the debug endpoint runs its slot.
+ */
 export const TickHandler = (order: number) =>
   SetMetadata<string, TickHandlerMeta>(TICK_HANDLER, { order });
