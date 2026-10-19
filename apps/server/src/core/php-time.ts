@@ -15,7 +15,7 @@ function shanghai(ts: number): Date {
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
-/** `date($format, $ts)` for the format characters the game uses: Y m d H i s n j N. */
+/** `date($format, $ts)` for the format characters the game uses: Y m d H G i s n j N w. */
 export function phpDate(format: string, ts: number): string {
   const d = shanghai(Math.trunc(ts));
   let out = '';
@@ -33,6 +33,9 @@ export function phpDate(format: string, ts: number): string {
       case 'H':
         out += pad(d.getUTCHours());
         break;
+      case 'G':
+        out += String(d.getUTCHours());
+        break;
       case 'i':
         out += pad(d.getUTCMinutes());
         break;
@@ -47,6 +50,9 @@ export function phpDate(format: string, ts: number): string {
         break;
       case 'N':
         out += String(d.getUTCDay() === 0 ? 7 : d.getUTCDay());
+        break;
+      case 'w':
+        out += String(d.getUTCDay());
         break;
       default:
         out += ch;

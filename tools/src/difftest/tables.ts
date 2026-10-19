@@ -44,4 +44,5 @@ export const tableRules: Record<string, TableRule> = {
   log_soldier_convert: { offsets: ['time'] },
   sys_city_reinforcequeue: { offsets: ['queuetime', 'state_starttime'] },
   mem_city_reinforce: { offsets: ['state_endtime'] },
+  sys_troops: { offsets: ['endtime'] },
 };

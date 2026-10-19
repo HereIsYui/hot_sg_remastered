@@ -8,6 +8,7 @@ import { DatabaseModule } from './db/database.module';
 import { GatewayModule } from './gateway/gateway.module';
 import { HealthController } from './health/health.controller';
 import { PushModule } from './push/push.module';
+import { RankModule } from './rank/rank.module';
 import { TickModule } from './tick/tick.module';
 import { UserModule } from './user/user.module';
 
@@ -23,6 +24,7 @@ import { UserModule } from './user/user.module';
     AuthModule,
     UserModule,
     CityModule,
+    RankModule,
   ],
   controllers: [HealthController],
 })

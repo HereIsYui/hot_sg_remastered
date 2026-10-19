@@ -13,7 +13,17 @@ import { TICK_HANDLER, type TickHandlerMeta } from './tick.decorator';
 export interface TickHandlerEntry {
   name: string;
   order: number;
-  run: () => unknown;
+  /** Scheduled ticks pass nothing; the debug endpoint may pass a `TickClock`. */
+  run: (clock?: TickClock) => unknown;
+}
+
+/**
+ * The wall-clock hour and weekday a handler gated on `date('G')` / `date('w')` should assume.
+ * Passing one also skips the handler's own "is it time yet" check.
+ */
+export interface TickClock {
+  hour: number;
+  weekday: number;
 }
 
 export interface TickReport {
@@ -85,9 +95,9 @@ export class TickService implements OnApplicationBootstrap, OnApplicationShutdow
   }
 
   /** Runs only the handlers of one `TickOrder` slot, letting their errors through. */
-  async runSlot(order: number): Promise<string[]> {
+  async runSlot(order: number, clock?: TickClock): Promise<string[]> {
     const slot = this.handlers.filter((h) => h.order === order);
-    for (const h of slot) await h.run();
+    for (const h of slot) await h.run(clock);
     return slot.map((h) => h.name);
   }
 
@@ -120,7 +130,10 @@ export class TickService implements OnApplicationBootstrap, OnApplicationShutdow
     for (const wrapper of this.discovery.getProviders()) {
       const instance = wrapper.instance as Record<string, unknown> | undefined;
       if (!instance || typeof instance !== 'object' || !wrapper.isDependencyTreeStatic()) continue;
-      const proto = Object.getPrototypeOf(instance) as Record<string, () => unknown>;
+      const proto = Object.getPrototypeOf(instance) as Record<
+        string,
+        (clock?: TickClock) => unknown
+      >;
       for (const methodName of this.scanner.getAllMethodNames(proto)) {
         const fn = proto[methodName];
         if (typeof fn !== 'function') continue;

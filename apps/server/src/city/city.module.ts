@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { RankModule } from '../rank/rank.module';
 import { BuildingInfoService } from './building-info.service';
 import { BuildingRules } from './building-rules.service';
 import { BuildingCommands } from './building.commands';
@@ -6,6 +7,7 @@ import { CityBuildingsService } from './city-buildings.service';
 import { CityCommandService, CityCommands } from './city.commands';
 import { CityInfoService } from './city-info.service';
 import { CityProductionService } from './city-production.service';
+import { CurseTick } from './curse.tick';
 import { DefenceRules } from './defence-rules.service';
 import { DefenceCommands } from './defence.commands';
 import { DefenceTick } from './defence.tick';
@@ -22,6 +24,7 @@ import { TechnicTick } from './technic.tick';
  * settlements.
  */
 @Module({
+  imports: [RankModule],
   providers: [
     BuildingCommands,
     BuildingInfoService,
@@ -31,6 +34,7 @@ import { TechnicTick } from './technic.tick';
     CityCommandService,
     CityInfoService,
     CityProductionService,
+    CurseTick,
     DefenceCommands,
     DefenceRules,
     DefenceTick,

@@ -10,6 +10,8 @@ export const GameState = {
   ClientVersion: 3,
   MaxOnline: 4,
   OpenTime: 6,
+  /** When HandleUsersRank last rebuilt the rankings. */
+  RankUpdated: 10,
   AdultContent: 18,
   AntiAddiction: 99,
   MaxUsers: 100,

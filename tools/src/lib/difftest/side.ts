@@ -15,11 +15,26 @@ export const TICK_SLOTS = {
 
 export type TickFunction = keyof typeof TICK_SLOTS;
 
+/**
+ * The hour (`date('G')`) and weekday (`date('w')`) a settlement should assume. Giving one also
+ * passes the top-of-the-hour check (`date('is') < 15`) of UpdateUsersCurse.
+ */
+export interface TickClock {
+  hour: number;
+  weekday: number;
+}
+
 /** An amfphp-style endpoint: `Service.method` called with an argument array. */
 export interface Target {
   call(service: string, method: string, args: unknown[]): Promise<unknown>;
   /** Runs one settlement function of cfg_js.php now. */
-  tick(fn: TickFunction): Promise<void>;
+  tick(fn: TickFunction, clock?: TickClock): Promise<void>;
+}
+
+/** ReportCron.php with its clock reads replaced, evaluated in place of the require. */
+function patchedReportCron(clock: TickClock): string {
+  const replace = `array("date('is')", "date('G')", "date('w')"), array("0", "${clock.hour}", "${clock.weekday}")`;
+  return `eval('?>' . str_replace(${replace}, file_get_contents("ReportCron.php")));`;
 }
 
 const LEGACY_COMPOSE = join(repoRoot, 'docker/legacy/docker-compose.yml');
@@ -27,10 +42,14 @@ const LEGACY_COMPOSE = join(repoRoot, 'docker/legacy/docker-compose.yml');
 export function legacyTarget(client = new LegacyClient()): Target {
   return {
     call: (service, method, args) => client.call(`${service}.${method}`, args),
-    async tick(fn) {
-      // cfg_js.php's includes, without the other handlers it calls at the top level.
+    async tick(fn, clock) {
+      // cfg_js.php's includes and the helper it defines for ReportCron.php, without the other
+      // handlers it calls at the top level.
+      const reportCron = clock ? patchedReportCron(clock) : 'require_once "ReportCron.php";';
       const script = `require_once "BattleFunc.php"; require_once "UtilsExtend.php";
-        require_once "ReportCron.php"; ${fn}();`;
+        preg_match('/function getNamePosition\\b.*?(?=function SoBitSo)/s',
+          file_get_contents("cfg_js.php"), $m); eval($m[0]);
+        ${reportCron} ${fn}();`;
       const out = capture('docker', [
         'compose',
         '-f',
@@ -52,8 +71,12 @@ export function legacyTarget(client = new LegacyClient()): Target {
 /** The NestJS gateway mirrors json.php at /api/service/:service/:method. */
 export function newTarget(baseUrl: string): Target {
   return {
-    async tick(fn) {
-      const res = await fetch(`${baseUrl}/api/debug/tick/${TICK_SLOTS[fn]}`, { method: 'POST' });
+    async tick(fn, clock) {
+      const res = await fetch(`${baseUrl}/api/debug/tick/${TICK_SLOTS[fn]}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ clock }),
+      });
       if (!res.ok) throw new Error(`tick ${fn}: HTTP ${res.status} ${await res.text()}`);
     },
     async call(service, method, args) {
@@ -197,8 +220,8 @@ export class Side {
   }
 
   /** Runs a cfg_js.php settlement function; its effects show up in the table deltas. */
-  tick(fn: TickFunction): Promise<void> {
-    return this.target.tick(fn);
+  tick(fn: TickFunction, clock?: TickClock): Promise<void> {
+    return this.target.tick(fn, clock);
   }
 
   query<T extends Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {

@@ -398,6 +398,74 @@ export const cases: DiffCase[] = [
       await s.dialog(session, FOREIGN_CITY, 20, 99, 'startReinforceQueue', 1, 1);
     },
   },
+  {
+    name: 'curse punishes cities and pays rewards',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const [other] = await s.query<{ uid: string; cid: string }>(
+        'select uid, cid from sys_city where uid > 1000 and uid <> ? order by uid limit 1',
+        [uid],
+      );
+      const otherUid = Number(other?.uid);
+      const otherCid = Number(other?.cid);
+      // Starving, broke, over-full and unhappy at once; 2 soldiers lose round(0.4) = none.
+      await s.query(
+        `update mem_city_resource set food = 0, gold = 0, wood = wood_max + 12345.5,
+          people = people_max + 1000, morale = 30 where cid = ?`,
+        [cid],
+      );
+      await s.query('update sys_city_soldier set count = 100 where cid = ? and sid = 1', [cid]);
+      await s.query('update sys_city_soldier set count = 2 where cid = ? and sid = 2', [cid]);
+      // A starving city with an army camped outside gets the army back instead.
+      await s.query('update mem_city_resource set food = 0 where cid = ?', [otherCid]);
+      await s.query(
+        `insert into sys_troops (id, uid, cid, hid, targetcid, state, pathtime, soldiers, resource)
+          values (900001, ?, ?, 0, ?, 4, 600, '', '')`,
+        [otherUid, otherCid, cid],
+      );
+      await s.query(
+        `insert into sys_gather (wid, troopid, fooduse, level, starttime)
+          values (1, 900001, 0, 1, 0)`,
+      );
+      // Disloyal heroes that stay: mt_rand(1, 600) is never below loyalty 1 (0 once the empty
+      // treasury costs a point), and a captive taken within a day is kept. A real desertion
+      // kills the legacy cron (see HeroRules.throwUsersHeroField).
+      await s.query(
+        `insert into sys_city_hero (hid, uid, cid, name, state, level, loyalty, affairs_base,
+            bravery_base, wisdom_base, command_base)
+          values (900001, ?, ?, '甲', 0, 12, 1, 50, 60, 70, 40),
+            (900002, ?, ?, '乙', 5, 3, 20, 10, 20, 30, 5)`,
+        [uid, cid, otherUid, otherCid],
+      );
+      await s.query(
+        'insert into sys_hero_captive (hid, uid, captivetime) values (900002, ?, unix_timestamp())',
+        [uid],
+      );
+      // 联盟排行 is due (sys_user_act state 2) and the player leads the week's honour.
+      await s.query(
+        `insert into sys_union (id, name, leader, creator, member, prestige, intro, announcement)
+          values (900, '测试盟', ?, ?, 1, 10, '', '')`,
+        [uid, uid],
+      );
+      await s.query('update sys_user set union_id = 900, honour = 5000 where uid = ?', [uid]);
+      await s.query(
+        `insert into log_battle_honour (uid, battlefieldid, honour, starttime, battleid,
+            finishtime, quittime, metal)
+          values (?, 1, 300, 0, 1, unix_timestamp(), 0, 0)`,
+        [uid],
+      );
+      await s.query('update sys_user_act set state = 2, con = 1, time = 1 where id = 1');
+      // Saturday 16:00 (hour 8 of the server clock).
+      await s.tick('UpdateUsersCurse', { hour: 8, weekday: 6 });
+      const [left] = await s.query<{ count: string }>(
+        'select count from sys_city_soldier where cid = ? and sid = 1',
+        [cid],
+      );
+      if (Number(left?.count) !== 80) throw new Error('the curse did not take the deserters');
+    },
+  },
 ];
 
 /** A 城墙 reply: `[current, next, defences, queue, space, used]`; the built entry's time runs. */

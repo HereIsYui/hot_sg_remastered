@@ -6,6 +6,7 @@ import { HeroRules } from './hero-rules.service';
 import { MailService } from './mail.service';
 import { OwnershipService } from './ownership.service';
 import { RandomService } from './random.service';
+import { ReportService } from './report.service';
 import { TaskRules } from './task-rules.service';
 import { UserRules } from './user-rules.service';
 
@@ -17,6 +18,7 @@ const providers = [
   MailService,
   OwnershipService,
   RandomService,
+  ReportService,
   TaskRules,
   UserRules,
 ];

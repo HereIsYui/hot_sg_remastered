@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { sql } from 'kysely';
 import { DbScope } from '../db/database.module';
 import { cellOf } from '../db/sql-fragments';
-import { phpFloatString, phpIntval, phpNum } from './php';
+import { phpFloatString, phpIntval, phpNum, phpString } from './php';
 
 /** Building ids (common.php ID_BUILDING_*). */
 export const Building = {
@@ -142,6 +142,42 @@ export class CityRules {
       values (${cid}, ${sid}, 0, ${n}, 9)
       on duplicate key update count = count + ${n}`.execute(db);
     await this.updateCityResourceAdd(cid);
+  }
+
+  /** utils.php::addCitySoldiers: adds (or with `add` false, takes) several soldier types. */
+  async addCitySoldiers(cid: number, soldiers: Map<number, number>, add: boolean): Promise<void> {
+    const db = this.scope.db;
+    for (const [sid, count] of soldiers) {
+      const n = phpFloatString(count);
+      if (add) {
+        await sql`insert into sys_city_soldier (cid, sid, count) values (${cid}, ${sid}, ${n})
+          on duplicate key update count = count + ${n}`.execute(db);
+      } else {
+        await sql`insert into sys_city_soldier (cid, sid, count) values (${cid}, ${sid}, ${`-${n}`})
+          on duplicate key update count = count - ${n}`.execute(db);
+      }
+    }
+    await this.updateCityResourceAdd(cid);
+  }
+
+  /**
+   * cfg_js.php::getNamePosition: `名称（x,y）`, the name being a wild field's terrain for type 0,
+   * a battlefield city for type 4 (as ` 战场【名称】`), otherwise the city's.
+   */
+  async getNamePosition(cid: number, type: number): Promise<string> {
+    const db = this.scope.db;
+    const cell = async (query: ReturnType<typeof sql<{ name: unknown }>>) =>
+      phpString((await query.execute(db)).rows[0]?.name);
+    if (type === 4 && cid > 1000000) {
+      const name = await cell(sql`select name from sys_battle_city where cid = ${cid}`);
+      return ` 战场【${name}】`;
+    }
+    const name =
+      type === 0
+        ? await cell(sql`select c.name from mem_world m left join cfg_world_type c
+            on c.type = m.type where m.wid = ${cid2wid(cid)}`)
+        : await cell(sql`select name from sys_city where cid = ${cid}`);
+    return `${name}（${cid % 1000},${Math.floor(cid / 1000)}）`;
   }
 
   /**

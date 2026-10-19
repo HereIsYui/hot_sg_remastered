@@ -71,6 +71,7 @@ describe('php time (Asia/Shanghai)', () => {
   it('formats and builds timestamps in UTC+8', () => {
     expect(phpDate('Y-m-d H:i:s', 0)).toBe('1970-01-01 08:00:00');
     expect(phpDate('n/j N', 1387090800)).toBe('12/15 7');
+    expect(phpDate('G w', 1387090800)).toBe('15 0');
     expect(phpMktime(16, 0, 0, 4, 10, 2011)).toBe(1302422400);
     expect(phpMktime(16, 0, 0, 12, 15 + 20, 2013)).toBe(phpMktime(16, 0, 0, 1, 4, 2014));
   });
