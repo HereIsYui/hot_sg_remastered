@@ -1,0 +1,71 @@
+shop  商城
+manage用户管理
+announce公告管理
+huodong活动操作
+adm_shop_sale 商城
+cfg_act战争？出征？
+cfg_act_paygift 充值活动？
+cfg_battle_field  战场
+cfg_battle_hero 名将属性
+cfg_box_details 宝藏？？？？
+cfg_building建筑
+cfg_building_level 建筑资源消耗
+cfg_city_npcvalue 校场出征兵shu
+cfg_defence城防数据
+cfg_goods商城宝物
+cfg_guide新手任务
+cfg_guide_group新手引导
+cfg_hero黄金将领
+cfg_hero_expr_reward历练奖励
+cfg_hero_expr_types历练方式选项
+cfg_hero_skill将领技能？？
+cfg_login_reward_goal史诗任务物品？？？
+cfg_name战报
+cfg_nobility爵位城池数
+cfg_npc_hero    npc将领属性
+cfg_office_pos官职
+cfg_pack_goods商品属性？还是......
+cfg_province州
+cfg_recruit_hero活动将领？
+cfg_res_name资源种类？？？？
+cfg_rumor_thing客栈花元宝买将领信息？？？
+cfg_shop商城宝物
+cfg_soldier造兵属性
+cfg_task成长任务
+cfg_task_goal建筑建造限制
+cfg_task_group成长任务信息
+cfg_task_reward成长任务奖励
+cfg_technic书院科技
+cfg_technic_condition科技
+cfg_technic_level科技升级需要资源
+cfg_things应该是和史诗任务有关
+cfg_trick计谋
+cfg_wall城墙
+cfg_world_type野地种类
+huangjin_progress史诗任务种类和任务规格
+huangjin_task_log玩家史诗完成任务的奖励数量
+huangjin_task_log_union同上？？？？？
+log_admin    gm什么的有关？？？？
+log_armor_type什么什么操作？？？
+log_money 和元宝有关
+mem_building_upgrading城市的什么
+mem_city_resource城市资源
+mem_city_schedule城市信息
+mem_hero_blood武将信息？
+mem_maneuver演戏
+mem_state服务器信息
+mem_technic_upgrading城市建筑
+mem_world野地状态
+rank_battle_day玩家什么的
+rank_battle_total战场荣誉
+rank_gongpin玩家史诗奖励数量
+sys_recruit_hero普通武将信息
+sys_goods玩家拥有的宝物
+sys_city_res_add城市资源加成
+sys_city_reinforcequeue城市造兵什么什么的
+sys_city_hero将领属性？？
+sys_city_defence城市士兵数量？
+sys_city有何城市有关
+sys_chat_word 聊天被屏蔽的词语
+rank_user玩家排行
+rank_union联盟排行
