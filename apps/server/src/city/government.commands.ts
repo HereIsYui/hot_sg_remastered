@@ -52,6 +52,32 @@ export class GovernmentCommands {
     private readonly random: RandomService,
   ) {}
 
+  /**
+   * `[cid, food, wood, rock, iron]`: the share of each production's workers put to work; the
+   * output follows on the next getCityProduct. The original took any rate, so a forged request
+   * multiplied the output; rates outside 0..100 are refused like changeTax's.
+   */
+  @GlobalCommand()
+  async setCityProductRate(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const uid = ctx.uid;
+    const cid = phpIntval(param[0]);
+    const own = await this.cell(sql`select 1 from sys_city where uid = ${uid} and cid = ${cid}`);
+    if (own === false) throw GameError.lang('MarkCity.No_Permission');
+    const rates = param.slice(1, 5).map(phpIntval);
+    while (rates.length < 4) rates.push(0);
+    if (rates.some((r) => r < 0 || r > 100)) throw GameError.lang('waigua.invalid');
+    const [food, wood, rock, iron] = rates as [number, number, number, number];
+    await this.scope.transaction(async () => {
+      await sql`update sys_city_res_add set food_rate = ${food}, wood_rate = ${wood},
+          rock_rate = ${rock}, iron_rate = ${iron}, resource_changing = 1
+        where cid = ${cid}`.execute(this.scope.db);
+      for (const [i, rate] of rates.entries()) {
+        if (rate === 100) await this.tasks.completeTask(uid, 219 + i);
+      }
+    });
+    return [];
+  }
+
   /** `[cid, tax]`: 0..100, the city's morale ceiling dropping with it. */
   @GlobalCommand()
   async changeTax(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {

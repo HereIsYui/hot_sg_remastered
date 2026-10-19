@@ -264,7 +264,9 @@ export class Game {
   }
 
   private onCityCommand(command: string, data: unknown): void {
-    if (command === 'changeTax') {
+    if (command === 'setCityProductRate') {
+      gameAlert(i18n('_BloodWarSrc_10'));
+    } else if (command === 'changeTax') {
       gameAlert(i18n('_BloodWarSrc_11'));
     } else if (command === 'changeCityName') {
       gameAlert(String((data as unknown[] | undefined)?.[0] ?? ''));
@@ -408,6 +410,11 @@ export class Game {
     this.session.dialog = building
       ? { name: 'building', building }
       : { name: 'createBuilding', kind };
+  }
+
+  /** `DialogManager.showBuildingListDialog` / `showResourceProductDialog`: replaces any dialog. */
+  showDialog(name: 'buildingList' | 'resourceProduct'): void {
+    this.session.dialog = { name };
   }
 
   /** `DialogManager.showBuildingDialog`: switches to another building's dialog. */

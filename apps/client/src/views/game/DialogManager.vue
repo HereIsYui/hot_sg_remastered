@@ -9,11 +9,13 @@ import {
 import type { BuildingState } from '../../stores/city';
 import { useSessionStore } from '../../stores/session';
 import ArmyDialog from '../army/ArmyDialog.vue';
+import BuildingListDialog from '../building/BuildingListDialog.vue';
 import CreateBuildingDialog from '../building/CreateBuildingDialog.vue';
 import DestroyPanel from '../building/DestroyPanel.vue';
 import UpgradeBuildingDialog from '../building/UpgradeBuildingDialog.vue';
 import CollegeDialog from '../college/CollegeDialog.vue';
 import GovernmentDialog from '../government/GovernmentDialog.vue';
+import ResourceProductDialog from '../government/ResourceProductDialog.vue';
 import WallDialog from '../wall/WallDialog.vue';
 
 /** DialogManager: the dialogs over the scene panels (only one shown at a time). */
@@ -50,6 +52,8 @@ function choose(action: 'all' | 'level') {
       :key="dialog.kind"
       :kind="dialog.kind"
     />
+    <BuildingListDialog v-else-if="dialog?.name === 'buildingList'" />
+    <ResourceProductDialog v-else-if="dialog?.name === 'resourceProduct'" />
     <GovernmentDialog
       v-else-if="dialog?.name === 'building' && ownDialog(dialog.building, BUILDING_GOVERNMENT)"
       :key="`government ${buildingKey}`"

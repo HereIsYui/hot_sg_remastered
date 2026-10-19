@@ -6,9 +6,15 @@ export type Screen = 'loading' | 'login' | 'createRole' | 'game';
 /** Main scene selected in the top bar. */
 export type View = 'cityInner' | 'city' | 'world' | 'battle';
 
-/** `DialogManager.showCreateBuildingDialog(kind)` (0 fields, 1 inner, 2 wall) / `showBuildingDialog`. */
+/**
+ * `DialogManager.showCreateBuildingDialog(kind)` (0 fields, 1 inner, 2 wall), `showBuildingDialog`,
+ * `showBuildingListDialog` and `showResourceProductDialog`.
+ */
 export type DialogState =
-  { name: 'createBuilding'; kind: number } | { name: 'building'; building: BuildingState };
+  | { name: 'createBuilding'; kind: number }
+  | { name: 'building'; building: BuildingState }
+  | { name: 'buildingList' }
+  | { name: 'resourceProduct' };
 
 /** Client-side flow state of BloodWar.as (which top-level view is shown, busy cursor). */
 export const useSessionStore = defineStore('session', {

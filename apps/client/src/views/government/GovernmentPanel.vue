@@ -16,10 +16,18 @@ const game = useGame();
 const city = useCityStore();
 const t = (n: number) => i18n(`Government_GovernmentPanel_${n}_1`);
 
-/** Buttons without an action (建筑总览, 资源生产, 附属野地, 所有城池) open unported dialogs. */
-const buttons: { x: number; label: number; action?: GovernmentAction }[] = [
-  { x: 1, label: 1 },
-  { x: 83, label: 5 },
+/**
+ * `action` opens a pop-up of the 官府, `dialog` another dialog; buttons with neither
+ * (附属野地, 所有城池) open unported dialogs.
+ */
+const buttons: {
+  x: number;
+  label: number;
+  action?: GovernmentAction;
+  dialog?: 'buildingList' | 'resourceProduct';
+}[] = [
+  { x: 1, label: 1, dialog: 'buildingList' },
+  { x: 83, label: 5, dialog: 'resourceProduct' },
   { x: 165, label: 2, action: 'tax' },
   { x: 247, label: 3, action: 'pacify' },
   { x: 329, label: 4, action: 'levy' },
@@ -27,6 +35,11 @@ const buttons: { x: number; label: number; action?: GovernmentAction }[] = [
   { x: 493, label: 16 },
   { x: 575, label: 17 },
 ];
+
+function onButton(b: (typeof buttons)[number]) {
+  if (b.action) emit('open', b.action);
+  else if (b.dialog) game.showDialog(b.dialog);
+}
 
 const rows = computed(() => upgradingRows(city.buildings, props.now, i18n));
 const columns: { header: string; field: keyof UpgradingRow & string; width: number }[] = [
@@ -64,8 +77,8 @@ function onItemClick(row: UpgradingRow) {
       :h="37"
       style-name="ButtonYellow"
       :label="t(b.label)"
-      :enabled="b.action !== undefined"
-      @click="b.action && emit('open', b.action)"
+      :enabled="b.action !== undefined || b.dialog !== undefined"
+      @click="onButton(b)"
     />
     <FxDataGrid
       :x="3"

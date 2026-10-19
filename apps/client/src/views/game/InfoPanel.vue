@@ -267,8 +267,15 @@ const cityIndex = computed({
         :y="31"
         style-name="MyCityBuilding"
         :tip="i18n('UserInfo_InfoPanel_20_1')"
+        @click="game.showDialog('buildingList')"
       />
-      <FxButton :x="218" :y="52" style-name="MyCityLabor" :tip="i18n('UserInfo_InfoPanel_21_1')" />
+      <FxButton
+        :x="218"
+        :y="52"
+        style-name="MyCityLabor"
+        :tip="i18n('UserInfo_InfoPanel_21_1')"
+        @click="game.showDialog('resourceProduct')"
+      />
       <FxButton :x="218" :y="73" style-name="MyCityField" :tip="i18n('UserInfo_InfoPanel_22_1')" />
     </FxCanvas>
 

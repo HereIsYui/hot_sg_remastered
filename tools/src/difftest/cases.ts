@@ -543,6 +543,28 @@ export const cases: DiffCase[] = [
       await s.command(session, 'pacifyPeople', FOREIGN_CITY, 0);
     },
   },
+  {
+    name: 'government sets production rates and reads the building queue item',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await s.command(session, 'setCityProductRate', cid, 100, 100, 100, 100);
+      await s.command(session, 'getCityProduct', cid);
+      await s.command(session, 'setCityProductRate', cid, 50, '60', 70);
+      await s.command(session, 'getCityProduct', cid);
+      await s.command(session, 'setCityProductRate', FOREIGN_CITY, 10, 10, 10, 10);
+
+      await s.command(session, 'getYaoYiLinTime');
+      await s.query('insert into mem_user_buffer (uid, buftype, endtime) values (?, 11, 1)', [uid]);
+      await s.command(session, 'getYaoYiLinTime');
+      await s.query(
+        'update mem_user_buffer set endtime = 2000000000 where uid = ? and buftype = 11',
+        [uid],
+      );
+      await s.command(session, 'getYaoYiLinTime');
+    },
+  },
 ];
 
 /** A 城墙 reply: `[current, next, defences, queue, space, used]`; the built entry's time runs. */
