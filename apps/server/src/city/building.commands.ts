@@ -28,6 +28,12 @@ const Action = { Build: 26, Upgrade: 27 } as const;
 /** 火药筒: demolishes a building completely. */
 const GOODS_FIRE_BARREL = 83;
 
+/** 地变符: turns a resource field into another kind, keeping its level. */
+const GOODS_LAND_CHANGE = 161504;
+
+/** startChangeBuilding's rebuild time in seconds. */
+const CHANGE_TIME = 5;
+
 /** Buildings a city may have more than one of. */
 const MULTIPLE_BUILDINGS = [1, 2, 3, 4, 5, 9, 17];
 
@@ -445,6 +451,42 @@ export class BuildingCommands {
           starttime = unix_timestamp()
         where targetcid = ${cid} and task = 1 and state = 4`.execute(db);
     }
+    return this.buildings.buildingInfo(uid, cid);
+  }
+
+  /**
+   * `[cid, inner, x, y, targetBid, bid]`: rebuilds an idle field as another kind with a 地变符.
+   * The original took any target bid; only the four resource fields are accepted here.
+   */
+  @GlobalCommand()
+  async startChangeBuilding(ctx: CommandContext, param: unknown[]): Promise<Row[]> {
+    const db = this.scope.db;
+    const uid = ctx.uid;
+    const [cid, inner, x, y, targetBid, bid] = Array.from({ length: 6 }, (_, i) =>
+      phpIntval(param[i]),
+    ) as [number, number, number, number, number, number];
+    const xy = encodeXy(inner ? 1 : 0, x, y);
+    await this.ownership.checkCityExist(cid, uid);
+    const building = await this.one(sql<Row>`select * from sys_building
+      where cid = ${cid} and xy = ${xy} and bid = ${bid}`);
+    if (!building) throw GameError.lang('getBuildingInfo.building_error');
+    if (!phpLooseEquals(building.state, 0)) throw GameError.lang('getBuildingInfo.upgrading');
+    if (!(await this.goods.checkGoods(uid, GOODS_LAND_CHANGE))) {
+      throw GameError.raw(`not_enough_goods${GOODS_LAND_CHANGE}`);
+    }
+    if (bid < 1 || bid > 4 || targetBid < 1 || targetBid > 4) {
+      throw GameError.lang('getBuildingInfo.building_error');
+    }
+    await sql`update sys_building set bid = ${targetBid}, state = '1',
+        state_starttime = unix_timestamp(), state_endtime = unix_timestamp() + ${CHANGE_TIME}
+      where cid = ${cid} and xy = ${xy} and bid = ${bid}`.execute(db);
+    await sql`insert into mem_building_upgrading (id, cid, xy, bid, level, state_endtime)
+      values (${building.id}, ${cid}, ${xy}, ${targetBid}, ${building.level},
+        unix_timestamp() + ${CHANGE_TIME})
+      on duplicate key update state_endtime = unix_timestamp() + ${CHANGE_TIME}`.execute(db);
+    await sql`update sys_city_res_add set resource_changing = 1 where cid = ${cid}`.execute(db);
+    await sql`update mem_city_resource set changing = 1 where cid = ${cid}`.execute(db);
+    await this.goods.reduceGoods(uid, GOODS_LAND_CHANGE, 1);
     return this.buildings.buildingInfo(uid, cid);
   }
 

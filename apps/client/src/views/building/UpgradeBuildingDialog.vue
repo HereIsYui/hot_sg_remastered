@@ -144,6 +144,13 @@ onUnmounted(() => {
       @hide="game.closeDialog()"
       @destroy-panel="emit('destroyPanel', $event)"
     />
+    <FxButton
+      v-if="state.bid < 5 && state.state === 0"
+      :x="20"
+      :y="120"
+      :label="i18n('buildingExchangePanel_change_btn')"
+      @click="game.showBuildingExchangePanel(state)"
+    />
     <slot
       :extra="extra"
       :level="current?.level ?? 0"

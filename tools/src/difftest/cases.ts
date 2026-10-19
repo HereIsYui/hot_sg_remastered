@@ -242,6 +242,34 @@ export const cases: DiffCase[] = [
     },
   },
   {
+    name: 'fields change kind with a 地变符',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const cid = await lastCity(s, session.uid);
+      const change = async (...args: number[]) => {
+        await s.command(session, 'startChangeBuilding', cid, ...args);
+        buildingTimes(s);
+      };
+      // The 农田 at field (1, 3).
+      await change(0, 1, 3, 2, 1);
+      await s.query(
+        `insert into sys_goods (uid, gid, count) values (?, 161504, 2)
+          on duplicate key update count = 2`,
+        [session.uid],
+      );
+      await change(0, 1, 3, 2, 3);
+      await change(0, 1, 3, 2, 1);
+      await change(0, 1, 3, 3, 2);
+      await s.command(session, 'startChangeBuilding', FOREIGN_CITY, 0, 1, 3, 2, 1);
+      await s.query(
+        'update sys_building set state_endtime = unix_timestamp() - 1 where cid = ? and xy = 13',
+        [cid],
+      );
+      await s.command(session, 'getCityBuilding', cid);
+      buildingTimes(s);
+    },
+  },
+  {
     name: 'college researches technics',
     run: async (s) => {
       const session = await s.login(EXISTING_PLAYER);

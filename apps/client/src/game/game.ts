@@ -469,15 +469,25 @@ export class Game {
   }
 
   /** The `[cid, inner, x, y, bid]` building commands, acting on `session.currentSlot`. */
-  buildingCommand(command: string, bid: number): void {
+  buildingCommand(command: string, bid: number, targetBid?: number): void {
     const slot = this.session.currentSlot;
     void this.cmd.sendGlobalCommand('city', command, [
       this.city.cid,
       slot.inner ? 1 : 0,
       slot.x,
       slot.y,
+      ...(targetBid === undefined ? [] : [targetBid]),
       bid,
     ]);
+  }
+
+  /**
+   * `DialogManager.showBuildingExchangePanel`: without a field (using a 地变符) it reopens for
+   * the last one, if any.
+   */
+  showBuildingExchangePanel(building?: BuildingState): void {
+    if (building) this.session.exchange = building;
+    if (this.session.exchange) this.session.exchangeOpen = true;
   }
 
   // ---- main screen timer (InfoPanel.startTimer / onTimer) ----

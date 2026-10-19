@@ -9,6 +9,7 @@ import {
 import type { BuildingState } from '../../stores/city';
 import { useSessionStore } from '../../stores/session';
 import ArmyDialog from '../army/ArmyDialog.vue';
+import BuildingExchangePanel from '../building/BuildingExchangePanel.vue';
 import BuildingListDialog from '../building/BuildingListDialog.vue';
 import CreateBuildingDialog from '../building/CreateBuildingDialog.vue';
 import DestroyPanel from '../building/DestroyPanel.vue';
@@ -109,6 +110,13 @@ function choose(action: 'all' | 'level') {
       @all="choose('all')"
       @level="choose('level')"
       @close="destroy = null"
+    />
+    <BuildingExchangePanel
+      v-if="session.exchange"
+      v-show="session.exchangeOpen"
+      :x="(736 - 292) / 2"
+      :y="(556 - 230) / 2 - 30"
+      :building="session.exchange"
     />
   </div>
 </template>
