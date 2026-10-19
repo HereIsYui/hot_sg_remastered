@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { assets, type StyleDecl } from '../assets/registry';
-import { boxStyle, skinSize, skinStyle, styleString, textStyle } from './skin';
+import { boxStyle, cssColor, skinSize, skinStyle, styleString, textStyle } from './skin';
 
 /** mx.controls.NumericStepper: an integer field with up/down arrows, clamped to its range. */
 const props = withDefaults(
@@ -12,8 +12,9 @@ const props = withDefaults(
     maximum?: number;
     styleName?: string;
     fx?: StyleDecl;
+    enabled?: boolean;
   }>(),
-  { minimum: 0, maximum: 10 },
+  { minimum: 0, maximum: 10, enabled: true },
 );
 
 const value = defineModel<number>({ default: 0 });
@@ -26,6 +27,14 @@ const arrow = computed(() => skinSize(styleString(decl.value, 'upArrowUpSkin')) 
 const pressed = ref<'up' | 'down' | null>(null);
 const text = ref(String(value.value));
 watch(value, (v) => (text.value = String(v)));
+/** A new range clamps the value without a change event. */
+watch(
+  () => [props.minimum, props.maximum],
+  () => {
+    const clamped = Math.min(props.maximum, Math.max(props.minimum, value.value));
+    if (clamped !== value.value) value.value = clamped;
+  },
+);
 
 function arrowSkin(which: 'up' | 'down'): string | undefined {
   const phase = pressed.value === which ? 'Down' : 'Up';
@@ -33,6 +42,7 @@ function arrowSkin(which: 'up' | 'down'): string | undefined {
 }
 
 function set(n: number) {
+  if (!props.enabled) return;
   const clamped = Math.min(props.maximum, Math.max(props.minimum, Math.trunc(n)));
   text.value = String(clamped);
   if (clamped === value.value) return;
@@ -57,9 +67,11 @@ function commit() {
       :style="{
         ...skinStyle(border),
         ...textStyle(decl),
+        ...(enabled ? {} : { color: cssColor(decl.disabledColor ?? 0xaab3b3) }),
         width: `${field[0]}px`,
         height: `${field[1]}px`,
       }"
+      :disabled="!enabled"
       autocomplete="off"
       spellcheck="false"
       @change="commit"

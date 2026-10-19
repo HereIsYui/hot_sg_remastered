@@ -51,6 +51,8 @@ export interface ArmyInfo {
   queue: ArmyDraftState[];
   /** sys_soldier_convert: the day's allowance and what was converted of it. */
   convert: { value: number; convert: number };
+  /** cfg_soldier_convert ratios, row `from - 1`, column `to - 1` (`Define.SOLDER_EXCHANGE_RATE`). */
+  rates: unknown[][];
 }
 
 const num = (v: unknown) => Number(v) || 0;
@@ -113,12 +115,15 @@ export function parseArmyInfo(extra: unknown[]): ArmyInfo | null {
   const [soldiers, queue, convert] = extra;
   if (!Array.isArray(soldiers) || !Array.isArray(queue)) return null;
   const allowance = Array.isArray(convert) ? convert[0] : null;
+  const rates =
+    Array.isArray(convert) && Array.isArray(convert[1]) ? (convert[1] as unknown[]) : [];
   return {
     soldiers: soldiers.filter(isRow).map(parseSoldier),
     queue: queue.filter(isRow).map(parseDraft),
     convert: isRow(allowance)
       ? { value: int(allowance.value), convert: int(allowance.convert) }
       : { value: 0, convert: 0 },
+    rates: rates.map((row) => (Array.isArray(row) ? (row as unknown[]) : [])),
   };
 }
 

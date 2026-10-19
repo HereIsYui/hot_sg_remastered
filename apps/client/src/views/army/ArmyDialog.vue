@@ -1,8 +1,12 @@
 <script setup lang="ts">
+import type { CommandArg } from '@hot/shared';
 import { shallowRef } from 'vue';
+import { convertChoices, convertDoneText, type ConvertChoice } from '../../game/soldierConvert';
 import { parseArmyInfo, type ArmySoldierState } from '../../game/soldiers';
 import { i18n } from '../../i18n';
 import { useCityStore, type BuildingState } from '../../stores/city';
+import { useGlobalStore } from '../../stores/global';
+import { showAlert } from '../../ui/alert';
 import FxButton from '../../ui/FxButton.vue';
 import FxLabel from '../../ui/FxLabel.vue';
 import FxTextInput from '../../ui/FxTextInput.vue';
@@ -10,6 +14,7 @@ import UpgradeBuildingDialog from '../building/UpgradeBuildingDialog.vue';
 import ArmyDissolveDialog from './ArmyDissolveDialog.vue';
 import ArmyDraftDialog from './ArmyDraftDialog.vue';
 import ArmyDraftPanel from './ArmyDraftPanel.vue';
+import SoldierChangerPanel from './SoldierChangerPanel.vue';
 
 /** Army.ArmyDialog: the 兵营's upgrade dialog with its draft panel and pop-ups. */
 defineProps<{ x: number; y: number; building: BuildingState }>();
@@ -20,8 +25,47 @@ const CONVERT_CITY_TYPE = 5;
 const CONVERT_MIN_LEVEL = 11;
 
 const city = useCityStore();
+const global = useGlobalStore();
 const drafting = shallowRef<ArmySoldierState | null>(null);
 const dissolving = shallowRef<ArmySoldierState | null>(null);
+/** `showChangePanel`: the soldier lists and allowance as they were when it opened. */
+const changing = shallowRef<{
+  from: ConvertChoice[];
+  to: ConvertChoice[];
+  rates: unknown[][];
+  remain: number;
+} | null>(null);
+/** `lastConvertInfo`: announced with the next reply, whatever it answers. */
+let lastConvert: [number, number, number, number] | null = null;
+
+function showChangePanel(extra: unknown[]) {
+  const info = parseArmyInfo(extra);
+  if (!info) return;
+  changing.value = {
+    ...convertChoices(info.soldiers),
+    rates: info.rates,
+    remain: info.convert.value - info.convert.convert,
+  };
+}
+
+function startConvert(
+  send: (cmd: string, args: CommandArg[]) => void,
+  b: BuildingState,
+  convert: [number, number, number, number],
+) {
+  lastConvert = convert;
+  send('soldierConvert', [b.inner, b.x, b.y, ...convert]);
+  changing.value = null;
+}
+
+function onReply() {
+  if (!lastConvert) return;
+  const [fromSid, fromCount, toSid, toCount] = lastConvert;
+  lastConvert = null;
+  const name = (sid: number) => global.soldierNames[sid] ?? '';
+  const template = i18n('SolderChangePanel_1_9');
+  void showAlert(convertDoneText(template, fromCount, name(fromSid), toCount, name(toSid)));
+}
 </script>
 
 <template>
@@ -31,16 +75,16 @@ const dissolving = shallowRef<ArmySoldierState | null>(null);
     :h="492"
     :building="building"
     @destroy-panel="emit('destroyPanel', $event)"
+    @reply="onReply"
   >
     <template #default="{ extra, level, now, send, reload }">
       <template v-if="city.type === CONVERT_CITY_TYPE && level >= CONVERT_MIN_LEVEL">
-        <!-- SoldierChangerPanel is not ported yet. -->
         <FxButton
           :x="20"
           :y="445"
           style-name="ButtonGreen"
           :label="i18n('SolderChangePanel_1_7')"
-          :enabled="false"
+          @click="showChangePanel(extra)"
         />
         <FxLabel :x="90" :y="450" :text="i18n('SolderChangePanel_1_8')" />
         <FxTextInput
@@ -82,6 +126,12 @@ const dissolving = shallowRef<ArmySoldierState | null>(null);
             send('dissolveSoldier', [building.inner, building.x, building.y, sid, count])
         "
         @close="dissolving = null"
+      />
+      <SoldierChangerPanel
+        v-if="changing"
+        v-bind="changing"
+        @convert="(...c) => startConvert(send, building, c)"
+        @close="changing = null"
       />
     </template>
   </UpgradeBuildingDialog>

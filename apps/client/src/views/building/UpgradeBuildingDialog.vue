@@ -21,7 +21,11 @@ const props = withDefaults(
   defineProps<{ x: number; y: number; h?: number; building: BuildingState }>(),
   { h: 166 },
 );
-const emit = defineEmits<{ destroyPanel: [handlers: { all: () => void; level: () => void }] }>();
+const emit = defineEmits<{
+  destroyPanel: [handlers: { all: () => void; level: () => void }];
+  /** Every building info reply, after it has been shown. */
+  reply: [];
+}>();
 defineSlots<{
   default(props: {
     /** The reply elements after the two levels (e.g. the 书院's technic list). */
@@ -84,6 +88,7 @@ const unregister = game.addDialogReceiver({
     current.value = parseBuildingInfo(data[0]);
     next.value = parseBuildingInfo(data[1]);
     extra.value = data.slice(2);
+    emit('reply');
   },
 });
 
