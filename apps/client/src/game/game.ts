@@ -1,6 +1,6 @@
 import type { CommandArg } from '@hot/shared';
 import type { Pinia } from 'pinia';
-import { inject, type InjectionKey } from 'vue';
+import { inject, reactive, type InjectionKey } from 'vue';
 import { serverTime, syncServerTime } from '../core/clock';
 import { i18n } from '../i18n';
 import { CommandClient, type CommandFailure, type DialogResult } from '../net/command';
@@ -10,6 +10,7 @@ import { useGlobalStore } from '../stores/global';
 import { useSessionStore, type PlainDialog, type View } from '../stores/session';
 import { cityPosition, parseCities, useUserStore } from '../stores/user';
 import { gameAlert, setAlertLabels, showAlert } from '../ui/alert';
+import { GuideManager } from './guide';
 import { loadLoginPrefs, saveLoginPrefs, type LoginPrefs } from './loginPrefs';
 import { HERO_TYPE_KING } from './units';
 
@@ -55,6 +56,7 @@ export class Game {
   readonly global;
   readonly city;
   readonly session;
+  readonly guide = reactive(new GuideManager());
   private queueTimer: ReturnType<typeof setInterval> | undefined;
   private secondTimer: ReturnType<typeof setInterval> | undefined;
   private pollCountdown = { resource: 15, units: 60, time: 600 };
@@ -247,6 +249,7 @@ export class Game {
     if (action === 'user') this.onUserCommand(command, data);
     else if (action === 'city') this.onCityCommand(command, data);
     else if (action === 'openlock') this.onOpenLock(data);
+    else if (action === 'guide' && command === 'getGuidesByGroup') this.guide.onGuides(data);
     else if (action === 'modifypassword') {
       const type = int((data as unknown[] | undefined)?.[0]);
       if (type === 1) gameAlert(i18n('ModifySecondaryPassword_set_succ'));
@@ -269,6 +272,7 @@ export class Game {
       }
     }
     if (command === 'createRole' || command === 'createCity') this.loadUserInfo();
+    if (command === 'createRole') this.session.welcome = true;
   }
 
   private onCityCommand(command: string, data: unknown): void {
@@ -287,6 +291,7 @@ export class Game {
       this.user.cities = parseCities((data as unknown[] | undefined)?.[1]);
     } else if (BUILDING_COMMANDS.has(command)) {
       this.city.applyBuildings(data, this.global.buildingDescriptions);
+      this.guide.triggerByBuildings(this.city.buildings);
     } else if (command === 'getCityInfo' && Array.isArray(data)) {
       const session = this.session;
       if (session.screen !== 'game' || (session.view !== 'city' && session.view !== 'world')) {
@@ -321,6 +326,7 @@ export class Game {
     city.applyDefences(info.shift());
     city.alarm = asRow(info.shift());
     city.applyBuildings(d.shift(), this.global.buildingDescriptions);
+    this.guide.triggerByBuildings(city.buildings);
     city.applyTechnics(d.shift());
     const where = asRow((d.shift() as unknown[] | undefined)?.[0]);
     city.provinceId = int(where?.province);
@@ -577,6 +583,7 @@ export class Game {
       return;
     }
     if (user.ustate === 3 || user.ustate === 4) {
+      this.guide.justCreatedRole = user.ustate === 3;
       this.session.createRoleFirstTime = user.ustate === 3;
       this.session.provinceLoaded = false;
       this.session.screen = 'createRole';
@@ -608,6 +615,12 @@ export class Game {
       face,
       '',
     ]);
+  }
+
+  /** `JackarooDialog.openJackaroo`: 我知道了 starts the guide. */
+  startGuide(): void {
+    this.session.welcome = false;
+    void this.cmd.sendGlobalCommand('guide', 'getGuidesByGroup', [1]);
   }
 
   createCity(cityName: string, province: number): void {

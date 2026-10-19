@@ -721,6 +721,18 @@ export const cases: DiffCase[] = [
       await s.command(session, 'dropTask', 20010);
     },
   },
+  {
+    name: 'guide reads its steps and remembers finished ones',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      await s.command(session, 'getGuidesByGroup', 1);
+      await s.command(session, 'getGuidesByGroup', 2);
+      await s.command(session, 'getGuidesByGroup', 'x');
+      await s.command(session, 'completeGuide', 3);
+      await s.command(session, 'completeGuide', 3);
+      await s.command(session, 'completeGuide', 14);
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {

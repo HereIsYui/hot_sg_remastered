@@ -44,5 +44,7 @@ export const useSessionStore = defineStore('session', {
     /** `City.current_inner` / `current_x` / `current_y`: the slot a building dialog acts on. */
     currentSlot: { inner: true, x: 0, y: 0 },
     dialog: null as DialogState | null,
+    /** JackarooDialog: the welcome shown once a role is created. */
+    welcome: false,
   }),
 });
