@@ -5,6 +5,7 @@ import { Building } from '../core/city-rules.service';
 import { phpNum } from '../core/php';
 import { DbScope } from '../db/database.module';
 import { BuildingRules } from './building-rules.service';
+import { DefenceRules } from './defence-rules.service';
 import { SoldierRules } from './soldier-rules.service';
 import { TechnicRules } from './technic-rules.service';
 
@@ -18,12 +19,13 @@ export class BuildingInfoService {
     private readonly rules: BuildingRules,
     private readonly technics: TechnicRules,
     private readonly soldiers: SoldierRules,
+    private readonly defences: DefenceRules,
   ) {}
 
   /**
    * The current and the next level; the buildings with their own dialogs append that dialog's
-   * data (书院 its technics, 兵营 its soldiers, queue and conversions). The other dialogs' data
-   * is added as those dialogs are ported.
+   * data (书院 its technics, 兵营 its soldiers, queue and conversions, 城墙 its defences, queue
+   * and space). The other dialogs' data is added as those dialogs are ported.
    */
   async buildingInfo(
     uid: number,
@@ -46,8 +48,23 @@ export class BuildingInfoService {
       ret.push(await this.soldiers.soldierInfo(uid, cid, xy));
       ret.push(await this.soldiers.draftQueue(cid, xy));
       ret.push(await this.soldiers.convertInfo(cid));
+    } else if (bid === Building.Wall) {
+      ret.push(await this.defences.defenceInfo(uid, cid));
+      ret.push(await this.defences.reinforceQueue(cid));
+      ret.push(await this.defences.cityArea(cid));
+      ret.push(await this.defences.cityAreaOccupied(cid));
     }
     return ret;
+  }
+
+  /** DefenceFunc.php::getWallInfo: the 城墙 after a command. */
+  async wallInfo(uid: number, cid: number): Promise<unknown[]> {
+    const wall = (
+      await sql<Row>`select * from sys_building
+        where cid = ${cid} and bid = ${Building.Wall}`.execute(this.scope.db)
+    ).rows[0];
+    if (!wall) throw GameError.lang('getWallInfo.no_wall');
+    return this.buildingInfo(uid, cid, 0, Building.Wall, phpNum(wall.level));
   }
 
   /** SoldierFunc.php::getArmyInfo: the 兵营 at `xy` after a command. */

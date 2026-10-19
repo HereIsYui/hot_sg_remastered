@@ -80,15 +80,20 @@ export function parseSoldier(r: Row): ArmySoldierState {
     goldNeed: num(r.goldNeed),
     peopleNeed: num(r.peopleNeed),
     draft_time: num(r.draft_time),
-    conditions: Array.isArray(r.conditions)
-      ? r.conditions.filter(isRow).map((c) => ({
-          type: str(c.type),
-          upgradeNeed: str(c.upgradeNeed),
-          currentOwn: str(c.currentOwn),
-          canUpgrade: bool(c.canUpgrade),
-        }))
-      : [],
+    conditions: parseConditions(r.conditions),
   };
+}
+
+/** The `UpgradeCondition` list of a soldier or defence state. */
+export function parseConditions(v: unknown): TechnicCondition[] {
+  return Array.isArray(v)
+    ? v.filter(isRow).map((c) => ({
+        type: str(c.type),
+        upgradeNeed: str(c.upgradeNeed),
+        currentOwn: str(c.currentOwn),
+        canUpgrade: bool(c.canUpgrade),
+      }))
+    : [];
 }
 
 function parseDraft(r: Row): ArmyDraftState {
@@ -140,9 +145,21 @@ export function maxDraftCount(s: ArmySoldierState, city: DraftCity): number {
   return Math.trunc(Math.max(0, Math.min(max, Math.floor(city.people_free / s.peopleNeed))));
 }
 
-/** `ArmySoldierItem.createDraftTip`. */
-export function draftTip(s: ArmySoldierState, city: CityAmounts): ResourceTip {
-  const src = (n: number) => i18n(`Army_ArmySoldierItemSrc_${n}`);
+/** The five unit costs of a soldier or a defence. */
+export type ResourceCosts = Pick<
+  ArmySoldierState,
+  'goldNeed' | 'foodNeed' | 'woodNeed' | 'rockNeed' | 'ironNeed'
+>;
+
+/**
+ * The build tips' rows (ArmySoldierItem / WallDefenceItem `createDraftTip` /
+ * `createReinforceTip`): the conditions, then food, wood, rock, iron and gold labelled `src(2..6)`.
+ */
+export function costRows(
+  s: ResourceCosts & { conditions: TechnicCondition[] },
+  city: CityAmounts,
+  src: (n: number) => string,
+): ResourceTipRow[] {
   const rows: ResourceTipRow[] = s.conditions.map((c) => ({
     type: c.type,
     need: c.upgradeNeed,
@@ -161,21 +178,19 @@ export function draftTip(s: ArmySoldierState, city: CityAmounts): ResourceTip {
       rows.push({ type: src(n), need: String(need), current: String(have), ok: have >= need });
     }
   }
-  return {
-    title: src(1) + s.sname,
-    description: s.description,
-    time: duration(s.draft_time),
-    rows,
-  };
+  return rows;
 }
 
 /**
- * `ArmySoldierItem.createDissolveTip`: a third of each cost back. The original only checks the
- * food cost before the food, wood, rock and iron lines.
+ * The dissolve tips' rows (`createDissolveTip`): a third of each cost back, labelled
+ * `src(13..17)`. The originals only check the food cost before the food, wood, rock and iron
+ * lines.
  */
-export function dissolveTip(s: ArmySoldierState, city: CityAmounts): ResourceTip {
-  const src = (n: number) => i18n(`Army_ArmySoldierItemSrc_${n}`);
-  const rows: ResourceTipRow[] = [];
+export function refundRows(
+  s: ResourceCosts,
+  city: CityAmounts,
+  src: (n: number) => string,
+): ResourceTipRow[] {
   const refunds: [number, number, number, number][] = [
     [s.foodNeed, s.foodNeed, city.food, 13],
     [s.foodNeed, s.woodNeed, city.wood, 14],
@@ -183,22 +198,36 @@ export function dissolveTip(s: ArmySoldierState, city: CityAmounts): ResourceTip
     [s.foodNeed, s.ironNeed, city.iron, 16],
     [s.goldNeed, s.goldNeed, city.gold, 17],
   ];
-  for (const [check, need, have, n] of refunds) {
-    if (check > 0) {
-      rows.push({
-        type: src(n),
-        need: String(Math.trunc(need / 3)),
-        current: String(have),
-        ok: true,
-      });
-    }
-  }
+  return refunds
+    .filter(([check]) => check > 0)
+    .map(([, need, have, n]) => ({
+      type: src(n),
+      need: String(Math.trunc(need / 3)),
+      current: String(have),
+      ok: true,
+    }));
+}
+
+/** `ArmySoldierItem.createDraftTip`. */
+export function draftTip(s: ArmySoldierState, city: CityAmounts): ResourceTip {
+  const src = (n: number) => i18n(`Army_ArmySoldierItemSrc_${n}`);
+  return {
+    title: src(1) + s.sname,
+    description: s.description,
+    time: duration(s.draft_time),
+    rows: costRows(s, city, src),
+  };
+}
+
+/** `ArmySoldierItem.createDissolveTip`. */
+export function dissolveTip(s: ArmySoldierState, city: CityAmounts): ResourceTip {
+  const src = (n: number) => i18n(`Army_ArmySoldierItemSrc_${n}`);
   return {
     title: src(7) + s.sname,
     description: src(8),
     headers: { type: src(9), need: src(10), current: src(11), time: src(12) },
     time: null,
-    rows,
+    rows: refundRows(s, city, src),
   };
 }
 
@@ -221,7 +250,7 @@ export interface ResourceLine {
  * `key(1..5)`, with `amount` of each unit cost.
  */
 export function resourceLines(
-  s: ArmySoldierState,
+  s: ResourceCosts,
   city: CityAmounts,
   key: (n: number) => string,
   amount: (need: number) => number,

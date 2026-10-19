@@ -12,7 +12,13 @@ const props = defineProps<{
   y?: number;
   w?: number;
   h?: number;
-  columns: { header: string; field: keyof T & string; width: number }[];
+  /** `color`: a cell's text colour (an item renderer's binding); the grid's otherwise. */
+  columns: {
+    header: string;
+    field: keyof T & string;
+    width: number;
+    color?: (row: T) => number;
+  }[];
   rows: T[];
 }>();
 
@@ -48,7 +54,12 @@ const line = computed(() => cssColor(decl.value.horizontalGridLineColor));
         borderBottom: `1px solid ${line}`,
       }"
     >
-      <div v-for="c in columns" :key="c.field" class="cell" :style="{ width: `${c.width}px` }">
+      <div
+        v-for="c in columns"
+        :key="c.field"
+        class="cell"
+        :style="{ width: `${c.width}px`, color: c.color ? cssColor(c.color(row)) : undefined }"
+      >
         {{ row[c.field] }}
       </div>
     </div>

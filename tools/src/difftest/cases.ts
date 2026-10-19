@@ -167,6 +167,7 @@ export const cases: DiffCase[] = [
         [1, 2, 0, 6],
         [0, 1, 3, 1],
         [1, 3, 5, 19],
+        [1, 9, 9, 20],
         [1, 0, 0, 6],
       ] as const) {
         await s.dialog(session, cid, bid, y * 10 + x, 'getBuildingInfo', inner, x, y, bid);
@@ -339,7 +340,70 @@ export const cases: DiffCase[] = [
       await s.dialog(session, FOREIGN_CITY, 9, 22, 'startDraftQueue', 1, 2, 2, 1, 1);
     },
   },
+  {
+    name: 'wall builds defences',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const cid = await lastCity(s, session.uid);
+      // The level 15 城墙 sits at inner (9, 9); its dialog is addressed by bid 20 and y * 10 + x.
+      const wall = async (func: string, ...args: unknown[]) => {
+        await s.dialog(session, cid, 20, 99, func, ...args);
+        reinforceTimes(s);
+      };
+      const queued = async (state: number) => {
+        const [row] = await s.query<{ id: string }>(
+          'select id from sys_city_reinforcequeue where cid = ? and state = ? order by id limit 1',
+          [cid, state],
+        );
+        return Number(row?.id ?? 0);
+      };
+      // A 城守 with 内政 speeds building up; 兵法 1 unlocks the second defence.
+      await s.query('update sys_city_hero set affairs_base = 40 where hid = 80213');
+      await s.query('update sys_city set chiefhid = 80213 where cid = ?', [cid]);
+      await s.query('insert into sys_technic (uid, tid, level, cid) values (?, 5, 1, ?)', [
+        session.uid,
+        cid,
+      ]);
+      await wall('getBuildingInfo', 1, 9, 9, 20);
+      await wall('startReinforceQueue', 1, 10);
+      await wall('startReinforceQueue', 2, 5);
+      await wall('startReinforceQueue', 1, 3);
+      await wall('stopReinforceQueue', await queued(0));
+      await wall('startReinforceQueue', 1, 0);
+      await wall('startReinforceQueue', 99, 1);
+      await wall('startReinforceQueue', 3, 1);
+      await wall('startReinforceQueue', 1, 100000);
+      // At level 1 the two entries fill the queue.
+      await s.query('update sys_building set level = 1 where cid = ? and bid = 20', [cid]);
+      await wall('startReinforceQueue', 1, 1);
+      await s.query('update sys_building set level = 15 where cid = ? and bid = 20', [cid]);
+      await s.query('update sys_city_defence set count = 29990 where cid = ? and did = 5', [cid]);
+      await wall('startReinforceQueue', 1, 100);
+      await wall('dissolveDefence', 5, 10);
+      await wall('dissolveDefence', 4, 1);
+      await wall('dissolveDefence', 5, 0);
+      await wall('accReinforceQueue', await queued(1));
+      await s.query('insert into sys_goods (uid, gid, count) values (?, 64, 2)', [session.uid]);
+      await wall('accReinforceQueue', await queued(1));
+      await wall('accReinforceQueue', await queued(1));
+      await wall('accReinforceQueue', await queued(0));
+      await s.query('update mem_city_reinforce set state_endtime = unix_timestamp() - 1');
+      await s.tick('UpdateUsersDeinforce');
+      const [done] = await s.query<{ count: string }>(
+        'select count from sys_city_defence where cid = ? and did = 1',
+        [cid],
+      );
+      if (Number(done?.count) !== 10) throw new Error('the tick did not finish the defences');
+      await wall('getBuildingInfo', 1, 9, 9, 20);
+      await s.dialog(session, FOREIGN_CITY, 20, 99, 'startReinforceQueue', 1, 1);
+    },
+  },
 ];
+
+/** A 城墙 reply: `[current, next, defences, queue, space, used]`; the built entry's time runs. */
+function reinforceTimes(s: Side): void {
+  s.mask(6, 3, '*', 'time_left');
+}
 
 /**
  * A 兵营 reply: `[current, next, soldiers, queue, conversions]`, wrapped with a message by

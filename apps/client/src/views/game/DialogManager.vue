@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, shallowRef, watch } from 'vue';
-import { BUILDING_ARMY, BUILDING_COLLEGE } from '../../game/cityGrid';
+import { BUILDING_ARMY, BUILDING_COLLEGE, BUILDING_WALL } from '../../game/cityGrid';
 import type { BuildingState } from '../../stores/city';
 import { useSessionStore } from '../../stores/session';
 import ArmyDialog from '../army/ArmyDialog.vue';
@@ -8,6 +8,7 @@ import CreateBuildingDialog from '../building/CreateBuildingDialog.vue';
 import DestroyPanel from '../building/DestroyPanel.vue';
 import UpgradeBuildingDialog from '../building/UpgradeBuildingDialog.vue';
 import CollegeDialog from '../college/CollegeDialog.vue';
+import WallDialog from '../wall/WallDialog.vue';
 
 /** DialogManager: the dialogs over the scene panels (only one shown at a time). */
 defineProps<{ x: number; y: number }>();
@@ -54,6 +55,14 @@ function choose(action: 'all' | 'level') {
     <ArmyDialog
       v-else-if="dialog?.name === 'building' && ownDialog(dialog.building, BUILDING_ARMY)"
       :key="`army ${buildingKey}`"
+      :x="0"
+      :y="0"
+      :building="dialog.building"
+      @destroy-panel="destroy = $event"
+    />
+    <WallDialog
+      v-else-if="dialog?.name === 'building' && ownDialog(dialog.building, BUILDING_WALL)"
+      :key="`wall ${buildingKey}`"
       :x="0"
       :y="0"
       :building="dialog.building"
