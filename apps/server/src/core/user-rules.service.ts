@@ -3,7 +3,7 @@ import { sql } from 'kysely';
 import type { LangService } from '../common/lang.service';
 import { DbScope } from '../db/database.module';
 import { cellOf, unixNow } from '../db/sql-fragments';
-import { phpEmpty, phpIntval } from './php';
+import { phpEmpty, phpIntval, phpNum } from './php';
 import { phpDate } from './php-time';
 
 /** utils.php::MakeTimeLeft, e.g. "1小时2分3秒". */
@@ -126,6 +126,36 @@ export class UserRules {
       .set({ rank: Number(rankRow.rows[0]?.v) })
       .where('id', '=', unionId)
       .execute();
+  }
+
+  /** utils.php::logUserAction */
+  async logUserAction(uid: number, aid: number): Promise<void> {
+    const db = this.scope.db;
+    await sql`insert into log_user_action (uid, aid, time)
+      values (${uid}, ${aid}, unix_timestamp())`.execute(db);
+    await sql`insert into log_action_count (uid, aid, count) values (${uid}, ${aid}, 1)
+      on duplicate key update count = count + 1`.execute(db);
+  }
+
+  /** utils.php::logActionCountback: an undone action (e.g. a cancelled build). */
+  async logActionCountback(uid: number, aid: number): Promise<void> {
+    const db = this.scope.db;
+    await sql`insert into log_user_action (uid, aid, time)
+      values (${uid}, ${aid}, unix_timestamp())`.execute(db);
+    await sql`insert into log_action_count (uid, aid, count) values (${uid}, ${aid}, 1)
+      on duplicate key update count = count - 1`.execute(db);
+  }
+
+  /** HeroFunc.php::checkHeroLevel: 君主 cultivation level and the lord hero's level. */
+  async checkHeroLevel(uid: number, userLevel: number, heroLevel: number): Promise<boolean> {
+    const db = this.scope.db;
+    const user = await sql<{ level: unknown }>`select level from sys_user_level
+      where uid = ${uid}`.execute(db);
+    const hero = await sql<{ level: unknown }>`select level from sys_city_hero
+      where uid = ${uid} and herotype = 1000`.execute(db);
+    const mUserLevel = phpEmpty(user.rows[0]?.level) ? 0 : phpNum(user.rows[0]?.level);
+    const mHeroLevel = phpEmpty(hero.rows[0]?.level) ? 0 : phpNum(hero.rows[0]?.level);
+    return mHeroLevel >= heroLevel && mUserLevel >= userLevel;
   }
 
   /** utils.php::sendSysInform */

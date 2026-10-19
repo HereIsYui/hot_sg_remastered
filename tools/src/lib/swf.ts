@@ -14,6 +14,7 @@ export const SKIN_SWFS = [
   'button_up',
   'fight',
   'heroBattleEffect',
+  'scene',
   'skin',
   'trooper',
   'trooperReverse',

@@ -88,24 +88,33 @@ export function sortAt(tree: unknown, path: (string | number)[]): unknown {
   return tree;
 }
 
-/** Replaces the values found at `path` (`'*'` matches every array element) with `<masked>`. */
-export function maskAt(tree: unknown, path: (string | number)[]): unknown {
-  if (path.length === 0) return '<masked>';
+/** Rewrites the values found at `path` (`'*'` matches every array element); missing paths are left alone. */
+export function mapAt(
+  tree: unknown,
+  path: (string | number)[],
+  fn: (value: unknown) => unknown,
+): unknown {
+  if (path.length === 0) return fn(tree);
   const [head, ...rest] = path;
   if (Array.isArray(tree)) {
-    if (head === '*') return tree.map((v) => maskAt(v, rest));
+    if (head === '*') return tree.map((v) => mapAt(v, rest, fn));
     if (typeof head === 'number' && head < tree.length) {
-      return tree.map((v, i) => (i === head ? maskAt(v, rest) : v));
+      return tree.map((v, i) => (i === head ? mapAt(v, rest, fn) : v));
     }
     return tree;
   }
   if (tree !== null && typeof tree === 'object' && String(head) in tree) {
-    return { ...(tree as Row), [String(head)]: maskAt((tree as Row)[String(head)], rest) };
+    return { ...(tree as Row), [String(head)]: mapAt((tree as Row)[String(head)], rest, fn) };
   }
   return tree;
 }
 
-function offsetOf(value: unknown, ctx: SideContext): unknown {
+/** Replaces the values found at `path` with `<masked>`. */
+export function maskAt(tree: unknown, path: (string | number)[]): unknown {
+  return mapAt(tree, path, () => '<masked>');
+}
+
+export function offsetOf(value: unknown, ctx: SideContext): unknown {
   const canonical = canonicalScalar(value);
   if (typeof canonical !== 'string' || !/^\d+$/.test(canonical)) return canonical;
   const minutes = Math.round((Number(canonical) - ctx.start) / 60);

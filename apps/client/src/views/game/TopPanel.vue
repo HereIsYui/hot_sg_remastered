@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { useGame } from '../../game/game';
 import { i18n } from '../../i18n';
+import { useSessionStore } from '../../stores/session';
 import FxButton from '../../ui/FxButton.vue';
 import FxCanvas from '../../ui/FxCanvas.vue';
 import FxImage from '../../ui/FxImage.vue';
@@ -8,10 +9,8 @@ import FxImage from '../../ui/FxImage.vue';
 /** Bar.TopPanel: view switch (inner city / city / world / battle) and the function buttons. */
 defineProps<{ x?: number; y?: number }>();
 
-type View = 'cityInner' | 'city' | 'world' | 'battle';
-const view = ref<View>('cityInner');
-const showLevel = ref(false);
-const showBuild = ref(false);
+const game = useGame();
+const session = useSessionStore();
 </script>
 
 <template>
@@ -21,45 +20,45 @@ const showBuild = ref(false);
       :x="10"
       :y="4"
       style-name="TopButtonCityInner"
-      :selected="view === 'cityInner'"
-      @button-down="view = 'cityInner'"
+      :selected="session.view === 'cityInner'"
+      @button-down="game.gotoView('cityInner')"
     />
     <FxButton
       :x="80"
       :y="4"
       style-name="TopButtonCity"
-      :selected="view === 'city'"
-      @button-down="view = 'city'"
+      :selected="session.view === 'city'"
+      @button-down="game.gotoView('city')"
     />
     <FxButton
       :x="150"
       :y="4"
       style-name="TopButtonWorld"
-      :selected="view === 'world'"
-      @button-down="view = 'world'"
+      :selected="session.view === 'world'"
+      @button-down="game.gotoView('world')"
     />
     <FxButton
       :x="220"
       :y="4"
       style-name="TopButtonBattle"
-      :selected="view === 'battle'"
-      @button-down="view = 'battle'"
+      :selected="session.view === 'battle'"
+      @button-down="game.gotoView('battle')"
     />
     <FxButton
       :x="305"
       :y="4"
       style-name="TopButtonBuild"
-      :selected="showBuild"
+      :selected="session.showBuildingList"
       :tip="i18n('Bar_TopPanel_1_1')"
-      @click="showBuild = !showBuild"
+      @click="game.toggleBuildingList()"
     />
     <FxButton
       :x="407"
       :y="4"
       style-name="TopButtonLevel"
-      :selected="showLevel"
+      :selected="session.showLevel"
       :tip="i18n('Bar_TopPanel_2_1')"
-      @click="showLevel = !showLevel"
+      @click="game.toggleShowLevel()"
     />
     <FxButton :x="345" :y="10" style-name="TopButtonCraft" :tip="i18n('Bar_TopPanel_3_1')" />
     <FxButton :x="369" :y="10" style-name="TopButtonTrick" :tip="i18n('Bar_TopPanel_4_1')" />

@@ -152,10 +152,104 @@ export const cases: DiffCase[] = [
       await s.command(session, 'getCityProduct', cid);
     },
   },
+  {
+    name: 'building dialogs describe slots',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const cid = await lastCity(s, session.uid);
+      for (const kind of [0, 1, 2]) {
+        await s.dialog(session, cid, 100, kind, 'getAllValidBuilding', kind);
+      }
+      await s.query('delete from sys_building where cid = ? and bid in (8, 13)', [cid]);
+      await s.dialog(session, cid, 100, 1, 'getAllValidBuilding', 1);
+      for (const [inner, x, y, bid] of [
+        [1, 0, 0, 5],
+        [1, 2, 0, 6],
+        [0, 1, 3, 1],
+        [1, 3, 5, 19],
+        [1, 0, 0, 6],
+      ] as const) {
+        await s.dialog(session, cid, bid, y * 10 + x, 'getBuildingInfo', inner, x, y, bid);
+      }
+      await s.dialog(session, FOREIGN_CITY, 6, 2, 'getBuildingInfo', 1, 2, 0, 6);
+    },
+  },
+  {
+    name: 'building upgrades start and stop',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const cid = await lastCity(s, session.uid);
+      const upgrade = async (...args: number[]) => {
+        await s.command(session, 'startUpgradeBuilding', cid, ...args);
+        buildingTimes(s);
+      };
+      await s.query('update sys_building set level = 3 where cid = ? and xy in (100, 101, 102)', [
+        cid,
+      ]);
+      await s.query('delete from sys_building where cid = ? and xy in (104, 82)', [cid]);
+      await upgrade(1, 0, 0, 5);
+      await upgrade(1, 0, 0, 5);
+      await upgrade(1, 0, 4, 8);
+      await upgrade(1, 0, 1, 5);
+      await s.command(session, 'stopUpgradeBuilding', cid, 1, 0, 0, 5);
+      buildingTimes(s);
+      await s.command(session, 'stopUpgradeBuilding', cid, 1, 0, 4, 8);
+      buildingTimes(s);
+      await upgrade(1, 0, 4, 14);
+      await upgrade(1, 0, 4, 6);
+      await upgrade(1, 5, 5, 5);
+      await upgrade(1, 1, 0, 6);
+      await upgrade(1, 1, 0, 5);
+      await upgrade(0, 1, 3, 1);
+      await upgrade(1, 0, 4, 99);
+      await s.command(session, 'stopUpgradeBuilding', cid, 1, 0, 2, 5);
+      await upgrade(1, 0, 2, 5);
+      await s.query('update sys_building set level = 1 where cid = ? and bid = 6', [cid]);
+      await upgrade(0, 8, 2, 1);
+      await s.query('update mem_city_resource set wood = 0 where cid = ?', [cid]);
+      await upgrade(1, 0, 4, 8);
+      await s.command(session, 'startUpgradeBuilding', FOREIGN_CITY, 1, 0, 0, 5);
+    },
+  },
+  {
+    name: 'building demolitions start and stop',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const cid = await lastCity(s, session.uid);
+      const destroy = async (func: string, ...args: number[]) => {
+        await s.command(session, func, cid, ...args);
+        buildingTimes(s);
+      };
+      await destroy('startDestroyBuilding', 1, 0, 0, 5);
+      await destroy('startDestroyBuilding', 1, 0, 0, 5);
+      await destroy('startDestroyBuilding', 1, 0, 1, 5);
+      await destroy('startDestroyBuilding', 1, 0, 2, 5);
+      await destroy('stopDestroyBuilding', 1, 0, 0, 5);
+      await destroy('startDestroyBuilding', 1, 2, 0, 6);
+      await destroy('startDestroyBuilding', 1, 0, 3, 6);
+      await destroy('startDestroyBuildingAll', 1, 2, 0, 6);
+      await destroy('startDestroyBuildingAll', 1, 0, 4, 8);
+      await s.query(
+        `insert into sys_goods (uid, gid, count) values (?, 83, 1)
+          on duplicate key update count = 1`,
+        [session.uid],
+      );
+      await destroy('startDestroyBuildingAll', 1, 0, 1, 5);
+      await destroy('startDestroyBuildingAll', 1, 9, 9, 20);
+      await destroy('startDestroyBuildingAll', 1, 0, 4, 8);
+      await s.command(session, 'startDestroyBuilding', FOREIGN_CITY, 1, 2, 0, 6);
+    },
+  },
 ];
 
 /** A city that belongs to someone else in the shipped save. */
 const FOREIGN_CITY = 1;
+
+/** A getCityBuilding-style reply: seconds left move with the clock, end times are now + duration. */
+function buildingTimes(s: Side): void {
+  s.mask(4, '*', 'state_timeleft');
+  s.offset(4, '*', 'state_endtime');
+}
 
 async function lastCity(side: Side, uid: number): Promise<number> {
   const [row] = await side.query<{ lastcid: string }>(

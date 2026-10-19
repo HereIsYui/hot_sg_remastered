@@ -4,6 +4,7 @@ import { assets } from '../assets/registry';
 import { flexHtml } from '../core/flexHtml';
 import { alertState, closeAlert } from './alert';
 import FxButton from './FxButton.vue';
+import ResourceTip from './ResourceTip.vue';
 import { cssColor, skinStyle, styleString, textStyle } from './skin';
 import { tooltip } from './tooltip';
 
@@ -57,7 +58,13 @@ const tipStyle = computed(() => ({
       </div>
     </div>
 
-    <div v-if="tooltip.visible" class="tooltip" :style="tipStyle">
+    <ResourceTip
+      v-if="tooltip.visible && tooltip.resource"
+      :tip="tooltip.resource"
+      :x="tooltip.x"
+      :y="tooltip.y"
+    />
+    <div v-else-if="tooltip.visible" class="tooltip" :style="tipStyle">
       <span v-if="tooltip.html" v-html="flexHtml(tooltip.html)" />
       <template v-else>{{ tooltip.text }}</template>
     </div>

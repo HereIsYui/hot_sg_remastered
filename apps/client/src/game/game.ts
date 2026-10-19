@@ -1,12 +1,13 @@
+import type { CommandArg } from '@hot/shared';
 import type { Pinia } from 'pinia';
 import { inject, type InjectionKey } from 'vue';
 import { serverTime, syncServerTime } from '../core/clock';
 import { i18n } from '../i18n';
-import { CommandClient, type CommandFailure } from '../net/command';
+import { CommandClient, type CommandFailure, type DialogResult } from '../net/command';
 import { LoginService, type LoginResult } from '../net/login';
-import { useCityStore } from '../stores/city';
+import { useCityStore, type BuildingState } from '../stores/city';
 import { useGlobalStore } from '../stores/global';
-import { useSessionStore } from '../stores/session';
+import { useSessionStore, type View } from '../stores/session';
 import { cityPosition, parseCities, useUserStore } from '../stores/user';
 import { gameAlert, setAlertLabels, showAlert } from '../ui/alert';
 import { loadLoginPrefs, saveLoginPrefs, type LoginPrefs } from './loginPrefs';
@@ -30,6 +31,12 @@ const BUILDING_COMMANDS = new Set([
   'startChangeBuilding',
 ]);
 
+/** A dialog waiting for replies (`isTarget` / `onData` of the original dialogs). */
+export interface DialogReceiver {
+  isTarget(receiverId: number, receiverParam: number): boolean;
+  onData(data: unknown, ttype: number): void;
+}
+
 const asRow = (v: unknown): Row | null =>
   v && typeof v === 'object' && !Array.isArray(v) ? (v as Row) : null;
 const int = (v: unknown) => parseInt(String(v), 10) || 0;
@@ -50,6 +57,7 @@ export class Game {
   private pollCountdown = { resource: 15, units: 60, time: 600 };
   private buildingWait = { seconds: 0, slot: '' };
   private showingFault = false;
+  private readonly dialogReceivers = new Set<DialogReceiver>();
 
   constructor(pinia: Pinia, loginService = new LoginService(), cmd?: CommandClient) {
     this.user = useUserStore(pinia);
@@ -68,7 +76,7 @@ export class Game {
         }),
         {
           global: (action, command, data) => this.onGlobalCommand(action, command, data),
-          dialog: () => {},
+          dialog: (result) => this.onDialogCommand(result),
           city: (type, data) => this.onCityInfoCommand(type, data),
           failure: (f) => this.onFailure(f),
           malformed: (source) =>
@@ -84,6 +92,7 @@ export class Game {
   async showLogin(): Promise<void> {
     this.stopTimer();
     this.city.$reset();
+    this.session.dialog = null;
     this.session.screen = 'login';
     setAlertLabels({
       ok: i18n('Login_LoginDialogSrc_4'),
@@ -191,6 +200,30 @@ export class Game {
 
   // ---- command routing (BloodWar.onGlobalCommand) ----
 
+  /** Registers an open dialog for its replies; returns the unregister function. */
+  addDialogReceiver(receiver: DialogReceiver): () => void {
+    this.dialogReceivers.add(receiver);
+    return () => this.dialogReceivers.delete(receiver);
+  }
+
+  /** `DialogManager.childOnCommand`: every dialog the reply is addressed to gets it. */
+  private onDialogCommand(result: DialogResult): void {
+    for (const receiver of [...this.dialogReceivers]) {
+      if (receiver.isTarget(result.receiverId, result.receiverParam)) {
+        receiver.onData(result.data, result.ttype);
+      }
+    }
+  }
+
+  sendDialogCommand(
+    command: string,
+    receiverId: number,
+    receiverParam: number,
+    args: CommandArg[],
+  ): void {
+    void this.cmd.sendDialogCommand(command, receiverId, receiverParam, args);
+  }
+
   onGlobalCommand(action: string, command: string, data: unknown): void {
     if (action === 'user') this.onUserCommand(command, data);
     else if (action === 'city') this.onCityCommand(command, data);
@@ -218,8 +251,17 @@ export class Game {
     } else if (BUILDING_COMMANDS.has(command)) {
       this.city.applyBuildings(data, this.global.buildingDescriptions);
     } else if (command === 'getCityInfo' && Array.isArray(data)) {
-      this.session.screen = 'game';
+      const session = this.session;
+      if (session.screen !== 'game' || (session.view !== 'city' && session.view !== 'world')) {
+        session.view = 'cityInner';
+      }
+      session.screen = 'game';
       this.onGetCityInfo([...(data as unknown[])]);
+      if (!session.buildingListOpened && this.city.buildings.length > 0) {
+        session.buildingListOpened = true;
+        session.showBuildingList = !session.showBuildingList;
+        session.showLevel = !session.showLevel;
+      }
     }
   }
 
@@ -307,6 +349,56 @@ export class Game {
   /** `BloodWar.getCityBuilding`. */
   refreshBuildings(): void {
     void this.cmd.sendGlobalCommand('city', 'getCityBuilding', [this.user.cid]);
+  }
+
+  // ---- city views (TopPanel / CityInnerPanel / CityPanel) ----
+
+  /** `BloodWar.gotoCityInner` / `gotoCity` / ...: switching scenes closes all dialogs. */
+  gotoView(view: View): void {
+    this.session.view = view;
+    this.session.dialog = null;
+  }
+
+  /** `TopPanel.onLevelClick`. */
+  toggleShowLevel(): void {
+    this.session.showLevel = !this.session.showLevel;
+  }
+
+  /** `TopPanel.onBuildClick`. */
+  toggleBuildingList(): void {
+    this.session.showBuildingList = !this.session.showBuildingList;
+  }
+
+  /**
+   * Click on a building slot (`CityInnerPanel` / `CityPanel.onMouseDown`): the building dialog
+   * for an existing building, otherwise the create dialog of that kind of slot.
+   */
+  openBuildingSlot(
+    slot: { inner: boolean; x: number; y: number },
+    kind: number,
+    building: BuildingState | undefined,
+  ): void {
+    if (this.session.dialog) return;
+    this.session.currentSlot = slot;
+    this.session.dialog = building
+      ? { name: 'building', building }
+      : { name: 'createBuilding', kind };
+  }
+
+  closeDialog(): void {
+    this.session.dialog = null;
+  }
+
+  /** The `[cid, inner, x, y, bid]` building commands, acting on `session.currentSlot`. */
+  buildingCommand(command: string, bid: number): void {
+    const slot = this.session.currentSlot;
+    void this.cmd.sendGlobalCommand('city', command, [
+      this.city.cid,
+      slot.inner ? 1 : 0,
+      slot.x,
+      slot.y,
+      bid,
+    ]);
   }
 
   // ---- main screen timer (InfoPanel.startTimer / onTimer) ----

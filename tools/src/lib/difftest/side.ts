@@ -42,6 +42,8 @@ export interface RecordedResponse {
   unordered: TreePath[];
   /** Values that depend on the moment of the call (e.g. seconds left); `'*'` = any element. */
   masked: TreePath[];
+  /** Times relative to the call (e.g. now + build time); compared as minutes from the case start. */
+  offsets: TreePath[];
 }
 
 /** What a test case drives: records every response and the values to alias before comparing. */
@@ -72,6 +74,7 @@ export class Side {
       value,
       unordered: [],
       masked: [],
+      offsets: [],
     });
     return value;
   }
@@ -99,6 +102,23 @@ export class Side {
     );
   }
 
+  /** A dialog command (type 1); the reply echoes the receiver so the right dialog takes it. */
+  dialog(
+    session: Session,
+    cid: number,
+    receiverId: number,
+    receiverParam: number,
+    func: string,
+    ...args: unknown[]
+  ): Promise<unknown> {
+    return this.service(
+      'Command',
+      'sendCommand',
+      [session.uid, session.sid, 1, cid, receiverId, receiverParam, 0, func, ...args],
+      func,
+    );
+  }
+
   /** CityCommand.sendCommand: the main screen's polling of city data. */
   cityCommand(session: Session, cid: number, type: number): Promise<unknown> {
     return this.service(
@@ -117,6 +137,11 @@ export class Side {
   /** Leaves the values at `path` in the last response out of the comparison. */
   mask(...path: TreePath): void {
     this.last('mask').masked.push(path);
+  }
+
+  /** Compares the times at `path` in the last response relative to the case start. */
+  offset(...path: TreePath): void {
+    this.last('offset').offsets.push(path);
   }
 
   private last(caller: string): RecordedResponse {

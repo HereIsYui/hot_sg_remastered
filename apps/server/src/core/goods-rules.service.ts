@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { sql } from 'kysely';
 import { DbScope } from '../db/database.module';
 import { unixNow } from '../db/sql-fragments';
+import { phpEmpty, phpNum } from './php';
 
 /** Gid 0 in drops means 礼金 (sys_user.gift) instead of an item. */
 const GIFT_GID = 0;
@@ -44,6 +45,32 @@ export class GoodsRules {
       .insertInto('log_goods')
       .values({ uid, gid: target, count, time: unixNow(), type })
       .execute();
+  }
+
+  /** utils.php::checkGoods: owns at least one. */
+  async checkGoods(uid: number, gid: number): Promise<boolean> {
+    const row = await sql<{ count: unknown }>`select count from sys_goods
+      where uid = ${uid} and gid = ${gid}`.execute(this.scope.db);
+    const count = row.rows[0]?.count;
+    return (phpEmpty(count) ? 0 : phpNum(count)) >= 1;
+  }
+
+  /**
+   * utils.php::reduceGoods. The achievements it grants for 110001-159999 and 158 are not
+   * ported, so callers are limited to other gids.
+   */
+  async reduceGoods(uid: number, gid: number, count: number, type = 0): Promise<void> {
+    if (count <= 0) return;
+    if ((gid > 110000 && gid < 160000) || gid === 158) {
+      throw new Error(`reduceGoods(${gid}): achievement hooks not ported`);
+    }
+    const db = this.scope.db;
+    await db
+      .insertInto('log_goods')
+      .values({ uid, gid, count: -count, time: unixNow(), type })
+      .execute();
+    await sql`update sys_goods set count = greatest(0, count - ${count})
+      where uid = ${uid} and gid = ${gid}`.execute(db);
   }
 
   /** utils.php::addThings */

@@ -1,10 +1,40 @@
 import { reactive, type Directive } from 'vue';
 import { DESIGN_WIDTH } from '@hot/shared';
 
-/** Flex `toolTip`: plain text, or Flex htmlText for custom tips (WorldMapTip etc.). */
-export type TipValue = string | { html: string } | null | undefined;
+/** One line of a ResourceRelatedToolTip; `ok` false paints the needed amount red. */
+export interface ResourceTipRow {
+  type: string;
+  need: string;
+  current: string;
+  ok: boolean;
+}
 
-export const tooltip = reactive({ visible: false, text: '', html: '', x: 0, y: 0 });
+/** `Tooltip.ResourceRelatedToolTip`: costs and conditions of building, upgrading, demolishing. */
+export interface ResourceTip {
+  title: string;
+  description: string;
+  /** Column titles and the time label (`setResourceTitle`); the build titles by default. */
+  headers?: { type: string; need: string; current: string; time: string };
+  /** `setUpgradeTime`: the formatted duration, or null to hide the bottom line. */
+  time: string | null;
+  rows: ResourceTipRow[];
+}
+
+/**
+ * Flex `toolTip`: plain text, Flex htmlText for custom tips (WorldMapTip etc.), or a
+ * ResourceRelatedToolTip built when the pointer arrives.
+ */
+export type TipValue =
+  string | { html: string } | { resource: () => ResourceTip | string | null } | null | undefined;
+
+export const tooltip = reactive({
+  visible: false,
+  text: '',
+  html: '',
+  resource: null as ResourceTip | null,
+  x: 0,
+  y: 0,
+});
 
 /** Converts a pointer position to the 1000x600 design coordinates of the enclosing stage. */
 export function stagePoint(
@@ -23,15 +53,22 @@ interface TipElement extends HTMLElement {
   _tipCleanup?: () => void;
 }
 
+/** Pointer events already answered by a nested tip; containers further up leave them alone. */
+const claimed = new WeakSet<Event>();
+
 function show(el: TipElement, e: MouseEvent) {
-  const value = el._tip;
+  if (claimed.has(e)) return;
+  let value: TipValue | ResourceTip = el._tip;
+  if (value && typeof value === 'object' && 'resource' in value) value = value.resource();
   if (!value || (typeof value === 'string' && !value.trim())) {
     tooltip.visible = false;
     return;
   }
+  claimed.add(e);
   const p = stagePoint(el, e.clientX, e.clientY);
   tooltip.text = typeof value === 'string' ? value : '';
-  tooltip.html = typeof value === 'string' ? '' : value.html;
+  tooltip.html = typeof value === 'object' && 'html' in value ? value.html : '';
+  tooltip.resource = typeof value === 'object' && 'rows' in value ? value : null;
   tooltip.x = p.x + 10;
   tooltip.y = p.y + 20;
   tooltip.visible = true;

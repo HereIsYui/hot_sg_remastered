@@ -34,4 +34,7 @@ export const tableRules: Record<string, TableRule> = {
   mem_world: { only: ['wid', 'ownercid', 'type', 'province', 'state'] },
   // Next random city events: midnight + 86400 * rand().
   mem_city_schedule: { ignore: ['next_good_event', 'next_bad_event'] },
+  sys_building: { offsets: ['state_endtime'] },
+  mem_building_upgrading: { offsets: ['state_endtime'] },
+  mem_building_destroying: { offsets: ['state_endtime'] },
 };

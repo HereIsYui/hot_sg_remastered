@@ -16,9 +16,11 @@ import { tableRules } from './difftest/tables.ts';
 import {
   compareTrees,
   diffMultisets,
+  mapAt,
   maskAt,
   normalizeRow,
   normalizeTree,
+  offsetOf,
   sortAt,
   type SideContext,
 } from './lib/difftest/normalize.ts';
@@ -200,7 +202,16 @@ async function runSide(
   return {
     responses: side.responses.map((r) => ({
       label: r.label,
-      value: r.unordered.reduce(sortAt, r.masked.reduce(maskAt, normalizeTree(r.value, ctx))),
+      value: r.unordered.reduce(
+        sortAt,
+        r.masked.reduce(
+          maskAt,
+          normalizeTree(
+            r.offsets.reduce((t, path) => mapAt(t, path, (v) => offsetOf(v, ctx)), r.value),
+            ctx,
+          ),
+        ),
+      ),
     })),
     error,
     deltas,
