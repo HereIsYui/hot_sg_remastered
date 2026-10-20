@@ -388,7 +388,7 @@ export class Game {
   }
 
   /** `BloodWar.onLoadHeroList`: the king's level also shows on the portrait. */
-  private onLoadHeroList(rows: unknown): void {
+  onLoadHeroList(rows: unknown): void {
     this.city.applyHeroes(rows);
     const king = this.city.heroes.find((h) => int(h.herotype) === HERO_TYPE_KING);
     if (king) this.user.kingHeroLevel = int(king.level);
@@ -448,6 +448,12 @@ export class Game {
   /** `DialogManager.showBuildingListDialog` / `showResourceProductDialog` / ...: replaces any dialog. */
   showDialog(name: PlainDialog): void {
     this.session.dialog = { name };
+  }
+
+  /** `TopPanel.onHeroClick` / `DialogManager.showHeroDetailDialog`: the city's heroes reloaded. */
+  showHeroDetail(hid = 0): void {
+    void this.cmd.sendCityCommand(CityInfoType.Hero);
+    this.session.dialog = { name: 'heroDetail', hid };
   }
 
   /** `DialogManager.showOpenLockDialog`: `action` runs once the server accepts the 2级密码. */

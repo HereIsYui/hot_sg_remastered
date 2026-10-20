@@ -147,7 +147,7 @@ export class RankRewards {
     const energymax = 100 + Math.floor(wisdom / 3);
     await sql`insert into mem_hero_blood (hid, \`force\`, force_max, energy, energy_max)
       values (${hid}, ${forcemax}, ${forcemax}, ${energymax}, ${energymax})`.execute(db);
-    await this.heroes.regenerateNewHeroAttri(uid, hid);
+    await this.heroes.regenerateHeroAttri(uid, hid);
     await this.heroes.updateCityHeroChange(uid, cid);
   }
 

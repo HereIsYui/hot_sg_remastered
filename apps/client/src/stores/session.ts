@@ -24,6 +24,7 @@ export type DialogState =
   | { name: 'createBuilding'; kind: number }
   | { name: 'building'; building: BuildingState }
   | { name: 'openLock'; type: string }
+  | { name: 'heroDetail'; hid: number }
   | { name: PlainDialog };
 
 /**

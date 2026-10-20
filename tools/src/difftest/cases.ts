@@ -1156,6 +1156,139 @@ export const cases: DiffCase[] = [
       await s.query('delete from sys_recruit_hero where cid = ? and id > 40002', [cid]);
     },
   },
+  {
+    name: 'hero dialog upgrades, trains, renames, rewards and dismisses heroes',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const hero = (func: string, ...args: unknown[]) => s.command(session, func, cid, ...args);
+      const LORD = 80213;
+      const HERO = 90001;
+      const FAR_FUTURE = 2000000000;
+
+      // The lord wears three pieces of the 龙渊 set: strengthened, smelted, with gems, deified
+      // (+10% 统率) and with an attack addon; 虎符, 勇武 and 马鞭 buffers and a 统率 book.
+      const gear: [spart: number, sid: number, armorid: number][] = [
+        [1, 50956, 53029],
+        [2, 50957, 53030],
+        [11, 50968, 53039],
+      ];
+      for (const [spart, sid, armorid] of gear) {
+        await s.query('insert into sys_hero_armor (hid, spart, sid, armorid) values (?, ?, ?, ?)', [
+          LORD,
+          spart,
+          sid,
+          armorid,
+        ]);
+        await s.query('update sys_user_armor set hid = ? where sid = ?', [LORD, sid]);
+      }
+      await s.query('update sys_user_armor set strong_level = 4 where sid = 50956');
+      await s.query('update sys_user_armor set combine_level = 3 where sid = 50957');
+      await s.query("update sys_user_armor set embed_pearls = '305,0,302' where sid = 50968");
+      await s.query(
+        'insert into sys_user_tie_deify_attribute (attid, sid, value) values (10001, 50956, 10)',
+      );
+      await s.query('insert into sys_armor_addon (sid, attid, value) values (50968, 10008, 10)');
+      for (const buftype of [160040, 3, 19057]) {
+        await s.query(
+          'insert into mem_hero_buffer (hid, buftype, endtime, bufparam) values (?, ?, ?, 0)',
+          [LORD, buftype, FAR_FUTURE],
+        );
+      }
+      await s.query(
+        'insert into sys_user_book (id, bid, uid, hid, level) values (900001, 4, ?, ?, 1)',
+        [uid, LORD],
+      );
+
+      await hero('upgradeHero', LORD);
+      await s.query('update sys_city_hero set exp = 100 where hid = ?', [LORD]);
+      await hero('upgradeHero', LORD);
+      await hero('addHeroPoint', LORD, 3, 3, 3);
+      await hero('addHeroPoint', LORD, 2, 3, 3);
+      await hero('addHeroPoint', LORD, 9, 3, 3);
+      await hero('largessHero', LORD, 1);
+      await hero('dismissHero', LORD);
+      await s.query('delete from sys_goods where uid = ? and gid = 22', [uid]);
+      await hero('clearHeroPoint', LORD);
+      await s.query('insert into sys_goods (uid, gid, count) values (?, 22, 2)', [uid]);
+      await hero('clearHeroPoint', LORD);
+
+      await s.query(
+        `insert into sys_city_hero (hid, uid, name, npcid, sex, face, cid, state, level, exp,
+          command_base, affairs_base, bravery_base, wisdom_base, loyalty, herotype)
+        values (?, ?, '甲乙', 0, 1, 10, ?, 0, 30, 0, 20, 40, 60, 50, 60, 0)`,
+        [HERO, uid, cid],
+      );
+      await s.query(
+        `insert into mem_hero_blood (hid, \`force\`, force_max, energy, energy_max)
+        values (?, 100, 120, 100, 120)`,
+        [HERO],
+      );
+      await hero('upgradeHero', HERO);
+      // Above the cap: put back to 120 although the upgrade fails.
+      await s.query('update sys_city_hero set level = 121 where hid = ?', [HERO]);
+      await hero('upgradeHero', HERO);
+      await s.query('update sys_city_hero set level = 30 where hid = ?', [HERO]);
+
+      for (const name of ['一二三四五', "a'b", '  ', 'A.CN', ' 新名 ']) {
+        await hero('changeHeroName', HERO, name);
+      }
+
+      await s.query('update sys_goods set count = 2 where uid = ? and gid = 30', [uid]);
+      await hero('largessHero', HERO, 1);
+      await hero('largessHero', HERO, 1);
+      s.mask(1); // 15 minutes less the second or two since the last reward
+      const resetLargess = () =>
+        s.query('update mem_hero_schedule set last_largess = 0 where hid = ?', [HERO]);
+      await resetLargess();
+      await s.query('delete from sys_goods where uid = ? and gid = 31', [uid]);
+      await hero('largessHero', HERO, 2);
+      // Gold: the gain is random, the loyalty cap of 100 is not.
+      await s.query('update sys_city_hero set loyalty = 100 where hid = ?', [HERO]);
+      await hero('largessHero', HERO, 0);
+      await resetLargess();
+      await s.query('update mem_city_resource set gold = 100 where cid = ?', [cid]);
+      await hero('largessHero', HERO, 0);
+      await s.query('update mem_city_resource set gold = 1000000 where cid = ?', [cid]);
+      await s.query('update sys_city_hero set bravery_base = 250 where hid = ?', [HERO]);
+      await hero('largessHero', HERO, 0);
+      await s.query('update sys_city_hero set bravery_base = 60 where hid = ?', [HERO]);
+
+      await s.query('update sys_city_hero set state = 1 where hid = ?', [HERO]);
+      await hero('dismissHero', HERO);
+      await s.query('update sys_city_hero set state = 0 where hid = ?', [HERO]);
+      await s.query('update sys_user_armor set hid = ? where sid = 50969', [HERO]);
+      await hero('dismissHero', HERO);
+      await s.query('update sys_user_armor set hid = 0 where sid = 50969');
+
+      // Item bonuses are taken back; the hero goes to the only free wild tile left.
+      await s.query(
+        `insert into sys_city_hero_base_add (hid, uid, type, command_base_add_on,
+          affairs_base_add_on, bravery_base_add_on, wisdom_base_add_on)
+        values (?, ?, 1, 1, 2, 3, 4)`,
+        [HERO, uid],
+      );
+      await s.query(
+        'update sys_city_hero set affairs_base = affairs_base + 2, bravery_base = bravery_base + 3 where hid = ?',
+        [HERO],
+      );
+      const [tile] = await s.query<{ wid: number }>(
+        'select wid from mem_world where ownercid = 0 and type > 1 and state = 0 order by wid limit 1',
+      );
+      const wid = Number(tile?.wid);
+      await s.query('delete from sys_city_hero where uid = 0 and cid = ?', [wid2cid(wid)]);
+      try {
+        await s.query(
+          'update mem_world set state = 100 where ownercid = 0 and type > 1 and state = 0 and wid <> ?',
+          [wid],
+        );
+        await hero('dismissHero', HERO);
+      } finally {
+        await s.query('update mem_world set state = 0 where state = 100');
+      }
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {

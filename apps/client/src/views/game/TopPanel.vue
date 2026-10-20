@@ -62,7 +62,7 @@ const session = useSessionStore();
     />
     <FxButton :x="345" :y="10" style-name="TopButtonCraft" :tip="i18n('Bar_TopPanel_3_1')" />
     <FxButton :x="369" :y="10" style-name="TopButtonTrick" :tip="i18n('Bar_TopPanel_4_1')" />
-    <FxButton :x="436" :y="4" style-name="TopButtonHero" />
+    <FxButton :x="436" :y="4" style-name="TopButtonHero" @click="game.showHeroDetail()" />
     <FxButton :x="500" :y="4" style-name="TopButtonArmy" />
     <FxButton :x="565" :y="4" style-name="TopButtonUnion" />
     <FxButton :x="630" :y="4" style-name="TopButtonMission" @click="game.showDialog('task')" />
