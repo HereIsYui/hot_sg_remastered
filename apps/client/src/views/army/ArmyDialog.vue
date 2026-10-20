@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { CommandArg } from '@hot/shared';
 import { shallowRef } from 'vue';
+import { useGame } from '../../game/game';
 import { convertChoices, convertDoneText, type ConvertChoice } from '../../game/soldierConvert';
 import { parseArmyInfo, type ArmySoldierState } from '../../game/soldiers';
 import { i18n } from '../../i18n';
@@ -24,6 +25,7 @@ const emit = defineEmits<{ destroyPanel: [handlers: { all: () => void; level: ()
 const CONVERT_CITY_TYPE = 5;
 const CONVERT_MIN_LEVEL = 11;
 
+const game = useGame();
 const city = useCityStore();
 const global = useGlobalStore();
 const drafting = shallowRef<ArmySoldierState | null>(null);
@@ -56,6 +58,31 @@ function startConvert(
   lastConvert = convert;
   send('soldierConvert', [b.inner, b.x, b.y, ...convert]);
   changing.value = null;
+}
+
+/**
+ * `ArmyDissolveDialog.onDraft`: disbanding any soldiers takes the 二级密码 first, which replaces
+ * this dialog until it is accepted.
+ */
+function dissolve(
+  send: (cmd: string, args: CommandArg[]) => void,
+  b: BuildingState,
+  sid: number,
+  count: number,
+) {
+  const args = [b.inner, b.x, b.y, sid, count];
+  if (count < 1) {
+    send('dissolveSoldier', args);
+    return;
+  }
+  game.requestUnlock('dismissSoldier', () => {
+    game.showBuildingDialog(
+      city.buildings.find(
+        (o) => o.bid === b.bid && o.inner === b.inner && o.x === b.x && o.y === b.y,
+      ) ?? b,
+    );
+    game.sendDialogCommand('dissolveSoldier', b.bid, b.y * 10 + b.x, args);
+  });
 }
 
 function onReply() {
@@ -121,10 +148,7 @@ function onReply() {
         v-if="dissolving"
         :key="dissolving.sid"
         :soldier="dissolving"
-        @dissolve="
-          (sid, count) =>
-            send('dissolveSoldier', [building.inner, building.x, building.y, sid, count])
-        "
+        @dissolve="(sid, count) => dissolve(send, building, sid, count)"
         @close="dissolving = null"
       />
       <SoldierChangerPanel

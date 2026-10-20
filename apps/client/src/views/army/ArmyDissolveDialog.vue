@@ -38,10 +38,10 @@ function setCount(n: number) {
   countText.value = String(n);
 }
 
-/** The original asks for the 二级密码 (OpenLockDialog) first, which is not ported. */
+/** `onDraft`: the 兵营 asks for the 二级密码 before disbanding any. */
 function onDissolve() {
   emit('close');
-  if (count.value >= 1) emit('dissolve', props.soldier.sid, count.value);
+  emit('dissolve', props.soldier.sid, count.value);
 }
 </script>
 
