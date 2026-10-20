@@ -14,6 +14,7 @@ import { GlobalCommand, type CommandContext } from '../gateway/decorators';
 import type { Row } from '../task/task-goals.service';
 import { TaskRewards } from '../task/task-rewards.service';
 import { BufferGoods } from './buffer-goods.service';
+import { CommittedMessage, DefaultBoxService } from './default-box.service';
 
 /** The useGoods reply kinds (`[gid, kind, ...]`) MyGoodsDialog.onCommand tells apart. */
 const UseReply = { Message: 0, Items: 1 } as const;
@@ -112,13 +113,42 @@ const ANNOUNCED_GIDS = new Set([
 /** A drop candidate: `gid`, weight `rate` and `value`. */
 type DropRate = Row;
 
+/**
+ * Items useGoods handles in a branch of their own that is not ported yet (迁城令, 免战牌, 盟主令,
+ * gear and hero boxes, 武魂, skill books, event items ...); everything else opens as a default
+ * box.
+ */
+const OWN_USE_GIDS = new Set([
+  -100, 12, 14, 15, 50, 119, 121, 122, 145, 146, 147, 150, 153, 156, 158, 161501, 164, 200, 250,
+  1015, 1016, 10013, 10016, 10017, 10072, 10215, 10303, 10304, 10308, 10314, 10417, 10428, 10487,
+  10816, 10931, 10996, 11078, 11227, 11228, 12051, 95, 96, 97, 8893, 8894,
+]);
+const OWN_USE_RANGES: [number, number][] = [
+  [40001, 49999],
+  [19061, 19063],
+  [10932, 10937],
+  [11021, 11022],
+  [10957, 10959],
+  [101, 112],
+  [110001, 159999],
+  [251, 254],
+  [10001, 10012],
+  [10018, 10024],
+  [210001, 249999],
+  [200000, 210000],
+  [8887, 8892],
+];
+const hasOwnUse = (gid: number) =>
+  OWN_USE_GIDS.has(gid) || OWN_USE_RANGES.some(([min, max]) => gid >= min && gid <= max);
+
 const isNewbiePack = (gid: number) =>
   (gid >= 50101 && gid <= 50110) || (gid >= 1000001 && gid <= 1000010);
 const isGiftPack = (gid: number) => gid >= 50000 && gid <= 60000;
 
 /**
  * GoodsFunc.php: the 宝物 list, selling, and using items. Of useGoods the packs, 礼匣, 珠宝匣,
- * 金条, 辎重 and the BufferGoods items are ported; other items answer 此功能尚未开放 for now.
+ * 金条, 辎重, the BufferGoods items and default boxes are ported; the items with a use of their
+ * own still answer 此功能尚未开放.
  */
 @Injectable()
 export class GoodsCommands {
@@ -133,6 +163,7 @@ export class GoodsCommands {
     private readonly ownership: OwnershipService,
     private readonly random: RandomService,
     private readonly buffers: BufferGoods,
+    private readonly defaultBox: DefaultBoxService,
   ) {}
 
   /** `[goods, things]` the player owns, in cfg order. */
@@ -194,7 +225,7 @@ export class GoodsCommands {
     const gid = phpIntval(param[0]);
     const useCount = Math.max(1, phpIntval(param[1]));
     if (useCount >= 100) throw GameError.raw('最高次数为99次！');
-    return this.scope.transaction(async () => {
+    const reply = await this.scope.transaction(async () => {
       const owned = await this.cell(sql`select count from sys_goods
         where uid = ${uid} and gid = ${gid}`);
       const cid = phpIntval(await this.cell(sql`select lastcid from sys_user where uid = ${uid}`));
@@ -206,11 +237,19 @@ export class GoodsCommands {
       if (useCount > 1 && (gid < 40000 || gid > 50000) && !MULTI_USE_GIDS.has(gid)) {
         throw GameError.raw('当前道具没有开启多开功能！');
       }
-      return [gid, ...(await this.use(uid, cid, gid, useCount))];
+      const used = await this.use(uid, cid, gid, useCount);
+      return used instanceof CommittedMessage ? used : [gid, ...used];
     });
+    if (reply instanceof CommittedMessage) throw GameError.raw(reply.text);
+    return reply;
   }
 
-  private async use(uid: number, cid: number, gid: number, useCount: number): Promise<unknown[]> {
+  private async use(
+    uid: number,
+    cid: number,
+    gid: number,
+    useCount: number,
+  ): Promise<unknown[] | CommittedMessage> {
     const usedElsewhere = USED_ELSEWHERE[gid];
     if (usedElsewhere) throw GameError.lang(usedElsewhere);
     if (gid === Box.Copper || gid === Box.CopperKey) {
@@ -243,7 +282,9 @@ export class GoodsCommands {
       throw GameError.raw('这个道具已过期');
     }
     if (isGiftPack(gid)) return [UseReply.Items, await this.openDynamicBox(uid, gid)];
-    throw GameError.lang('useGoods.func_not_in_use');
+    if (hasOwnUse(gid)) throw GameError.lang('useGoods.func_not_in_use');
+    const opened = await this.defaultBox.open(uid, cid, gid);
+    return opened instanceof CommittedMessage ? opened : [UseReply.Items, opened];
   }
 
   /** openDynamicBox: a cfg_pack_goods pack of resources, items, 礼金, things and gear. */

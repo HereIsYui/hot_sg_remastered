@@ -51,6 +51,7 @@ export class TaskRewards {
     withMessage = false,
     logType = TASK_LOG_TYPE,
     moneyLogType = TASK_MONEY_LOG_TYPE,
+    strongLevel = 0,
   ): Promise<string> {
     const type = phpIntval(reward.type);
     const count = phpNum(reward.count);
@@ -76,7 +77,7 @@ export class TaskRewards {
         await this.goods.addThings(uid, type, count, logType);
         return withMessage ? this.gained('gain_things', 'cfg_things', 'tid', type, count) : '';
       case 6:
-        await this.addArmor(uid, type, count, logType);
+        await this.addArmor(uid, type, count, logType, strongLevel);
         return withMessage ? this.gained('gain_armor', 'cfg_armor', 'id', type, count) : '';
       case 10:
         return this.giveTask(uid, type);
@@ -379,24 +380,27 @@ export class TaskRewards {
       on duplicate key update count = count + ${count}`.execute(this.scope.db);
   }
 
-  /** utils.php::addArmor at strength level 0, the cfg_armor row looked up by id. */
-  async addArmor(uid: number, armorid: number, count: number, logType: number): Promise<void> {
+  /** utils.php::addArmor, the cfg_armor row looked up by id. */
+  async addArmor(
+    uid: number,
+    armorid: number,
+    count: number,
+    logType: number,
+    strongLevel = 0,
+  ): Promise<void> {
     if (count === 0) return;
-    if (armorid >= BATTLE_ARMOR.min && armorid <= BATTLE_ARMOR.max) {
-      throw new Error(`addArmor(${armorid}): battlefield opening not ported`);
-    }
     const db = this.scope.db;
     const armor = await this.row(sql`select * from cfg_armor where id = ${armorid}`);
     const strongValue = await this.cell(sql`select strong_value from cfg_strong_probability
-      where level = 0`);
+      where level = ${strongLevel}`);
     for (let i = 0; i < count; i++) {
       await sql`insert into sys_user_armor
           (uid, armorid, hp, hp_max, hid, strong_level, strong_value, combine_level)
         values (${uid}, ${armor?.id ?? ''}, ${phpNum(armor?.ori_hp_max) * 10},
-          ${armor?.ori_hp_max ?? ''}, 0, 0, ${phpEmpty(strongValue) ? 0 : strongValue}, 0)`.execute(
-        db,
-      );
+          ${armor?.ori_hp_max ?? ''}, 0, ${strongLevel},
+          ${phpEmpty(strongValue) ? 0 : strongValue}, 0)`.execute(db);
     }
+    await this.updateBattleOpenState(uid, armorid);
     const did = ARMOR_DESIGNATIONS[armorid];
     if (
       did !== undefined &&
@@ -408,6 +412,28 @@ export class TaskRewards {
     }
     await sql`insert into log_armor (uid, armorid, count, time, type)
       values (${uid}, ${armor?.id ?? ''}, ${count}, unix_timestamp(), ${logType})`.execute(db);
+  }
+
+  /**
+   * utils.php::updateBattleOpenState: owning every medal item of a battlefield's gear opens the
+   * battlefields that depend on it. Opening one is not ported, so that case fails.
+   */
+  private async updateBattleOpenState(uid: number, armorid: number): Promise<void> {
+    if (armorid < BATTLE_ARMOR.min || armorid > BATTLE_ARMOR.max) return;
+    const battle = await this.row(sql`select a.bid, b.battleId from cfg_armor a,
+        sys_battle_open_condition b
+      where a.id = ${armorid} and b.dependBattleId = a.bid`);
+    if (!battle) return;
+    const medal = await this.cell(sql`select a.medalTypeId from cfg_shop a, cfg_things b
+      where a.gid = ${armorid} and a.group = 6 and a.battleGoodsType = 1
+        and a.medalTypeId = b.tid`);
+    const owned = await this.rows(sql`select distinct armorid from sys_user_armor
+      where armorid >= ${BATTLE_ARMOR.min} and armorid <= ${BATTLE_ARMOR.max} and uid = ${uid}`);
+    const missing = await this.check(sql`select 1 from cfg_shop
+      where medalTypeId = ${medal === false ? null : medal} and battleGoodsType = 1
+        ${owned.length ? sql`and gid not in (${sql.join(owned.map((r) => r.armorid))})` : sql``}
+      limit 1`);
+    if (!missing) throw new Error(`addArmor(${armorid}): battlefield opening not ported`);
   }
 
   /** HeroFunc.php::deleteHeroBaseAdd: undoes the hero's attribute bonuses. */

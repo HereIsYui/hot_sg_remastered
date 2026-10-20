@@ -1035,6 +1035,70 @@ export const cases: DiffCase[] = [
       await s.command(session, 'useGoods', 47);
     },
   },
+  {
+    name: 'default boxes give one configured reward',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const give = (gid: number, count: number) =>
+        s.query(
+          `insert into sys_goods (uid, gid, count) values (?, ?, ?)
+            on duplicate key update count = values(count)`,
+          [uid, gid, count],
+        );
+      // The pick is random: all rows of a box but one get no weight.
+      const rates = await s.query<{ id: number; rate: number }>(
+        'select id, rate from cfg_box_details where srctype = 0 and srcid in (1001, 10128, 10144, 10217)',
+      );
+      const pin = (srcid: number, id: number) =>
+        s.query(
+          'update cfg_box_details set rate = if(id = ?, 1, 0) where srctype = 0 and srcid = ?',
+          [id, srcid],
+        );
+      try {
+        await give(10164, 1);
+        await s.command(session, 'useGoods', 10164);
+        await give(161502, 1);
+        await s.command(session, 'useGoods', 161502);
+        await give(161503, 2);
+        await s.command(session, 'useGoods', 161503);
+        await s.command(session, 'useGoods', 161503);
+        await give(10057, 1);
+        await give(10058, 1);
+        await s.command(session, 'useGoods', 10057);
+        for (const gid of [10139, 10137, 10317, 10318]) {
+          await give(gid, 1);
+          await s.command(session, 'useGoods', gid);
+        }
+        await give(24, 1);
+        await s.command(session, 'useGoods', 24);
+
+        // 1001: resources, things, an announced item and a resource the list does not show.
+        for (const id of [203, 204, 222, 223, 209]) {
+          await pin(1001, id);
+          await give(1001, 1);
+          await s.command(session, 'useGoods', 1001);
+        }
+        // 10144: soldiers; 10128: gear three times per player.
+        await pin(10144, 10525);
+        await give(10144, 1);
+        await s.command(session, 'useGoods', 10144);
+        await pin(10128, 10134);
+        for (let i = 0; i < 4; i++) {
+          await give(10128, 1);
+          await s.command(session, 'useGoods', 10128);
+        }
+        // 10217: strengthened gear.
+        await pin(10217, 11469);
+        await give(10217, 1);
+        await s.command(session, 'useGoods', 10217);
+      } finally {
+        for (const { id, rate } of rates) {
+          await s.query('update cfg_box_details set rate = ? where id = ?', [rate, id]);
+        }
+      }
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {
