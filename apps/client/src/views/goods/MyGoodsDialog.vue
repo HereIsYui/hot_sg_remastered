@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue';
-import { endTimeText } from '../../core/clock';
+import { endTimeText, timeLeftText } from '../../core/clock';
 import { useGame } from '../../game/game';
 import {
   GOODS_TAB_COUNT,
@@ -187,7 +187,10 @@ function onSellGoodsSucc(d: unknown[]) {
   gameAlert(src(33));
 }
 
-/** `[gid, kind, ...]`: a message, opened items or an end time; then the list reloads. */
+/**
+ * `[gid, kind, ...]`: a message, opened items, an end time or the nobility a 推恩令 raised to;
+ * then the list reloads.
+ */
 function onUseGoods(d: unknown[]) {
   const gid = parseInt(String(d.shift()), 10);
   const kind = parseInt(String(d.shift()), 10);
@@ -196,6 +199,11 @@ function onUseGoods(d: unknown[]) {
   else if (kind === 2) {
     const text = String(d.shift() ?? '');
     void showAlert(text + endTimeText(parseInt(String(d.shift()), 10)));
+  } else if (kind === 4 || kind === 5) {
+    const left = timeLeftText(parseInt(String(d.shift()), 10) || 0, i18n);
+    const nobility = game.nobilityName(String(d.shift() ?? '0'));
+    const first = kind === 4 ? 1 : 4;
+    void showAlert(src(first) + nobility + src(first + 1) + left + src(first + 2));
   }
   if (REFRESH_CITY_GIDS.has(gid)) game.refreshResource();
   game.guide.triggerByGoods(gid);

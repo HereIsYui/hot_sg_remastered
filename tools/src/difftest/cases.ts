@@ -929,6 +929,112 @@ export const cases: DiffCase[] = [
       await s.command(session, 'useTypeGoods', 44, 10152, cid);
     },
   },
+  {
+    name: 'buff items add timed effects',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const give = (gid: number, count: number) =>
+        s.query(
+          `insert into sys_goods (uid, gid, count) values (?, ?, ?)
+            on duplicate key update count = values(count)`,
+          [uid, gid, count],
+        );
+      /** `[gid, 2, text, endtime]`: the end time is now + duration. */
+      const use = async (gid: number, count?: number) => {
+        await (count === undefined
+          ? s.command(session, 'useGoods', gid)
+          : s.command(session, 'useGoods', gid, count));
+        s.offset(4, 3);
+      };
+      for (const gid of [2, 3, 4, 5, 44, 6, 7, 25, 165, 51, 54, 55, 133, 154, 142, 120, 60, 62]) {
+        await give(gid, 3);
+      }
+      await use(2, 2);
+      await use(3);
+      await use(4);
+      await use(5);
+      await use(44);
+      await use(6, 2);
+      await use(6);
+      await s.query(
+        `insert into mem_user_buffer (uid, buftype, endtime) values (?, 10085, unix_timestamp() + 60)
+          on duplicate key update endtime = values(endtime)`,
+        [uid],
+      );
+      await use(7);
+      await s.query('delete from mem_user_buffer where uid = ? and buftype = 10085', [uid]);
+      await use(7, 2);
+      await give(10085, 1);
+      await use(10085);
+      await use(25, 2);
+      await use(165);
+      await use(51);
+      await use(54);
+      await use(55);
+      await use(133);
+      await use(154);
+      await use(142);
+      await use(142);
+      await use(120);
+      await use(120);
+      await use(60);
+      await use(62);
+      await use(61);
+      await give(56, 3);
+      await use(56, 2);
+      await use(56);
+      await use(56);
+      await give(166, 3);
+      await use(166, 3);
+      await give(10333, 2);
+      await use(10333, 2);
+      await give(10321, 1);
+      await use(10321);
+      await give(10158, 2);
+      await use(10158);
+
+      await give(117, 3);
+      await give(124, 3);
+      await s.query('update sys_user set nobility = 3 where uid = ?', [uid]);
+      await s.command(session, 'useGoods', 117);
+      await s.query('update sys_user set nobility = 18 where uid = ?', [uid]);
+      await s.command(session, 'useGoods', 124);
+      await s.query('update sys_user set nobility = 6 where uid = ?', [uid]);
+      for (const gid of [117, 117, 124, 124]) {
+        await s.command(session, 'useGoods', gid);
+        s.mask(4, 2);
+      }
+
+      await give(57, 2);
+      await give(139, 2);
+      await s.query('update mem_city_resource set people = 10 where cid = ?', [cid]);
+      await s.command(session, 'useGoods', 57);
+      await s.command(session, 'useGoods', 139);
+      await s.query('update mem_city_resource set people = people_max where cid = ?', [cid]);
+      await s.command(session, 'useGoods', 57);
+      await s.command(session, 'useGoods', 139);
+      await give(58, 2);
+      await s.query('update mem_city_resource set morale = 50, complaint = 20 where cid = ?', [
+        cid,
+      ]);
+      await s.command(session, 'useGoods', 58);
+      await s.command(session, 'useGoods', 58);
+
+      await give(134, 2);
+      await s.query('update sys_user set honour = 0 where uid = ?', [uid]);
+      await s.command(session, 'useGoods', 134);
+      await s.query('update sys_user set honour = -50 where uid = ?', [uid]);
+      await s.command(session, 'useGoods', 134);
+      await give(138, 2);
+      await s.query('update mem_user_schedule set today_war_count = 0 where uid = ?', [uid]);
+      await s.command(session, 'useGoods', 138);
+      await s.query('update mem_user_schedule set today_war_count = 3 where uid = ?', [uid]);
+      await s.command(session, 'useGoods', 138);
+      await s.command(session, 'useGoods', 47);
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {

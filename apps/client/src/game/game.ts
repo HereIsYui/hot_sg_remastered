@@ -718,7 +718,8 @@ export class Game {
     return id === '0' ? i18n('_Utils_26') : (this.global.officeposNames[int(id)] ?? '');
   }
 
-  private nobilityName(id: string): string {
+  /** `Utils.getNobilityPos`. */
+  nobilityName(id: string): string {
     return id === '0' ? i18n('_Utils_27') : (this.global.nobilityNames[int(id)] ?? '');
   }
 

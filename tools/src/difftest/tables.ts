@@ -33,7 +33,12 @@ export const tableRules: Record<string, TableRule> = {
   // Random tile: only the ownership change is meaningful, not the tile's terrain.
   mem_world: { only: ['wid', 'ownercid', 'type', 'province', 'state'] },
   // Next random city events: midnight + 86400 * rand().
-  mem_city_schedule: { ignore: ['next_good_event', 'next_bad_event'] },
+  mem_city_schedule: {
+    ignore: ['next_good_event', 'next_bad_event'],
+    offsets: ['last_anming'],
+  },
+  mem_user_buffer: { offsets: ['endtime'] },
+  mem_city_buffer: { offsets: ['endtime'] },
   sys_building: { offsets: ['state_endtime'] },
   mem_building_upgrading: { offsets: ['state_endtime'] },
   mem_building_destroying: { offsets: ['state_endtime'] },

@@ -13,6 +13,7 @@ import { DbScope } from '../db/database.module';
 import { GlobalCommand, type CommandContext } from '../gateway/decorators';
 import type { Row } from '../task/task-goals.service';
 import { TaskRewards } from '../task/task-rewards.service';
+import { BufferGoods } from './buffer-goods.service';
 
 /** The useGoods reply kinds (`[gid, kind, ...]`) MyGoodsDialog.onCommand tells apart. */
 const UseReply = { Message: 0, Items: 1 } as const;
@@ -116,8 +117,8 @@ const isNewbiePack = (gid: number) =>
 const isGiftPack = (gid: number) => gid >= 50000 && gid <= 60000;
 
 /**
- * GoodsFunc.php: the 宝物 list, selling, and using items. Of useGoods only the packs, 礼匣,
- * 珠宝匣, 金条 and 辎重 are ported; other items answer 此功能尚未开放 for now.
+ * GoodsFunc.php: the 宝物 list, selling, and using items. Of useGoods the packs, 礼匣, 珠宝匣,
+ * 金条, 辎重 and the BufferGoods items are ported; other items answer 此功能尚未开放 for now.
  */
 @Injectable()
 export class GoodsCommands {
@@ -131,6 +132,7 @@ export class GoodsCommands {
     private readonly users: UserRules,
     private readonly ownership: OwnershipService,
     private readonly random: RandomService,
+    private readonly buffers: BufferGoods,
   ) {}
 
   /** `[goods, things]` the player owns, in cfg order. */
@@ -223,6 +225,7 @@ export class GoodsCommands {
     if (GEM_BOXES[gid]) return [UseReply.Items, await this.openGemBox(uid, gid)];
     if (GOLD_BARS[gid]) return [UseReply.Message, await this.openGoldBar(uid, cid, gid, useCount)];
     if (RES_BOXES[gid]) return [UseReply.Message, await this.openResBox(uid, cid, gid, useCount)];
+    if (this.buffers.handles(gid)) return this.buffers.use(uid, cid, gid, useCount);
     if (isNewbiePack(gid)) {
       const needLevel = gid >= 1000001 ? gid - 1000000 : gid - 50100;
       const government = await this.cell(sql`select max(b.level) as level
