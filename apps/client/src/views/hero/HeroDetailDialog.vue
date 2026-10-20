@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { serverTime } from '../../core/clock';
+import { SKILL_SPART } from '../../game/armor';
 import { useGame } from '../../game/game';
 import {
   heroDetail,
@@ -25,11 +26,12 @@ import ChangeArmorDialog from './ChangeArmorDialog.vue';
 import ChangeHeroNameDialog from './ChangeHeroNameDialog.vue';
 import HeroArmorPanel from './HeroArmorPanel.vue';
 import { useHeroArmor } from './heroArmor';
+import { useHeroSkill } from './heroSkill';
 import LargessDialog from './LargessDialog.vue';
 
 /**
  * Hero.HeroDetailDialog: the city's heroes, the chosen one's attributes, upgrading, spending
- * and clearing potential, renaming, rewards, dismissal and gear. Skills, item bonuses, the
+ * and clearing potential, renaming, rewards, dismissal, gear and skills. Item bonuses, the
  * 君主 panel and summoning captives are not ported.
  */
 const props = defineProps<{ hid: number }>();
@@ -73,6 +75,7 @@ const hero = computed(() => {
 
 setHero(props.hid);
 const armor = useHeroArmor(hero);
+const skill = useHeroSkill(hero);
 watch(
   () => city.heroes,
   () => setHero(mHid.value),
@@ -413,7 +416,17 @@ const points = computed(() => {
           :fx="{ ...TITLE, color: 16547361 }"
           :text="t(49)"
         />
-        <FxCanvas :x="44" :y="224" :w="65" :h="20" style-name="BoardListDown" />
+        <FxCanvas :x="44" :y="224" :w="65" :h="20" style-name="BoardListDown">
+          <FxLabel
+            :x="0"
+            :y="0"
+            :w="65"
+            style-name="ItemValue"
+            :fx="VALUE"
+            :text="skill.state.value.name"
+            :tip="skill.state.value.description"
+          />
+        </FxCanvas>
         <FxButton
           :x="198"
           :y="222"
@@ -421,7 +434,7 @@ const points = computed(() => {
           :h="28"
           style-name="ButtonYellow"
           :label="t(50)"
-          @click="notYet"
+          @click="skill.onDigest"
         />
 
         <FxLabel
@@ -535,7 +548,7 @@ const points = computed(() => {
         </template>
       </FxCanvas>
 
-      <HeroArmorPanel :x="417" :y="0" :state="armor" />
+      <HeroArmorPanel :x="417" :y="0" :state="armor" :skill="skill" />
     </FxCanvas>
 
     <ChangeHeroNameDialog
@@ -556,6 +569,14 @@ const points = computed(() => {
       :spart="armor.changePart.value"
       @equip="armor.equip"
       @close="armor.changePart.value = null"
+    />
+    <ChangeArmorDialog
+      v-if="skill.choosing.value !== null && hero"
+      :hero="hero"
+      :spart="SKILL_SPART"
+      :skill="skill.choosing.value"
+      @wear="skill.wear"
+      @close="skill.choosing.value = null"
     />
     <ArmorRenovatePayDialog
       v-if="armor.renovate.value"

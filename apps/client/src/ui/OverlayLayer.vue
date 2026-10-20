@@ -6,6 +6,7 @@ import { alertState, closeAlert } from './alert';
 import ArmorTipView from './ArmorTip.vue';
 import FxButton from './FxButton.vue';
 import GoodsTip from './GoodsTip.vue';
+import HeroSkillTip from './HeroSkillTip.vue';
 import PopupMenu from './PopupMenu.vue';
 import ResourceTip from './ResourceTip.vue';
 import { cssColor, skinStyle, styleString, textStyle } from './skin';
@@ -72,6 +73,12 @@ const tipStyle = computed(() => ({
     <GoodsTip
       v-else-if="tooltip.visible && tooltip.goods"
       :tip="tooltip.goods"
+      :x="tooltip.x"
+      :y="tooltip.y"
+    />
+    <HeroSkillTip
+      v-else-if="tooltip.visible && tooltip.skill"
+      :tip="tooltip.skill"
       :x="tooltip.x"
       :y="tooltip.y"
     />

@@ -36,6 +36,7 @@ export type TipValue =
   | { html: string }
   | { resource: () => ResourceTip | string | null }
   | { goods: GoodsTip }
+  | { skill: GoodsTip }
   | { armor: () => ArmorTip | null }
   | null
   | undefined;
@@ -46,6 +47,7 @@ export const tooltip = reactive({
   html: '',
   resource: null as ResourceTip | null,
   goods: null as GoodsTip | null,
+  skill: null as GoodsTip | null,
   armor: null as ArmorTip | null,
   x: 0,
   y: 0,
@@ -89,6 +91,7 @@ function show(el: TipElement, e: MouseEvent) {
   tooltip.html = typeof value === 'object' && 'html' in value ? value.html : '';
   tooltip.resource = typeof value === 'object' && 'rows' in value ? value : null;
   tooltip.goods = typeof value === 'object' && 'goods' in value ? value.goods : null;
+  tooltip.skill = typeof value === 'object' && 'skill' in value ? value.skill : null;
   tooltip.armor = typeof value === 'object' && 'armorTip' in value ? value.armorTip : null;
   tooltip.x = p.x + 10;
   tooltip.y = p.y + 20;

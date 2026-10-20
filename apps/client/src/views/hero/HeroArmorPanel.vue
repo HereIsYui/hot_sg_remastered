@@ -1,16 +1,28 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { ARMOR_SPARTS, armorPartName, EMPTY_ARMOR_IMAGE, SKILL_SPART } from '../../game/armor';
+import { skillImage, skillTip } from '../../game/skill';
 import { i18n } from '../../i18n';
-import { showAlert } from '../../ui/alert';
 import FxButton from '../../ui/FxButton.vue';
 import FxCanvas from '../../ui/FxCanvas.vue';
 import FxImage from '../../ui/FxImage.vue';
 import FxLabel from '../../ui/FxLabel.vue';
+import { showMenu } from '../../ui/menu';
+import { stagePoint, type TipValue } from '../../ui/tooltip';
 import ArmorItemSmall from './ArmorItemSmall.vue';
 import type { HeroArmorState } from './heroArmor';
+import type { HeroSkillControls } from './heroSkill';
 
-/** Hero.HeroArmorPanel: the hero's 16 gear slots over the figure, and the whole-set buttons. */
-const props = defineProps<{ x: number; y: number; state: HeroArmorState }>();
+/**
+ * Hero.HeroArmorPanel: the hero's 16 gear slots over the figure, the skill book slot, and the
+ * whole-set buttons.
+ */
+const props = defineProps<{
+  x: number;
+  y: number;
+  state: HeroArmorState;
+  skill: HeroSkillControls;
+}>();
 
 const SLOTS: [number, number][] = [
   [90, 6],
@@ -32,10 +44,25 @@ const SLOTS: [number, number][] = [
 ];
 const t = (n: number) => i18n(`Hero_HeroArmorPanel_${n}_1`);
 
-/** HeroSkillItemSmall: 技能书 are not ported. */
-function onSkill() {
+const worn = computed(() => props.skill.state.value.worn);
+const skillTipValue = computed<TipValue>(() =>
+  worn.value ? { skill: skillTip(worn.value) } : i18n('Hero_ArmorItemSmall_8_1'),
+);
+
+/** HeroSkillItemSmall.onClick */
+async function onSkill(e: MouseEvent) {
   if (props.state.unhealthy()) return;
-  void showAlert(i18n('NotYetValid'));
+  const empty = !worn.value;
+  const p = stagePoint(e.currentTarget as Element, e.clientX, e.clientY);
+  const action = await showMenu(
+    [
+      { label: i18n('Hero_ArmorItemSmall_3_1'), data: 'equip', enabled: empty },
+      { label: i18n('Hero_ArmorItemSmall_4_1'), data: 'offload', enabled: !empty },
+    ],
+    p.x,
+    p.y,
+  );
+  if (action) props.skill.onSlotAction(action);
 }
 </script>
 
@@ -58,11 +85,13 @@ function onSkill() {
         :y="0"
         :w="32"
         :h="32"
-        :source="EMPTY_ARMOR_IMAGE"
-        :tip="i18n('Hero_ArmorItemSmall_8_1')"
+        :source="worn ? skillImage(worn.skill, worn.level) : EMPTY_ARMOR_IMAGE"
+        :tip="skillTipValue"
+        hand
         @click="onSkill"
       />
       <FxLabel
+        v-if="!worn"
         :x="0"
         :y="8"
         :w="32"

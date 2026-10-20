@@ -20,14 +20,15 @@ import FxButton from '../../ui/FxButton.vue';
 import FxCanvas from '../../ui/FxCanvas.vue';
 import FxImage from '../../ui/FxImage.vue';
 import FxLabel from '../../ui/FxLabel.vue';
+import MySkillDialog from './MySkillDialog.vue';
 import SellGoodsPanel from './SellGoodsPanel.vue';
 import TreasureGetDialog from './TreasureGetDialog.vue';
 import UserGoodsItem from './UserGoodsItem.vue';
 
 /**
  * Goods.MyGoodsDialog: the player's items by kind, 21 to a page, to use or sell. The items
- * with a dialog of their own (迁城令, 免战牌, 旌旗, 名帖, 武魂, 离间符 ...), the skill books, card
- * mixing, recharging and the shop are not ported.
+ * with a dialog of their own (迁城令, 免战牌, 旌旗, 名帖, 武魂, 离间符 ...), card mixing,
+ * recharging and the shop are not ported; the skill books open in a dialog of their own.
  */
 const game = useGame();
 const user = useUserStore();
@@ -66,13 +67,17 @@ const shown = computed(() =>
 );
 const treasure = shallowRef<TreasureItem[] | null>(null);
 const selling = shallowRef<GoodsItem | null>(null);
+const skillOpen = ref(false);
 
 function loadUserGoods() {
   game.sendGlobalCommand('goods', 'loadUserGoods');
 }
 
 function showTab(type: number) {
-  if (type === SKILL_TAB) return;
+  if (type === SKILL_TAB) {
+    skillOpen.value = true;
+    return;
+  }
   if (type !== curType.value) {
     curPage.value = 0;
     curType.value = type;
@@ -231,7 +236,13 @@ const remembered = { type: 0, page: 0 };
 </script>
 
 <template>
-  <FxCanvas :w="682" :h="492" style-name="PanelGreyGreen" :fx="{ fontSize: 12 }">
+  <FxCanvas
+    v-show="!skillOpen"
+    :w="682"
+    :h="492"
+    style-name="PanelGreyGreen"
+    :fx="{ fontSize: 12 }"
+  >
     <FxImage :x="215" :y="15" source="images/title.png" />
     <FxLabel
       :x="264"
@@ -308,4 +319,5 @@ const remembered = { type: 0, page: 0 };
     <TreasureGetDialog v-if="treasure" :items="treasure" @close="treasure = null" />
     <SellGoodsPanel v-if="selling" :goods="selling" @sell="doSellGoods" @close="selling = null" />
   </FxCanvas>
+  <MySkillDialog v-if="skillOpen" @close="skillOpen = false" />
 </template>

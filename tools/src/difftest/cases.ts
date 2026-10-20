@@ -1411,6 +1411,122 @@ export const cases: DiffCase[] = [
       await cmd('offloadAllArmor', LORD);
     },
   },
+  {
+    name: 'hero skills are learnt, books worn and taken off, the shelf grows and books sell',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      // Book lists come without ORDER BY: MyISAM reuses the slots of deleted rows.
+      const BOOK_LISTS: Record<string, number[]> = {
+        loadUserValidSkillBook: [4, 1],
+        loadUserSkillBook: [4, 0],
+      };
+      const cmd = async (func: string, ...args: unknown[]) => {
+        await s.command(session, func, ...args);
+        const at = BOOK_LISTS[func];
+        if (at) s.unordered(...at);
+      };
+      const LORD = 80213;
+      const HERO = 90002;
+      // 运筹帷幄 (skill 4) at levels 1 and 2, 安居乐业 (9, production) and 骁勇善战 (5).
+      const [COMMAND_1, COMMAND_2, HARVEST_1, BRAVERY_3] = [900101, 900102, 900103, 900104];
+
+      await s.query('delete from sys_user_book where uid = ?', [uid]);
+      await s.query('delete from sys_hero_skill where hid in (?, ?)', [LORD, HERO]);
+      await s.query('delete from sys_user_bookshelfnum where uid = ?', [uid]);
+      await s.query('delete from sys_goods where uid = ? and gid = 10668', [uid]);
+      await s.query(
+        `insert into sys_city_hero (hid, uid, name, npcid, sex, face, cid, state, level, exp,
+          command_base, affairs_base, bravery_base, wisdom_base, loyalty, herotype)
+        values (?, ?, '丙丁', 0, 1, 10, ?, 0, 30, 0, 20, 40, 60, 50, 60, 0)`,
+        [HERO, uid, cid],
+      );
+      await s.query(
+        `insert into mem_hero_blood (hid, \`force\`, force_max, energy, energy_max)
+        values (?, 100, 120, 100, 120)`,
+        [HERO],
+      );
+      for (const [id, bid, level] of [
+        [COMMAND_1, 4, 1],
+        [COMMAND_2, 4, 2],
+        [HARVEST_1, 9, 1],
+        [BRAVERY_3, 5, 3],
+      ]) {
+        await s.query(
+          'insert into sys_user_book (id, bid, uid, hid, level) values (?, ?, ?, 0, ?)',
+          [id, bid, uid, level],
+        );
+      }
+
+      await cmd('loadUserValidSkillBook');
+      await cmd('getHeroSkill', LORD);
+      await cmd('resetHeroSkill', cid, LORD);
+      await s.query('insert into sys_goods (uid, gid, count) values (?, 10668, 3)', [uid]);
+      await cmd('resetHeroSkill', cid, 999999);
+      await s.query('update sys_city_hero set state = 1 where hid = ?', [HERO]);
+      await cmd('resetHeroSkill', cid, HERO);
+      await s.query('update sys_city_hero set state = 0 where hid = ?', [HERO]);
+
+      // The new skill is random: only one row of cfg_skill_rate keeps a weight.
+      const rates = await s.query<{ skill_id: number; rate: number }>(
+        'select skill_id, rate from cfg_skill_rate',
+      );
+      const pin = (skill: number) =>
+        s.query('update cfg_skill_rate set rate = if(skill_id = ?, 100, 0)', [skill]);
+      try {
+        await pin(4);
+        await cmd('resetHeroSkill', cid, LORD);
+        await cmd('getHeroSkill', LORD);
+        await cmd('loadUserSkillBook', 4);
+        await cmd('setHeroBook', LORD, HARVEST_1, cid);
+        await cmd('setHeroBook', LORD, 999999, cid);
+        await cmd('setHeroBook', LORD, COMMAND_1, cid);
+        await cmd('getHeroSkill', LORD);
+        await cmd('setHeroBook', LORD, COMMAND_2, cid);
+        await cmd('resetHeroSkill', cid, LORD);
+        await cmd('loadUserSkillBook', 4);
+
+        await pin(9);
+        await cmd('resetHeroSkill', cid, HERO);
+        await cmd('setHeroBook', HERO, COMMAND_1, cid);
+        await cmd('setHeroBook', HERO, HARVEST_1, cid);
+        await cmd('getHeroSkill', HERO);
+        await s.query('update sys_city_hero set state = 1 where hid = ?', [HERO]);
+        await cmd('moveHeroBook', HERO, HARVEST_1, cid);
+        await s.query('update sys_city_hero set state = 0 where hid = ?', [HERO]);
+        await cmd('moveHeroBook', HERO, HARVEST_1, cid);
+        await cmd('moveHeroBook', HERO, HARVEST_1, cid);
+        // The worn book of the same skill only has to exist: the one named is taken off.
+        await cmd('moveHeroBook', LORD, COMMAND_2, cid);
+        await cmd('moveHeroBook', LORD, COMMAND_1, cid);
+        await cmd('getHeroSkill', LORD);
+      } finally {
+        for (const { skill_id, rate } of rates) {
+          await s.query('update cfg_skill_rate set rate = ? where skill_id = ?', [rate, skill_id]);
+        }
+      }
+
+      await cmd('AddSkillBookShelf');
+      await cmd('AddSkillBookShelf');
+      await s.query('update sys_user_bookshelfnum set num = 500 where uid = ?', [uid]);
+      await cmd('AddSkillBookShelf');
+      const [user] = await s.query<{ money: number }>('select money from sys_user where uid = ?', [
+        uid,
+      ]);
+      await s.query('update sys_user set money = 49 where uid = ?', [uid]);
+      await cmd('AddSkillBookShelf');
+      await s.query('update sys_user set money = ? where uid = ?', [user?.money, uid]);
+      await cmd('loadUserValidSkillBook');
+
+      await cmd('sellBook', cid, BRAVERY_3);
+      await cmd('sellBook', cid, BRAVERY_3);
+      await cmd('sellBook', FOREIGN_CITY, HARVEST_1);
+      await s.query('update sys_user_book set hid = ? where id = ?', [LORD, HARVEST_1]);
+      await cmd('sellBook', cid, HARVEST_1);
+      await s.query('update sys_user_book set hid = 0 where id = ?', [HARVEST_1]);
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {

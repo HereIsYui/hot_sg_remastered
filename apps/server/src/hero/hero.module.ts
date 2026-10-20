@@ -5,10 +5,11 @@ import { TaskModule } from '../task/task.module';
 import { ArmorCommands } from './armor.commands';
 import { HeroCommands } from './hero.commands';
 import { HotelCommands } from './hotel.commands';
+import { SkillCommands } from './skill.commands';
 
-/** HotelFunc.php, HeroFunc.php and ArmorFunc.php. */
+/** HotelFunc.php, HeroFunc.php, ArmorFunc.php and HeroSkillFunc.php. */
 @Module({
   imports: [CityModule, GoodsModule, TaskModule],
-  providers: [ArmorCommands, HeroCommands, HotelCommands],
+  providers: [ArmorCommands, HeroCommands, HotelCommands, SkillCommands],
 })
 export class HeroModule {}
