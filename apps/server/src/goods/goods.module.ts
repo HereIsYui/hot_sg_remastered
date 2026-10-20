@@ -10,5 +10,6 @@ import { TypeGoodsCommands } from './type-goods.commands';
 @Module({
   imports: [CityModule, TaskModule],
   providers: [GoodsCommands, TypeGoodsCommands, BufferGoods, DefaultBoxService],
+  exports: [DefaultBoxService],
 })
 export class GoodsModule {}

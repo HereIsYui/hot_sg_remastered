@@ -10,6 +10,7 @@ import { GatewayModule } from './gateway/gateway.module';
 import { GoodsModule } from './goods/goods.module';
 import { GuideModule } from './guide/guide.module';
 import { HealthController } from './health/health.controller';
+import { HeroModule } from './hero/hero.module';
 import { PushModule } from './push/push.module';
 import { RankModule } from './rank/rank.module';
 import { TaskModule } from './task/task.module';
@@ -33,6 +34,7 @@ import { UserModule } from './user/user.module';
     TaskModule,
     GuideModule,
     GoodsModule,
+    HeroModule,
   ],
   controllers: [HealthController],
 })

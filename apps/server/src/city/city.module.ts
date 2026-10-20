@@ -14,6 +14,7 @@ import { DefenceCommands } from './defence.commands';
 import { DefenceTick } from './defence.tick';
 import { FieldCommands } from './field.commands';
 import { GovernmentCommands } from './government.commands';
+import { HotelRules } from './hotel-rules.service';
 import { SoldierRules } from './soldier-rules.service';
 import { SoldierCommands } from './soldier.commands';
 import { SoldierTick } from './soldier.tick';
@@ -44,6 +45,7 @@ import { TechnicTick } from './technic.tick';
     DefenceTick,
     FieldCommands,
     GovernmentCommands,
+    HotelRules,
     SoldierCommands,
     SoldierRules,
     SoldierTick,
@@ -57,6 +59,7 @@ import { TechnicTick } from './technic.tick';
     CityBuildingsService,
     CityInfoService,
     CityProductionService,
+    HotelRules,
   ],
 })
 export class CityModule {}

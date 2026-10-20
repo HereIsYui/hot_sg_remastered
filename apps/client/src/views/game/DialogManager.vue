@@ -4,6 +4,7 @@ import {
   BUILDING_ARMY,
   BUILDING_COLLEGE,
   BUILDING_GOVERNMENT,
+  BUILDING_HOTEL,
   BUILDING_WALL,
 } from '../../game/cityGrid';
 import type { BuildingState } from '../../stores/city';
@@ -21,6 +22,7 @@ import MyGoodsDialog from '../goods/MyGoodsDialog.vue';
 import UseGoodsDialog from '../goods/UseGoodsDialog.vue';
 import GovernmentDialog from '../government/GovernmentDialog.vue';
 import ResourceProductDialog from '../government/ResourceProductDialog.vue';
+import HotelDialog from '../hotel/HotelDialog.vue';
 import ModifyPasswordDialog from '../system/ModifyPasswordDialog.vue';
 import OpenLockDialog from '../system/OpenLockDialog.vue';
 import TaskDialog from '../task/TaskDialog.vue';
@@ -87,6 +89,14 @@ function choose(action: 'all' | 'level') {
     <ArmyDialog
       v-else-if="dialog?.name === 'building' && ownDialog(dialog.building, BUILDING_ARMY)"
       :key="`army ${buildingKey}`"
+      :x="0"
+      :y="0"
+      :building="dialog.building"
+      @destroy-panel="destroy = $event"
+    />
+    <HotelDialog
+      v-else-if="dialog?.name === 'building' && ownDialog(dialog.building, BUILDING_HOTEL)"
+      :key="`hotel ${buildingKey}`"
       :x="0"
       :y="0"
       :building="dialog.building"

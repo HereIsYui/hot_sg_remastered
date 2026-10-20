@@ -35,7 +35,7 @@ export const tableRules: Record<string, TableRule> = {
   // Next random city events: midnight + 86400 * rand().
   mem_city_schedule: {
     ignore: ['next_good_event', 'next_bad_event'],
-    offsets: ['last_anming'],
+    offsets: ['last_anming', 'last_reset_recruit'],
   },
   mem_user_buffer: { offsets: ['endtime'] },
   mem_city_buffer: { offsets: ['endtime'] },

@@ -24,7 +24,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   destroyPanel: [handlers: { all: () => void; level: () => void }];
   /** Every building info reply, after it has been shown. */
-  reply: [];
+  reply: [data: unknown[]];
 }>();
 defineSlots<{
   default(props: {
@@ -92,7 +92,7 @@ const unregister = game.addDialogReceiver({
     current.value = parseBuildingInfo(data[0]);
     next.value = parseBuildingInfo(data[1]);
     extra.value = data.slice(2);
-    emit('reply');
+    emit('reply', data);
   },
 });
 

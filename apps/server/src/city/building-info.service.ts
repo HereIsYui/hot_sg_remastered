@@ -3,9 +3,11 @@ import { sql } from 'kysely';
 import { GameError } from '../common/game-error';
 import { Building } from '../core/city-rules.service';
 import { phpIntval, phpNum } from '../core/php';
+import { UserRules } from '../core/user-rules.service';
 import { DbScope } from '../db/database.module';
 import { BuildingRules } from './building-rules.service';
 import { DefenceRules } from './defence-rules.service';
+import { HotelRules } from './hotel-rules.service';
 import { SoldierRules } from './soldier-rules.service';
 import { TechnicRules } from './technic-rules.service';
 
@@ -20,12 +22,15 @@ export class BuildingInfoService {
     private readonly technics: TechnicRules,
     private readonly soldiers: SoldierRules,
     private readonly defences: DefenceRules,
+    private readonly hotel: HotelRules,
+    private readonly users: UserRules,
   ) {}
 
   /**
    * The current and the next level; the buildings with their own dialogs append that dialog's
-   * data (书院 its technics, 兵营 its soldiers, queue and conversions, 城墙 its defences, queue
-   * and space). The other dialogs' data is added as those dialogs are ported.
+   * data (书院 its technics, 兵营 its soldiers, queue and conversions, 客栈 its recruits, free
+   * hero slots and whether the lord may befriend famous heroes, 城墙 its defences, queue and
+   * space). The other dialogs' data is added as those dialogs are ported.
    */
   async buildingInfo(
     uid: number,
@@ -48,6 +53,13 @@ export class BuildingInfoService {
       ret.push(await this.soldiers.soldierInfo(uid, cid, xy));
       ret.push(await this.soldiers.draftQueue(cid, xy));
       ret.push(await this.soldiers.convertInfo(cid));
+    } else if (bid === Building.Hotel) {
+      ret.push(await this.hotel.recruitHeroes(uid, cid, level));
+      ret.push(await this.hotel.officeValidPosition(uid, cid));
+      const nobility = await sql<Row>`select nobility from sys_user where uid = ${uid}`.execute(
+        this.scope.db,
+      );
+      ret.push((await this.users.bufferNobility(uid, nobility.rows[0]?.nobility)) >= 5);
     } else if (bid === Building.Wall) {
       ret.push(await this.defences.defenceInfo(uid, cid));
       ret.push(await this.defences.reinforceQueue(cid));
@@ -55,6 +67,19 @@ export class BuildingInfoService {
       ret.push(await this.defences.cityAreaOccupied(cid));
     }
     return ret;
+  }
+
+  /** HotelFunc.php::getHotelInfo: the city's highest 客栈 after a command. */
+  async hotelInfo(uid: number, cid: number): Promise<unknown[]> {
+    await this.hotel.fillWildPool();
+    const hotel = (
+      await sql<Row>`select * from sys_building
+        where cid = ${cid} and bid = ${Building.Hotel} order by level desc limit 1`.execute(
+        this.scope.db,
+      )
+    ).rows[0];
+    if (!hotel) throw GameError.lang('getHotelInfo.no_hotel_built');
+    return this.buildingInfo(uid, cid, phpIntval(hotel.xy), Building.Hotel, phpNum(hotel.level));
   }
 
   /** DefenceFunc.php::getWallInfo: the 城墙 after a command. */

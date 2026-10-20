@@ -12,6 +12,8 @@ import { TaskRewards } from '../task/task-rewards.service';
 
 /** cfg_box_details.srctype of an item opened from the goods list. */
 const SRC_GOODS = 0;
+/** cfg_box_details.srctype of the gift with a recruited event hero (srcid = herotype). */
+export const SRC_RECRUIT_HERO = 2000;
 /** giveReward log reasons of opened boxes. */
 const LOG_BOX_GOODS = 6;
 const LOG_BOX_MONEY = 20;
@@ -39,8 +41,9 @@ export class CommittedMessage {
 }
 
 /**
- * GoodsFunc.php::openDefaultBox for the items of the goods list (srctype 0): one weighted pick
- * from cfg_box_details, given through giveReward. Boxes that need a key take both.
+ * GoodsFunc.php::openDefaultBox for the items of the goods list (srctype 0) and the event
+ * gifts: one weighted pick from cfg_box_details, given through giveReward. Boxes that need a
+ * key take both.
  */
 @Injectable()
 export class DefaultBoxService {
@@ -85,10 +88,31 @@ export class DefaultBoxService {
       await this.goods.reduceGoods(uid, srcid, 1);
     }
 
-    const pick = await this.pickWithLimit(uid, srcid, details);
+    const pick = await this.pickWithLimit(uid, SRC_GOODS, srcid, details);
     if (!pick) return false;
     if (phpIntval(pick.sort) === 7) throw new Error(`openDefaultHeroBox(${srcid}) not ported`);
-    return this.give(uid, cid, srcid, pick);
+    const given = await this.give(uid, cid, srcid, SRC_GOODS, pick);
+    return typeof given === 'string' ? new CommittedMessage(given) : given;
+  }
+
+  /**
+   * openDefaultBox for an event source (srctype 2000: a recruited event hero): the text of
+   * what was given, or false for nothing.
+   */
+  async openEvent(
+    uid: number,
+    cid: number,
+    srcid: number,
+    srctype: number,
+  ): Promise<string | false> {
+    const details = await this.rows(sql`select * from cfg_box_details
+      where srctype = ${srctype} and srcid = ${srcid}`);
+    if (details.length === 0) return false;
+    const pick = await this.pickWithLimit(uid, srctype, srcid, details);
+    if (!pick) return false;
+    if (phpIntval(pick.sort) === 7) throw new Error(`openDefaultHeroBox(${srcid}) not ported`);
+    const given = await this.give(uid, cid, srcid, srctype, pick);
+    return typeof given === 'string' ? given : false;
   }
 
   /** The act 252 roll for 沉睡的匣子; ten lucky ones in a row earn an achievement. */
@@ -120,14 +144,19 @@ export class DefaultBoxService {
    * getOpenDefaultGoodsResult: pickOne by rate, then the daily, per-player and server-wide
    * limits; `limit` caps the count when one applies.
    */
-  private async pickWithLimit(uid: number, srcid: number, details: Row[]): Promise<Row | null> {
+  private async pickWithLimit(
+    uid: number,
+    srctype: number,
+    srcid: number,
+    details: Row[],
+  ): Promise<Row | null> {
     const gift = this.pickOne(details);
     if (!gift) return null;
     const sort = phpIntval(gift.sort);
     const type = phpIntval(gift.type);
     const logged = (extra: RawBuilder<unknown>) =>
       this.cell(sql`select sum(count) from log_act where actid = ${srcid} and sort = ${sort}
-        and type = ${type} and log_type = ${SRC_GOODS} ${extra}`);
+        and type = ${type} and log_type = ${srctype} ${extra}`);
     let left = UNLIMITED;
     let limited = false;
     if (phpNum(gift.dayopencount) > 0) {
@@ -162,17 +191,21 @@ export class DefaultBoxService {
     return null;
   }
 
-  /** openDefaultGoodsNow: gives the first detail row matching the pick. */
+  /**
+   * openDefaultGoodsNow: gives the first detail row matching the pick. The goods list shows
+   * the items; other sources get the text of the reward.
+   */
   private async give(
     uid: number,
     cid: number,
     srcid: number,
+    srctype: number,
     pick: Row,
-  ): Promise<unknown[] | false | CommittedMessage> {
+  ): Promise<unknown[] | string | false | CommittedMessage> {
     const sort = phpIntval(pick.sort);
     const type = phpIntval(pick.type);
     const row = await this.row(sql`select * from cfg_box_details
-      where srcid = ${srcid} and srctype = ${SRC_GOODS} and sort = ${sort} and type = ${type}
+      where srcid = ${srcid} and srctype = ${srctype} and sort = ${sort} and type = ${type}
         and count = ${phpIntval(pick.count)}`);
     if (!row) return false;
     const limit = phpNum(pick.limit);
@@ -193,27 +226,27 @@ export class DefaultBoxService {
       phpNum(row.owncount) > 0
     ) {
       await sql`insert into log_act (uid, actid, sort, type, count, log_type, time)
-        values (${uid}, ${srcid}, ${sort}, ${type}, ${count}, ${SRC_GOODS}, unix_timestamp())`.execute(
+        values (${uid}, ${srcid}, ${sort}, ${type}, ${count}, ${srctype}, unix_timestamp())`.execute(
         this.scope.db,
       );
     }
     if (isHiddenToken(sort, type)) return false;
     if (phpNum(row.inform) || (sort === 2 && ANNOUNCED_GIDS.has(type))) {
-      const uname = await this.cell(sql`select name from sys_user where uid = ${uid}`);
-      const boxName = phpString(
-        await this.cell(sql`select name from cfg_goods where gid = ${srcid}`),
-      );
-      await this.users.sendSysInform({
-        type: 0,
-        inuse: 1,
-        starttime: 0,
-        endtime: 300,
-        interval: 1800,
-        scrollcount: 1,
-        color: 49151,
-        msg: this.lang.t('goodsopen.inform', uname, boxName + gotten),
-      });
+      const msg = await this.informText(uid, srcid, srctype, gotten);
+      if (msg !== null) {
+        await this.users.sendSysInform({
+          type: 0,
+          inuse: 1,
+          starttime: 0,
+          endtime: 300,
+          interval: 1800,
+          scrollcount: 1,
+          color: 49151,
+          msg,
+        });
+      }
     }
+    if (srctype !== SRC_GOODS) return gotten;
 
     const ret: unknown[] = [];
     if (sort === 2) {
@@ -239,6 +272,28 @@ export class DefaultBoxService {
     }
     if (ret.length === 0) return new CommittedMessage(gotten);
     return ret;
+  }
+
+  /** The announcement of a rare reward; sources not ported yet announce nothing. */
+  private async informText(
+    uid: number,
+    srcid: number,
+    srctype: number,
+    gotten: string,
+  ): Promise<string | null> {
+    const uname = await this.cell(sql`select name from sys_user where uid = ${uid}`);
+    if (srctype === SRC_GOODS) {
+      const boxName = phpString(
+        await this.cell(sql`select name from cfg_goods where gid = ${srcid}`),
+      );
+      return this.lang.t('goodsopen.inform', uname, boxName + gotten);
+    }
+    if (srctype === SRC_RECRUIT_HERO) {
+      const heroname = await this.cell(sql`select heroname from cfg_recruit_hero
+        where herotype = ${srcid}`);
+      return this.lang.t('getHero.inform', uname, heroname, gotten);
+    }
+    return null;
   }
 
   private async rows(query: RawBuilder<unknown>): Promise<Row[]> {

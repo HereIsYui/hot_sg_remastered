@@ -1099,6 +1099,63 @@ export const cases: DiffCase[] = [
       }
     },
   },
+  {
+    name: 'hotel recruits heroes and refreshes its list',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      // The level 15 客栈 sits at inner (2, 4); its dialog is addressed by bid 10 and y * 10 + x.
+      const hotel = (func: string, ...args: unknown[]) =>
+        s.dialog(session, cid, 10, 42, func, ...args);
+      // A refresh ahead keeps the shipped list; the regenerated one is random.
+      await s.query(
+        'update mem_city_schedule set last_reset_recruit = unix_timestamp() + 3600 where cid = ?',
+        [cid],
+      );
+      await hotel('getBuildingInfo', 1, 2, 4, 10);
+      await hotel('recruitHero', 30231);
+      await hotel('recruitHero', 1);
+      await s.query('update mem_city_resource set gold = 100 where cid = ?', [cid]);
+      await hotel('recruitHero', 30235);
+      await s.query('update mem_city_resource set gold = 1000000 where cid = ?', [cid]);
+      await s.query('update sys_building set level = 2 where cid = ? and bid = 11', [cid]);
+      await hotel('recruitHero', 30235);
+      await s.query('update sys_building set level = 15 where cid = ? and bid = 11', [cid]);
+
+      // 西域胡商 of the running event 2054 comes with a once-per-player gift, already taken in
+      // the save; a cap of one per player then refuses the second.
+      const eventHero = (id: number) =>
+        s.query(
+          `insert into sys_recruit_hero (id, name, sex, face, cid, level, exp, affairs_base,
+            bravery_base, wisdom_base, loyalty, gold_need, gen_time, herotype)
+          values (?, '西域胡商', 1, 1001, ?, 10, 4500, 30, 40, 85, 70, 9000, 0, 197)`,
+          [id, cid],
+        );
+      await s.query('delete from log_act where uid = ? and actid = 197 and log_type = 2000', [uid]);
+      await eventHero(40001);
+      await hotel('recruitHero', 40001);
+      try {
+        await s.query('update cfg_recruit_hero set userhavecnt = 1 where herotype = 197');
+        await eventHero(40002);
+        await hotel('recruitHero', 40002);
+      } finally {
+        await s.query('update cfg_recruit_hero set userhavecnt = 0 where herotype = 197');
+      }
+
+      await s.query('delete from sys_goods where uid = ? and gid = 23', [uid]);
+      await hotel('resetRecruitHero');
+      await s.query('insert into sys_goods (uid, gid, count) values (?, 23, 1)', [uid]);
+      await hotel('resetRecruitHero');
+      s.mask(6, 2);
+      const [fresh] = await s.query<{ n: string }>(
+        'select count(*) as n from sys_recruit_hero where cid = ? and id > 40002',
+        [cid],
+      );
+      if (Number(fresh?.n) !== 15) throw new Error('the 招贤榜 did not refill the list');
+      await s.query('delete from sys_recruit_hero where cid = ? and id > 40002', [cid]);
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {

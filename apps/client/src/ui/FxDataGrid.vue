@@ -104,6 +104,8 @@ function rowBackground(i: number) {
   position: absolute;
   overflow: hidden auto;
   font-size: 12px;
+  /* Keeps the sticky header under pop-ups drawn over the grid. */
+  isolation: isolate;
 }
 
 .grid > .row:first-child {
