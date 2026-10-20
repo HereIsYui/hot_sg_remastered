@@ -18,6 +18,7 @@ import CollegeDialog from '../college/CollegeDialog.vue';
 import CityFieldDialog from '../government/CityFieldDialog.vue';
 import CityListDialog from '../government/CityListDialog.vue';
 import MyGoodsDialog from '../goods/MyGoodsDialog.vue';
+import UseGoodsDialog from '../goods/UseGoodsDialog.vue';
 import GovernmentDialog from '../government/GovernmentDialog.vue';
 import ResourceProductDialog from '../government/ResourceProductDialog.vue';
 import ModifyPasswordDialog from '../system/ModifyPasswordDialog.vue';
@@ -120,6 +121,7 @@ function choose(action: 'all' | 'level') {
       :y="(556 - 230) / 2 - 30"
       :building="session.exchange"
     />
+    <UseGoodsDialog v-if="session.useGoods" :request="session.useGoods" />
   </div>
 </template>
 

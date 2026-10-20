@@ -62,7 +62,11 @@ watch(
     const b = list.find(
       (o) => o.bid === s.bid && o.inner === s.inner && o.x === s.x && o.y === s.y,
     );
-    if (b) state.value = { ...b };
+    if (!b) return;
+    // A speed-up finishes the building before the countdown below does.
+    const finished = s.state !== 0 && b.state === 0;
+    state.value = { ...b };
+    if (finished) reloadBuildingInfo();
   },
 );
 

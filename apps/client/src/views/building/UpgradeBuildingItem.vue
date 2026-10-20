@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { endTimeText, timeLeftText } from '../../core/clock';
+import { endTimeText, serverTime, timeLeftText } from '../../core/clock';
 import {
   destroyBuildingTip,
   maxBuildingLevel,
@@ -9,6 +9,7 @@ import {
 } from '../../game/buildings';
 import { BUILDING_GOVERNMENT } from '../../game/cityGrid';
 import { useGame } from '../../game/game';
+import { UseGoodsType } from '../../game/goods';
 import { HERO_TYPE_KING } from '../../game/units';
 import { i18n } from '../../i18n';
 import { useCityStore, type BuildingState } from '../../stores/city';
@@ -71,6 +72,8 @@ function accelerateTip() {
 }
 
 const t = (n: number) => i18n(`Building_UpgradeBuildingItemSrc_${n}`);
+/** The guide's 建造 step, in case it is still pending. */
+const GUIDE_BUILD_STEP = 7;
 
 async function confirm(text: string): Promise<boolean> {
   return (await showAlert(text, '', ['yes', 'no'])) === 'yes';
@@ -122,6 +125,16 @@ async function startDestroy() {
   }
 }
 
+/** `startAccerateBuilding`: the 鲁班 items for this slot. */
+function startAccelerate() {
+  game.showUseGoodsDialog(
+    props.state.state_endtime - serverTime(),
+    UseGoodsType.Building,
+    game.slotParam(props.state.bid),
+  );
+  game.guide.complete(GUIDE_BUILD_STEP);
+}
+
 async function cancel() {
   const s = props.state;
   if (s.state === 1) {
@@ -165,7 +178,6 @@ async function cancel() {
       />
     </template>
     <template v-else>
-      <!-- 加速 needs the item dialogs (UseGoodsDialog) of the shop. -->
       <FxButton
         :x="90"
         :y="7"
@@ -174,8 +186,8 @@ async function cancel() {
         style-name="ButtonYellow"
         :fx="{ fontSize: 12, fontWeight: 'normal' }"
         :label="i18n('Building_UpgradeBuildingItem_4_1')"
-        :enabled="false"
         :tip="{ resource: accelerateTip }"
+        @click="startAccelerate"
       />
       <FxButton
         :x="90"

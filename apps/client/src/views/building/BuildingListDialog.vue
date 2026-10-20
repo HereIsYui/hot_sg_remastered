@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { endTimeText, serverTime, timeLeftText } from '../../core/clock';
 import { useGame } from '../../game/game';
+import { UseGoodsType } from '../../game/goods';
 import { i18n } from '../../i18n';
 import { useCityStore, type BuildingState } from '../../stores/city';
 import { showAlert } from '../../ui/alert';
@@ -11,14 +12,14 @@ import FxDataGrid from '../../ui/FxDataGrid.vue';
 import FxImage from '../../ui/FxImage.vue';
 import FxLabel from '../../ui/FxLabel.vue';
 
-/**
- * Building.BuildingListDialog: every building of the city, those under way with their times.
- * 加速 and 增加建造队列 need the item dialog (UseGoodsDialog), which is not ported.
- */
+/** Building.BuildingListDialog: every building of the city, those under way with their times. */
 const game = useGame();
 const city = useCityStore();
 const t = (n: number) => i18n(`Building_BuildingListDialog_${n}_1`);
 const src = (n: number) => i18n(`Building_BuildingListDialogSrc_${n}`);
+
+/** `onAddSyncList`: the UseGoodsDialog type listing 徭役令 and the 高级 one. */
+const ADD_QUEUE_TYPE = -16656;
 
 const now = ref(serverTime());
 /** When the 徭役令's extra building queues end. */
@@ -85,6 +86,18 @@ function openBuilding(row: Row) {
   game.showBuildingDialog(b);
 }
 
+/** `onClickAcc`: the 鲁班 items for the building. */
+function onAccelerate(row: Row) {
+  const b = row.building;
+  game.showUseGoodsDialog(b.state_endtime - serverTime(), UseGoodsType.Building, [
+    city.cid,
+    b.inner ? 1 : 0,
+    b.x,
+    b.y,
+    b.bid,
+  ]);
+}
+
 /** `onClickCancel`: stops the upgrade or demolition after a confirmation. */
 async function onCancel(row: Row) {
   const b = row.building;
@@ -130,7 +143,14 @@ onUnmounted(() => {
       :fx="{ paddingLeft: 2, paddingRight: 2 }"
       @click="game.closeDialog()"
     />
-    <FxButton :x="438" :y="446" :w="110" style-name="ButtonGreen" :label="t(2)" :enabled="false" />
+    <FxButton
+      :x="438"
+      :y="446"
+      :w="110"
+      style-name="ButtonGreen"
+      :label="t(2)"
+      @click="game.showUseGoodsDialog(0, ADD_QUEUE_TYPE)"
+    />
     <FxLabel
       :x="20"
       :y="454"
@@ -150,7 +170,7 @@ onUnmounted(() => {
       >
         <template #cell="{ row, column }">
           <div v-if="column.field === 'building'" class="actions">
-            <FxButton :x="5" :y="0" :w="50" :h="28" :label="t(9)" :enabled="false" />
+            <FxButton :x="5" :y="0" :w="50" :h="28" :label="t(9)" @click="onAccelerate(row)" />
             <FxButton :x="55" :y="0" :w="50" :h="28" :label="t(10)" @click="onCancel(row)" />
           </div>
           <template v-else>{{ row[column.field] }}</template>

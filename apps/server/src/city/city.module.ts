@@ -51,6 +51,12 @@ import { TechnicTick } from './technic.tick';
     TechnicRules,
     TechnicTick,
   ],
-  exports: [BuildingRules, CityBuildingsService, CityInfoService, CityProductionService],
+  exports: [
+    BuildingInfoService,
+    BuildingRules,
+    CityBuildingsService,
+    CityInfoService,
+    CityProductionService,
+  ],
 })
 export class CityModule {}

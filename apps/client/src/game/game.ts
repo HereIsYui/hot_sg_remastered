@@ -10,6 +10,8 @@ import { useGlobalStore } from '../stores/global';
 import { useSessionStore, type PlainDialog, type View } from '../stores/session';
 import { cityPosition, parseCities, useUserStore } from '../stores/user';
 import { gameAlert, setAlertLabels, showAlert } from '../ui/alert';
+import { BUILDING_COLLEGE } from './cityGrid';
+import { UseGoodsType } from './goods';
 import { GuideManager } from './guide';
 import { loadLoginPrefs, saveLoginPrefs, type LoginPrefs } from './loginPrefs';
 import { HERO_TYPE_KING } from './units';
@@ -101,6 +103,7 @@ export class Game {
     this.stopTimer();
     this.city.$reset();
     this.session.dialog = null;
+    this.session.useGoods = null;
     this.session.screen = 'login';
     setAlertLabels({
       ok: i18n('Login_LoginDialogSrc_4'),
@@ -216,10 +219,13 @@ export class Game {
 
   /** `DialogManager.childOnCommand`: every dialog the reply is addressed to gets it. */
   private onDialogCommand(result: DialogResult): void {
+    this.deliverToDialog(result.receiverId, result.receiverParam, result.data, result.ttype);
+  }
+
+  /** Hands data to the open dialogs addressed by `receiverId` / `receiverParam`. */
+  deliverToDialog(receiverId: number, receiverParam: number, data: unknown, ttype = 0): void {
     for (const receiver of [...this.dialogReceivers]) {
-      if (receiver.isTarget(result.receiverId, result.receiverParam)) {
-        receiver.onData(result.data, result.ttype);
-      }
+      if (receiver.isTarget(receiverId, receiverParam)) receiver.onData(data, ttype);
     }
   }
 
@@ -290,8 +296,7 @@ export class Game {
     } else if (command === 'discardCity') {
       this.user.cities = parseCities((data as unknown[] | undefined)?.[1]);
     } else if (BUILDING_COMMANDS.has(command)) {
-      this.city.applyBuildings(data, this.global.buildingDescriptions);
-      this.guide.triggerByBuildings(this.city.buildings);
+      this.onGetCityBuilding(data);
     } else if (command === 'getCityInfo' && Array.isArray(data)) {
       const session = this.session;
       if (session.screen !== 'game' || (session.view !== 'city' && session.view !== 'world')) {
@@ -389,6 +394,12 @@ export class Game {
     if (king) this.user.kingHeroLevel = int(king.level);
   }
 
+  /** `BloodWar.onGetCityBuilding`: a refreshed building list, which may finish a guide step. */
+  onGetCityBuilding(data: unknown): void {
+    this.city.applyBuildings(data, this.global.buildingDescriptions);
+    this.guide.triggerByBuildings(this.city.buildings);
+  }
+
   /** `BloodWar.getCityBuilding`. */
   refreshBuildings(): void {
     void this.cmd.sendGlobalCommand('city', 'getCityBuilding', [this.user.cid]);
@@ -405,6 +416,7 @@ export class Game {
   gotoView(view: View): void {
     this.session.view = view;
     this.session.dialog = null;
+    this.session.useGoods = null;
   }
 
   /** `TopPanel.onLevelClick`. */
@@ -473,17 +485,36 @@ export class Game {
     this.session.dialog = null;
   }
 
+  /**
+   * `DialogManager.showUseGoodsDialog`: picks an item of `type` to use, over the open dialog.
+   * `time` is the time left that the 鲁班传人 / 墨家弟子 price is figured from.
+   */
+  showUseGoodsDialog(time: number, type: number, param: (number | string)[] = []): void {
+    this.session.useGoods = { time, type, param };
+  }
+
   /** The `[cid, inner, x, y, bid]` building commands, acting on `session.currentSlot`. */
   buildingCommand(command: string, bid: number, targetBid?: number): void {
-    const slot = this.session.currentSlot;
+    const [cid, inner, x, y] = this.slotParam(bid);
     void this.cmd.sendGlobalCommand('city', command, [
-      this.city.cid,
-      slot.inner ? 1 : 0,
-      slot.x,
-      slot.y,
+      cid,
+      inner,
+      x,
+      y,
       ...(targetBid === undefined ? [] : [targetBid]),
       bid,
     ]);
+  }
+
+  /** `startAccerateTechnic`: the 墨家 items for the research of the 书院 on `currentSlot`. */
+  accelerateTechnic(timeLeft: number): void {
+    this.showUseGoodsDialog(timeLeft, UseGoodsType.Technic, this.slotParam(BUILDING_COLLEGE));
+  }
+
+  /** `[City.cid, current_inner, current_x, current_y, bid]`. */
+  slotParam(bid: number): [number, number, number, number, number] {
+    const slot = this.session.currentSlot;
+    return [this.city.cid, slot.inner ? 1 : 0, slot.x, slot.y, bid];
   }
 
   /**

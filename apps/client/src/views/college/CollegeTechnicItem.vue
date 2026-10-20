@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { timeLeftText } from '../../core/clock';
+import { useGame } from '../../game/game';
 import { technicTip, type TechnicState } from '../../game/technics';
 import { i18n } from '../../i18n';
 import { useCityStore } from '../../stores/city';
@@ -15,6 +16,7 @@ import FxText from '../../ui/FxText.vue';
 const props = defineProps<{ x: number; y: number; technic: TechnicState; now: number }>();
 const emit = defineEmits<{ start: [tid: number]; stop: [tid: number] }>();
 
+const game = useGame();
 const city = useCityStore();
 const s = (n: number) => i18n(`College_CollegeTechnicItemSrc_${n}`);
 
@@ -71,7 +73,6 @@ async function stop() {
       @click="emit('start', technic.tid)"
     />
     <template v-else>
-      <!-- 加速 needs the item dialogs (UseGoodsDialog) of the shop. -->
       <FxButton
         :x="83"
         :y="9"
@@ -80,8 +81,9 @@ async function stop() {
         style-name="ButtonGreen"
         :fx="{ fontSize: 12, fontWeight: 'normal' }"
         :label="i18n('College_CollegeTechnicItem_3_1')"
-        :enabled="false"
+        :enabled="ownResearch"
         :tip="{ resource: tip }"
+        @click="game.accelerateTechnic(technic.state_endtime - now)"
       />
       <FxButton
         :x="83"

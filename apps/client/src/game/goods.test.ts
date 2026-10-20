@@ -3,9 +3,11 @@ import {
   goodsImage,
   itemPosition,
   pageCount,
+  parseTypeGoods,
   parseUserGoods,
   thingImage,
   treasureItems,
+  typeGoodsDialogWidth,
 } from './goods';
 
 describe('goods', () => {
@@ -57,5 +59,26 @@ describe('goods', () => {
       ['images/armor/50000.png', ''],
       ['images/thing_10400.png', '2'],
     ]);
+  });
+
+  it('lists the items of a use type, counting what is not owned as 0', () => {
+    const items = parseTypeGoods([
+      { gid: '73', name: '鲁班传人', count: '立即完成', imagetype: '0' },
+      { gid: '67', name: '鲁班残页', count: null, imagetype: '0', description: 'd' },
+      { gid: '68', count: '3', imagetype: '1', image: '5' },
+    ]);
+    expect(items.map((i) => [i.gid, i.count, i.imageName])).toEqual([
+      [73, '立即完成', 'images/item_73.png'],
+      [67, '0', 'images/item_67.png'],
+      [68, '3', 'images/hero/hero_boy_5.jpg'],
+    ]);
+    expect(parseTypeGoods(null)).toEqual([]);
+  });
+
+  it('sizes the use dialog to its items', () => {
+    expect(typeGoodsDialogWidth(1)).toBe(160);
+    expect(typeGoodsDialogWidth(2)).toBe(213);
+    expect(typeGoodsDialogWidth(6)).toBe(585);
+    expect(typeGoodsDialogWidth(7)).toBe(682);
   });
 });

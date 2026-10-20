@@ -263,9 +263,14 @@ export class GuideManager {
     this.curGid = gid;
   }
 
-  /** `GuideTip.completeGuide`: the step on screen is done; the final one ends the guide. */
+  /** `GuideTip.completeCurGuide`: the step on screen is done; the final one ends the guide. */
   completeCurrent(): void {
-    const i = this.tips.findIndex((t) => t.gid === this.curGid);
+    this.complete(this.curGid);
+  }
+
+  /** `GuideManager.completeGuide`: drops a pending step, which takes down the one on screen. */
+  complete(gid: number): void {
+    const i = this.tips.findIndex((t) => t.gid === gid);
     if (i < 0) return;
     this.tips.splice(i, 1);
     if (this.last) this.justCreatedRole = false;

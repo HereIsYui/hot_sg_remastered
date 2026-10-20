@@ -844,6 +844,91 @@ export const cases: DiffCase[] = [
       await s.command(session, 'loadUserGoods');
     },
   },
+  {
+    name: 'speed-up items shorten buildings and research',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const give = (gid: number, count: number) =>
+        s.query(
+          `insert into sys_goods (uid, gid, count) values (?, ?, ?)
+            on duplicate key update count = values(count)`,
+          [uid, gid, count],
+        );
+      // The 民房 at inner (0, 0) and the 书院 at inner (4, 4).
+      const house = [cid, 1, 0, 0, 5];
+      const college = [cid, 1, 4, 4, 7];
+      const luban = async (gid: number, ...extra: number[]) => {
+        await s.command(session, 'useTypeGoods', 0, gid, cid, ...house, ...extra);
+        buildingTimes(s);
+      };
+      const mojia = async (gid: number, ...extra: number[]) => {
+        await s.command(session, 'useTypeGoods', 1, gid, cid, ...college, ...extra);
+        s.mask(4, 2, 0, '*', 'state_timeleft');
+        s.offset(4, 2, 0, '*', 'state_endtime');
+        s.unordered(4, 2, 0);
+      };
+      await give(67, 2);
+      await give(73, 0);
+      await s.command(session, 'getUserTypeGoods', 0, 7200);
+      await s.command(session, 'getUserTypeGoods', 1, -5);
+      await s.command(session, 'getUserTypeGoods', 42);
+      await s.command(session, 'getUserTypeGoods', 160026);
+
+      await luban(67);
+      await luban(66);
+      await s.query('update sys_building set level = 3 where cid = ? and xy in (100, 101, 102)', [
+        cid,
+      ]);
+      await s.command(session, 'startUpgradeBuilding', ...house);
+      buildingTimes(s);
+      for (const table of ['sys_building', 'mem_building_upgrading']) {
+        await s.query(
+          `update ${table} set state_endtime = unix_timestamp() + 36000 where cid = ? and xy = 100`,
+          [cid],
+        );
+      }
+      await give(69, 0);
+      await luban(69);
+      await luban(67);
+      await give(68, 1);
+      await luban(68);
+      await give(72, 1);
+      await luban(72);
+      // A fixed time left keeps the 元宝 cost away from its 800 second steps.
+      await s.query(
+        `update sys_building set state_endtime = unix_timestamp() + 400
+          where cid = ? and xy = 100`,
+        [cid],
+      );
+      await s.query('update sys_user set money = 10, gift = 1000 where uid = ?', [uid]);
+      await luban(73, 0);
+      await luban(73, 1);
+
+      await mojia(8);
+      await s.dialog(session, cid, 7, 44, 'startUpgradeTechnic', 1);
+      technicTimes(s);
+      // Long enough for every cut: 墨家宝典 on a due research fails in the original.
+      for (const table of ['sys_technic', 'mem_technic_upgrading']) {
+        await s.query(`update ${table} set state_endtime = unix_timestamp() + 7200 where cid = ?`, [
+          cid,
+        ]);
+      }
+      await mojia(8);
+      await give(8, 1);
+      await mojia(8);
+      await give(10, 1);
+      await mojia(10);
+      await s.query('update sys_technic set state_endtime = unix_timestamp() + 400 where uid = ?', [
+        uid,
+      ]);
+      await mojia(53);
+      await mojia(53, 1);
+      await mojia(53, 1);
+      await s.command(session, 'useTypeGoods', 44, 10152, cid);
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {

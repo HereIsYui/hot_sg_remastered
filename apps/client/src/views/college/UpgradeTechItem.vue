@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { timeLeftText } from '../../core/clock';
+import { useGame } from '../../game/game';
 import type { TechnicState } from '../../game/technics';
 import { i18n } from '../../i18n';
 import { showAlert } from '../../ui/alert';
@@ -19,6 +20,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ cancel: [tid: number] }>();
 
+const game = useGame();
 const own = computed(() => props.technic?.cid === props.cid);
 const timeLeft = computed(() =>
   props.technic ? timeLeftText(Math.max(0, props.technic.state_endtime - props.now), i18n) : '',
@@ -45,7 +47,6 @@ async function cancel() {
     :fx="{ fontSize: 12, borderStyle: 'outset' }"
   >
     <template v-if="technic">
-      <!-- 加速 needs the item dialogs (UseGoodsDialog) of the shop. -->
       <FxButton
         v-if="own"
         :x="152"
@@ -55,7 +56,7 @@ async function cancel() {
         style-name="ButtonGreen"
         :fx="{ fontSize: 12 }"
         :label="i18n('College_UpgradeTechItem_1_1')"
-        :enabled="false"
+        @click="game.accelerateTechnic(technic.state_endtime - now)"
       />
       <FxButton
         v-if="own"

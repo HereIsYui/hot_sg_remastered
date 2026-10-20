@@ -26,6 +26,16 @@ export type DialogState =
   | { name: 'openLock'; type: string }
   | { name: PlainDialog };
 
+/**
+ * `DialogManager.showUseGoodsDialog(time, type, param)`: the item picker over the other dialogs.
+ * `param` is appended to useTypeGoods, e.g. the building's `[cid, inner, x, y, bid]`.
+ */
+export interface UseGoodsRequest {
+  time: number;
+  type: number;
+  param: (number | string)[];
+}
+
 /** Client-side flow state of BloodWar.as (which top-level view is shown, busy cursor). */
 export const useSessionStore = defineStore('session', {
   state: () => ({
@@ -53,6 +63,7 @@ export const useSessionStore = defineStore('session', {
     /** BuildingExchangePanel: the field it converts, kept while it is hidden. */
     exchange: null as BuildingState | null,
     exchangeOpen: false,
+    useGoods: null as UseGoodsRequest | null,
     /** JackarooDialog: the welcome shown once a role is created. */
     welcome: false,
   }),

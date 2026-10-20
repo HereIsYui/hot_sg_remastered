@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { sql } from 'kysely';
 import { GameError } from '../common/game-error';
 import { LangService } from '../common/lang.service';
-import { Building, CityRules } from '../core/city-rules.service';
+import { CityRules } from '../core/city-rules.service';
 import { OwnershipService } from '../core/ownership.service';
 import {
   phpEmpty,
@@ -42,20 +42,6 @@ export class TechnicCommands {
 
   private async one(query: ReturnType<typeof sql<Row>>): Promise<Row | false> {
     return (await this.rows(query))[0] ?? false;
-  }
-
-  /** TechnicFunc.php::getCollegeInfo (not in openfunc): the city's highest 书院. */
-  private async collegeInfo(uid: number, cid: number): Promise<unknown[]> {
-    const college = await this.one(sql<Row>`select * from sys_building
-      where cid = ${cid} and bid = ${Building.College} order by level desc limit 1`);
-    if (!college) throw GameError.lang('getCollegeInfo.no_college_built');
-    return this.info.buildingInfo(
-      uid,
-      cid,
-      phpIntval(college.xy),
-      Building.College,
-      phpNum(college.level),
-    );
   }
 
   /** `[tid]`: researches the next level; one technic per city at a time. */
@@ -137,7 +123,7 @@ export class TechnicCommands {
         on duplicate key update cid = ${cid}, level = ${dstlevel},
           state_endtime = unix_timestamp() + ${timeNeed}`.execute(db);
     }
-    return this.collegeInfo(uid, cid);
+    return this.info.collegeInfo(uid, cid);
   }
 
   /** `[tid]`: cancels the city's research and refunds 66% of its cost. */
@@ -173,6 +159,6 @@ export class TechnicCommands {
       );
       await this.users.logActionCountback(uid, ACTION_TECHNIC);
     }
-    return this.collegeInfo(uid, cid);
+    return this.info.collegeInfo(uid, cid);
   }
 }

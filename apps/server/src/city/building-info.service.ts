@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { sql } from 'kysely';
 import { GameError } from '../common/game-error';
 import { Building } from '../core/city-rules.service';
-import { phpNum } from '../core/php';
+import { phpIntval, phpNum } from '../core/php';
 import { DbScope } from '../db/database.module';
 import { BuildingRules } from './building-rules.service';
 import { DefenceRules } from './defence-rules.service';
@@ -65,6 +65,24 @@ export class BuildingInfoService {
     ).rows[0];
     if (!wall) throw GameError.lang('getWallInfo.no_wall');
     return this.buildingInfo(uid, cid, 0, Building.Wall, phpNum(wall.level));
+  }
+
+  /** TechnicFunc.php::getCollegeInfo: the city's highest 书院 after a command. */
+  async collegeInfo(uid: number, cid: number): Promise<unknown[]> {
+    const college = (
+      await sql<Row>`select * from sys_building
+        where cid = ${cid} and bid = ${Building.College} order by level desc limit 1`.execute(
+        this.scope.db,
+      )
+    ).rows[0];
+    if (!college) throw GameError.lang('getCollegeInfo.no_college_built');
+    return this.buildingInfo(
+      uid,
+      cid,
+      phpIntval(college.xy),
+      Building.College,
+      phpNum(college.level),
+    );
   }
 
   /** SoldierFunc.php::getArmyInfo: the 兵营 at `xy` after a command. */

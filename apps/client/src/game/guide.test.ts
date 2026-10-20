@@ -68,6 +68,17 @@ describe('guide steps', () => {
     expect(m.current?.gid).toBe(11);
   });
 
+  it('drops a pending step by gid, taking down the one on screen', () => {
+    const m = started();
+    m.complete(99);
+    expect(m.current?.gid).toBe(1);
+    m.complete(3);
+    expect(m.current).toBeNull();
+    expect(m.tips.map((t) => t.gid)).toEqual([1, 2, 11, 12, 14]);
+    m.triggerByGoods(50101);
+    expect(m.current).toBeNull();
+  });
+
   it('ends the guide with the step of the highest gid', () => {
     const m = started();
     m.skip();

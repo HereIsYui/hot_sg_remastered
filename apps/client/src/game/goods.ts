@@ -143,6 +143,42 @@ export function attrTip(row: Row): string {
   return `${tip}\n`;
 }
 
+/** UseGoodsDialog types: 0 speeds the current building up, 1 the 书院's research. */
+export const UseGoodsType = { Building: 0, Technic: 1 } as const;
+
+/** An item of the UseGoodsDialog picker; a 鲁班传人 / 墨家弟子 not owned counts 立即完成. */
+export interface TypeGoodsItem {
+  gid: number;
+  name: string;
+  count: string;
+  description: string;
+  imageName: string;
+}
+
+/** `UseGoodsDialog.onGetGoods`: the getUserTypeGoods list, missing counts as 0. */
+export function parseTypeGoods(list: unknown): TypeGoodsItem[] {
+  if (!Array.isArray(list)) return [];
+  return (list as unknown[])
+    .filter((r): r is Row => !!r && typeof r === 'object')
+    .map((row) => ({
+      gid: int(row.gid),
+      name: str(row.name),
+      count: row.count ? str(row.count) : '0',
+      description: str(row.description),
+      imageName:
+        int(row.imagetype) === 0
+          ? `images/item_${str(row.gid)}.png`
+          : `images/hero/hero_boy_${str(row.image)}.jpg`,
+    }));
+}
+
+/** UseGoodsDialog: 80 wide items 13 apart, the dialog as wide as the stage from 7 on. */
+export function typeGoodsDialogWidth(count: number): number {
+  if (count <= 1) return 160;
+  if (count < 7) return count * 80 + (count - 1) * 13 + 40;
+  return 682;
+}
+
 /** `TreasureGetDialog.loadGoods`: the items of a useGoods reply. */
 export function treasureItems(list: unknown): TreasureItem[] {
   if (!Array.isArray(list)) return [];
