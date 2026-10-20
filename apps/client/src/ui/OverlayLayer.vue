@@ -4,11 +4,13 @@ import { assets } from '../assets/registry';
 import { flexHtml } from '../core/flexHtml';
 import { alertState, closeAlert } from './alert';
 import FxButton from './FxButton.vue';
+import GoodsTip from './GoodsTip.vue';
+import PopupMenu from './PopupMenu.vue';
 import ResourceTip from './ResourceTip.vue';
 import { cssColor, skinStyle, styleString, textStyle } from './skin';
 import { tooltip } from './tooltip';
 
-/** Top-most stage layer: modal Alerts, the floating AlertPanel and tooltips. */
+/** Top-most stage layer: modal Alerts, the floating AlertPanel, popup menus and tooltips. */
 
 const alertDecl = computed(() => assets.style('Alert'));
 const titleDecl = computed(() => assets.style('', styleString(alertDecl.value, 'titleStyleName')));
@@ -58,9 +60,17 @@ const tipStyle = computed(() => ({
       </div>
     </div>
 
+    <PopupMenu />
+
     <ResourceTip
       v-if="tooltip.visible && tooltip.resource"
       :tip="tooltip.resource"
+      :x="tooltip.x"
+      :y="tooltip.y"
+    />
+    <GoodsTip
+      v-else-if="tooltip.visible && tooltip.goods"
+      :tip="tooltip.goods"
       :x="tooltip.x"
       :y="tooltip.y"
     />

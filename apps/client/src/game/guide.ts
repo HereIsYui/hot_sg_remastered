@@ -222,6 +222,8 @@ export class GuideManager {
   last = false;
   /** `BloodWar.mJustCreateRole`: steps only show for a role created in this session. */
   justCreatedRole = false;
+  /** `GuideTip.maskAll`: areas closed off between steps, until `unmask`. */
+  masks: Rect[] = [];
   private curGid = -1;
 
   /** The getGuidesByGroup reply: `[steps]`; the first one shows at once. */
@@ -273,6 +275,15 @@ export class GuideManager {
   showNext(): void {
     const next = this.tips.find((t) => t.pregid === this.curGid);
     if (next) this.show(next.gid);
+  }
+
+  maskAll(rects: Rect[]): void {
+    this.masks = rects;
+  }
+
+  /** Removing every MaskCanvas from the stage. */
+  unmask(): void {
+    this.masks = [];
   }
 
   /** `skipCurGuide`: 跳过引导 drops every remaining step. */

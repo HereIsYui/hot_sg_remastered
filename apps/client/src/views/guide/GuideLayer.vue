@@ -117,6 +117,14 @@ onBeforeUnmount(() => {
         class="arrow"
       />
     </template>
+    <template v-else>
+      <div
+        v-for="(r, i) in guide.masks"
+        :key="i"
+        class="mask"
+        :style="{ left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px` }"
+      />
+    </template>
   </div>
 </template>
 

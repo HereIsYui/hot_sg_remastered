@@ -20,18 +20,30 @@ export interface ResourceTip {
   rows: ResourceTipRow[];
 }
 
+/** `Tooltip.GoodsTip`: an item's name over its htmlText description. */
+export interface GoodsTip {
+  title: string;
+  text: string;
+}
+
 /**
- * Flex `toolTip`: plain text, Flex htmlText for custom tips (WorldMapTip etc.), or a
- * ResourceRelatedToolTip built when the pointer arrives.
+ * Flex `toolTip`: plain text, Flex htmlText for custom tips (WorldMapTip etc.), a
+ * ResourceRelatedToolTip built when the pointer arrives, or a GoodsTip.
  */
 export type TipValue =
-  string | { html: string } | { resource: () => ResourceTip | string | null } | null | undefined;
+  | string
+  | { html: string }
+  | { resource: () => ResourceTip | string | null }
+  | { goods: GoodsTip }
+  | null
+  | undefined;
 
 export const tooltip = reactive({
   visible: false,
   text: '',
   html: '',
   resource: null as ResourceTip | null,
+  goods: null as GoodsTip | null,
   x: 0,
   y: 0,
 });
@@ -69,6 +81,7 @@ function show(el: TipElement, e: MouseEvent) {
   tooltip.text = typeof value === 'string' ? value : '';
   tooltip.html = typeof value === 'object' && 'html' in value ? value.html : '';
   tooltip.resource = typeof value === 'object' && 'rows' in value ? value : null;
+  tooltip.goods = typeof value === 'object' && 'goods' in value ? value.goods : null;
   tooltip.x = p.x + 10;
   tooltip.y = p.y + 20;
   tooltip.visible = true;

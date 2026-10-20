@@ -791,6 +791,59 @@ export const cases: DiffCase[] = [
       await s.command(session, 'completeGuide', 14);
     },
   },
+  {
+    name: 'goods are listed, opened and sold',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const give = (gid: number, count: number) =>
+        s.query(
+          `insert into sys_goods (uid, gid, count) values (?, ?, ?)
+            on duplicate key update count = values(count)`,
+          [uid, gid, count],
+        );
+      // The login hands out one of two daily boxes at random.
+      await s.query('delete from sys_goods where uid = ? and gid in (50186, 50187)', [uid]);
+      await s.command(session, 'loadUserGoods');
+      await s.command(session, 'useGoods', 999);
+      await s.command(session, 'useGoods', 57);
+      await s.command(session, 'useGoods', 50101, 100);
+      await s.command(session, 'useGoods', 1, 2);
+      await s.command(session, 'useGoods', 8);
+      await s.command(session, 'useGoods', 87, 2);
+      await s.command(session, 'useGoods', 86);
+      await s.command(session, 'useGoods', 50104);
+      await give(50101, 1);
+      await s.command(session, 'useGoods', 50101);
+      await s.command(session, 'useGoods', 50101);
+
+      await give(16, 2);
+      await give(19, 1);
+      // Only 藏宝图 can drop, once: a weight of 5 or less always comes alone. Other drops could
+      // also hit mt_rand(1, 0), which the legacy server's PHP 7 rejects and PHP 5 answered 1.
+      await s.query(`update cfg_goods set copperbox = -copperbox, silverbox = -silverbox
+        where gid <> 118 and (copperbox > 0 or silverbox > 0)`);
+      try {
+        await s.command(session, 'useGoods', 16);
+        await s.command(session, 'useGoods', 16);
+        await s.command(session, 'useGoods', 19);
+        await give(19, 1);
+        await s.command(session, 'useGoods', 19);
+      } finally {
+        await s.query(`update cfg_goods set copperbox = abs(copperbox), silverbox = abs(silverbox)
+          where copperbox < 0 or silverbox < 0`);
+      }
+
+      await s.command(session, 'sellGoods', cid, 67, 3);
+      await s.query('update sys_user set nobility = 1 where uid = ?', [uid]);
+      await s.command(session, 'sellGoods', cid, 67, 3);
+      await s.command(session, 'sellGoods', cid, 67, 100);
+      await s.command(session, 'sellGoods', cid, 67, 0);
+      await s.command(session, 'sellGoods', cid, 160052, 1);
+      await s.command(session, 'loadUserGoods');
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {

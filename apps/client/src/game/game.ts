@@ -394,6 +394,11 @@ export class Game {
     void this.cmd.sendGlobalCommand('city', 'getCityBuilding', [this.user.cid]);
   }
 
+  /** `Command.sendCityCommand(0)`: resources and user fields now rather than at the next poll. */
+  refreshResource(): void {
+    void this.cmd.sendCityCommand(CityInfoType.Resource);
+  }
+
   // ---- city views (TopPanel / CityInnerPanel / CityPanel) ----
 
   /** `BloodWar.gotoCityInner` / `gotoCity` / ...: switching scenes closes all dialogs. */

@@ -17,6 +17,7 @@ import UpgradeBuildingDialog from '../building/UpgradeBuildingDialog.vue';
 import CollegeDialog from '../college/CollegeDialog.vue';
 import CityFieldDialog from '../government/CityFieldDialog.vue';
 import CityListDialog from '../government/CityListDialog.vue';
+import MyGoodsDialog from '../goods/MyGoodsDialog.vue';
 import GovernmentDialog from '../government/GovernmentDialog.vue';
 import ResourceProductDialog from '../government/ResourceProductDialog.vue';
 import ModifyPasswordDialog from '../system/ModifyPasswordDialog.vue';
@@ -65,6 +66,7 @@ function choose(action: 'all' | 'level') {
     <OpenLockDialog v-else-if="dialog?.name === 'openLock'" :type="dialog.type" />
     <ModifyPasswordDialog v-else-if="dialog?.name === 'modifyPassword'" />
     <TaskDialog v-else-if="dialog?.name === 'task'" />
+    <MyGoodsDialog v-else-if="dialog?.name === 'myGoods'" />
     <GovernmentDialog
       v-else-if="dialog?.name === 'building' && ownDialog(dialog.building, BUILDING_GOVERNMENT)"
       :key="`government ${buildingKey}`"

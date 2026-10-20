@@ -379,8 +379,8 @@ export class TaskRewards {
       on duplicate key update count = count + ${count}`.execute(this.scope.db);
   }
 
-  /** utils.php::addArmor at strength level 0. */
-  private async addArmor(uid: number, armorid: number, count: number, logType: number) {
+  /** utils.php::addArmor at strength level 0, the cfg_armor row looked up by id. */
+  async addArmor(uid: number, armorid: number, count: number, logType: number): Promise<void> {
     if (count === 0) return;
     if (armorid >= BATTLE_ARMOR.min && armorid <= BATTLE_ARMOR.max) {
       throw new Error(`addArmor(${armorid}): battlefield opening not ported`);

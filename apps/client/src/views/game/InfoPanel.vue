@@ -186,7 +186,7 @@ const cityIndex = computed({
       </FxCanvas>
       <FxButton :x="13" :y="102" style-name="King" />
       <FxButton :x="13" :y="135" style-name="Armor" />
-      <FxButton :x="13" :y="168" style-name="Inventory" />
+      <FxButton :x="13" :y="168" style-name="Inventory" @click="game.showDialog('myGoods')" />
     </FxCanvas>
 
     <FxCanvas :y="210" :h="102" :left="6" :right="6" style-name="PanelGreyBlue">

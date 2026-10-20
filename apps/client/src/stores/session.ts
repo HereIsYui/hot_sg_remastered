@@ -8,7 +8,13 @@ export type View = 'cityInner' | 'city' | 'world' | 'battle';
 
 /** Dialogs opened without arguments (`showBuildingListDialog`, `showCityFieldDialog`, ...). */
 export type PlainDialog =
-  'buildingList' | 'resourceProduct' | 'cityList' | 'cityField' | 'modifyPassword' | 'task';
+  | 'buildingList'
+  | 'resourceProduct'
+  | 'cityList'
+  | 'cityField'
+  | 'modifyPassword'
+  | 'task'
+  | 'myGoods';
 
 /**
  * `DialogManager.showCreateBuildingDialog(kind)` (0 fields, 1 inner, 2 wall), `showBuildingDialog`,

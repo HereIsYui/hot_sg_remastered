@@ -7,6 +7,7 @@ import { ConfigModule } from './config/config.module';
 import { CoreModule } from './core/core.module';
 import { DatabaseModule } from './db/database.module';
 import { GatewayModule } from './gateway/gateway.module';
+import { GoodsModule } from './goods/goods.module';
 import { GuideModule } from './guide/guide.module';
 import { HealthController } from './health/health.controller';
 import { PushModule } from './push/push.module';
@@ -31,6 +32,7 @@ import { UserModule } from './user/user.module';
     BufferModule,
     TaskModule,
     GuideModule,
+    GoodsModule,
   ],
   controllers: [HealthController],
 })
