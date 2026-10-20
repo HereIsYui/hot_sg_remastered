@@ -254,6 +254,24 @@ export class CityInfoService {
     return ret;
   }
 
+  /** ArmorFunc.php::getHeroDetail: one hero row with its buffers, as the armor commands reply. */
+  async heroDetail(hid: number): Promise<Row | undefined> {
+    const hero = await this.one(sql<Row>`select * from sys_city_hero h
+      left join mem_hero_blood m on m.hid = h.hid where h.hid = ${hid}`);
+    if (!hero) return undefined;
+    const buffers = await this.rows(sql<Row>`select * from mem_hero_buffer
+      where hid = ${hero.hid} and endtime > unix_timestamp()`);
+    for (const buf of buffers) hero[`buf${String(buf.buftype)}`] = buf.endtime;
+    if (phpIntval(hero.herotype) === 1000) {
+      const level = await this.cell(
+        sql<Row>`select level from sys_user_level where uid = ${hero.uid}`,
+      );
+      hero.kingLevel = phpEmpty(level) ? 0 : level;
+    }
+    hero.curCid = await this.heroCity(hero.hid);
+    return hero;
+  }
+
   /** global.php::doGetHeroState: where the hero is, the garrison target when stationed (4). */
   private async heroCity(hid: unknown): Promise<unknown> {
     const hero = await this.one(sql<Row>`select * from sys_city_hero where hid = ${hid} limit 1`);

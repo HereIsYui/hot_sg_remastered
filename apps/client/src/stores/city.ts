@@ -182,6 +182,14 @@ export const useCityStore = defineStore('city', {
       this.heroes = rowsOf(rows);
     },
 
+    /** `heroList.setItemAt`: one hero row refreshed by an armor command. */
+    replaceHero(row: unknown): void {
+      if (!row || typeof row !== 'object' || Array.isArray(row)) return;
+      const hero = row as Row;
+      const i = this.heroes.findIndex((h) => int(h.hid) === int(hero.hid));
+      if (i >= 0) this.heroes.splice(i, 1, hero);
+    },
+
     /** `onLoadSoldierList` / `onLoadDefenceList`: `count` may be null. */
     applySoldiers(rows: unknown): void {
       this.soldierCounts = Object.fromEntries(rowsOf(rows).map((r) => [int(r.sid), int(r.count)]));

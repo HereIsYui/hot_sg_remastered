@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { assets } from '../assets/registry';
 import { flexHtml } from '../core/flexHtml';
 import { alertState, closeAlert } from './alert';
+import ArmorTipView from './ArmorTip.vue';
 import FxButton from './FxButton.vue';
 import GoodsTip from './GoodsTip.vue';
 import PopupMenu from './PopupMenu.vue';
@@ -71,6 +72,12 @@ const tipStyle = computed(() => ({
     <GoodsTip
       v-else-if="tooltip.visible && tooltip.goods"
       :tip="tooltip.goods"
+      :x="tooltip.x"
+      :y="tooltip.y"
+    />
+    <ArmorTipView
+      v-else-if="tooltip.visible && tooltip.armor"
+      :tip="tooltip.armor"
       :x="tooltip.x"
       :y="tooltip.y"
     />

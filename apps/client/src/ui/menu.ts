@@ -1,11 +1,15 @@
 import { reactive } from 'vue';
 
-/** An entry of `mx.controls.Menu` data: `label`, `data`, optionally disabled. */
+/** An entry of `mx.controls.Menu` data: `label`, `data`, optionally disabled or a separator. */
 export interface MenuItem {
   label: string;
   data: string;
   enabled?: boolean;
+  separator?: boolean;
 }
+
+/** `{type: "separator"}` */
+export const MENU_SEPARATOR: MenuItem = { label: '', data: '-', separator: true };
 
 export const menuState = reactive({
   visible: false,

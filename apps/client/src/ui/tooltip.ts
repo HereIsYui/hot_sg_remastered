@@ -1,5 +1,6 @@
 import { reactive, type Directive } from 'vue';
 import { DESIGN_WIDTH } from '@hot/shared';
+import type { ArmorTip } from '../game/armor';
 
 /** One line of a ResourceRelatedToolTip; `ok` false paints the needed amount red. */
 export interface ResourceTipRow {
@@ -35,6 +36,7 @@ export type TipValue =
   | { html: string }
   | { resource: () => ResourceTip | string | null }
   | { goods: GoodsTip }
+  | { armor: () => ArmorTip | null }
   | null
   | undefined;
 
@@ -44,6 +46,7 @@ export const tooltip = reactive({
   html: '',
   resource: null as ResourceTip | null,
   goods: null as GoodsTip | null,
+  armor: null as ArmorTip | null,
   x: 0,
   y: 0,
 });
@@ -70,8 +73,12 @@ const claimed = new WeakSet<Event>();
 
 function show(el: TipElement, e: MouseEvent) {
   if (claimed.has(e)) return;
-  let value: TipValue | ResourceTip = el._tip;
+  let value: TipValue | ResourceTip | { armorTip: ArmorTip | null } = el._tip;
   if (value && typeof value === 'object' && 'resource' in value) value = value.resource();
+  if (value && typeof value === 'object' && 'armor' in value) {
+    const armorTip = value.armor();
+    value = armorTip && { armorTip };
+  }
   if (!value || (typeof value === 'string' && !value.trim())) {
     tooltip.visible = false;
     return;
@@ -82,6 +89,7 @@ function show(el: TipElement, e: MouseEvent) {
   tooltip.html = typeof value === 'object' && 'html' in value ? value.html : '';
   tooltip.resource = typeof value === 'object' && 'rows' in value ? value : null;
   tooltip.goods = typeof value === 'object' && 'goods' in value ? value.goods : null;
+  tooltip.armor = typeof value === 'object' && 'armorTip' in value ? value.armorTip : null;
   tooltip.x = p.x + 10;
   tooltip.y = p.y + 20;
   tooltip.visible = true;

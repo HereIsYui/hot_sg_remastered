@@ -20,12 +20,16 @@ import FxCanvas from '../../ui/FxCanvas.vue';
 import FxDataGrid from '../../ui/FxDataGrid.vue';
 import FxImage from '../../ui/FxImage.vue';
 import FxLabel from '../../ui/FxLabel.vue';
+import ArmorRenovatePayDialog from './ArmorRenovatePayDialog.vue';
+import ChangeArmorDialog from './ChangeArmorDialog.vue';
 import ChangeHeroNameDialog from './ChangeHeroNameDialog.vue';
+import HeroArmorPanel from './HeroArmorPanel.vue';
+import { useHeroArmor } from './heroArmor';
 import LargessDialog from './LargessDialog.vue';
 
 /**
  * Hero.HeroDetailDialog: the city's heroes, the chosen one's attributes, upgrading, spending
- * and clearing potential, renaming, rewards and dismissal. Gear, skills, item bonuses, the
+ * and clearing potential, renaming, rewards, dismissal and gear. Skills, item bonuses, the
  * 君主 panel and summoning captives are not ported.
  */
 const props = defineProps<{ hid: number }>();
@@ -68,6 +72,7 @@ const hero = computed(() => {
 });
 
 setHero(props.hid);
+const armor = useHeroArmor(hero);
 watch(
   () => city.heroes,
   () => setHero(mHid.value),
@@ -530,9 +535,7 @@ const points = computed(() => {
         </template>
       </FxCanvas>
 
-      <FxCanvas :x="417" :y="0" :w="235" :h="375" style-name="BoardListDown">
-        <FxImage :x="19" :y="3" :w="205" :h="369" source="images/back_armor.png" />
-      </FxCanvas>
+      <HeroArmorPanel :x="417" :y="0" :state="armor" />
     </FxCanvas>
 
     <ChangeHeroNameDialog
@@ -546,6 +549,20 @@ const points = computed(() => {
       :hero="hero"
       @largess="(typeidx) => send('largessHero', hero!.hid, typeidx)"
       @close="panel = null"
+    />
+    <ChangeArmorDialog
+      v-if="armor.changePart.value !== null && hero"
+      :hero="hero"
+      :spart="armor.changePart.value"
+      @equip="armor.equip"
+      @close="armor.changePart.value = null"
+    />
+    <ArmorRenovatePayDialog
+      v-if="armor.renovate.value"
+      :all="armor.renovate.value.all"
+      :cost="armor.renovate.value.cost"
+      @pay="(byGift) => armor.payRenovation(armor.renovate.value!, byGift)"
+      @close="armor.renovate.value = null"
     />
   </FxCanvas>
 </template>

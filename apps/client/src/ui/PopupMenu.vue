@@ -29,7 +29,7 @@ function rowStyle(item: MenuItem, i: number) {
 }
 
 function choose(item: MenuItem) {
-  if (item.enabled === false) return;
+  if (item.enabled === false || item.separator) return;
   closeMenu(item.data);
 }
 
@@ -50,17 +50,19 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocumentDown
 
 <template>
   <div v-if="menuState.visible" ref="root" class="popup-menu" :style="boxStyle">
-    <div
-      v-for="(item, i) in menuState.items"
-      :key="item.data"
-      class="row"
-      :style="rowStyle(item, i)"
-      @mouseenter="over = i"
-      @mouseleave="over = -1"
-      @click="choose(item)"
-    >
-      {{ item.label }}
-    </div>
+    <template v-for="(item, i) in menuState.items" :key="`${i}${item.data}`">
+      <div v-if="item.separator" class="separator" />
+      <div
+        v-else
+        class="row"
+        :style="rowStyle(item, i)"
+        @mouseenter="over = i"
+        @mouseleave="over = -1"
+        @click="choose(item)"
+      >
+        {{ item.label }}
+      </div>
+    </template>
   </div>
 </template>
 
@@ -70,6 +72,12 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocumentDown
   padding: 1px 0;
   pointer-events: auto;
   box-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.separator {
+  height: 1px;
+  margin: 3px 2px;
+  background: rgba(128, 128, 128, 0.6);
 }
 
 .row {

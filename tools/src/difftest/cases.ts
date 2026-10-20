@@ -1289,6 +1289,128 @@ export const cases: DiffCase[] = [
       }
     },
   },
+  {
+    name: 'hero gear is equipped, repaired, renovated and taken off',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      // Set lists and set attributes come without ORDER BY: MyISAM vs InnoDB row order.
+      const GEAR_LISTS: Record<string, (string | number)[]> = {
+        loadUserPartArmor: [4],
+        getHeroArmor: [4],
+        equipArmor: [4, 1],
+        offloadArmor: [4, 1],
+        offloadAllArmor: [4, 1],
+      };
+      const cmd = async (func: string, ...args: unknown[]) => {
+        await s.command(session, func, ...args);
+        const at = GEAR_LISTS[func];
+        if (!at) return;
+        const [ties, tieAttributes] = func === 'loadUserPartArmor' ? [3, 4] : [6, 7];
+        s.unordered(...at, ties);
+        s.unordered(...at, tieAttributes);
+      };
+      const LORD = 80213;
+      // 白虎 pieces need level 120; 龙渊 110.
+      const HELMET = 50939;
+      const NECKLACE = 50938;
+      const SHOULDER = 50941;
+      const LONGYUAN_HELMET = 50956;
+      const damage = (sid: number, hp: number, hpMax = 255) =>
+        s.query('update sys_user_armor set hp = ?, hp_max = ? where sid = ?', [hp, hpMax, sid]);
+
+      await cmd('getHeroArmor', LORD);
+      await cmd('loadUserPartArmor', 1);
+      await cmd('equipArmor', LORD, HELMET, 20);
+      await cmd('equipArmor', LORD, 999999, 10);
+      await cmd('equipArmor', LORD, HELMET, 10);
+      await s.query('update sys_city_hero set level = 120 where hid = ?', [LORD]);
+      await cmd('equipArmor', LORD, HELMET, 10);
+      await cmd('equipArmor', LORD, LONGYUAN_HELMET, 10);
+      await cmd('equipArmor', LORD, HELMET, 10);
+      await cmd('equipArmor', LORD, NECKLACE, 20);
+      await cmd('equipArmor', LORD, LONGYUAN_HELMET, 10);
+      await cmd('equipArmor', LORD, LONGYUAN_HELMET, 10);
+      await damage(SHOULDER, 0);
+      await cmd('equipArmor', LORD, SHOULDER, 30);
+      await damage(SHOULDER, 2550);
+      await s.query('update sys_city_hero set state = 2 where hid = ?', [LORD]);
+      await cmd('equipArmor', LORD, SHOULDER, 30);
+      await s.query('update sys_city_hero set state = 1 where hid = ?', [LORD]);
+      await cmd('equipArmor', LORD, SHOULDER, 30);
+      await s.query('update sys_city_hero set state = 0 where hid = ?', [LORD]);
+      await s.query('insert into sys_armor_special (sid, type) values (?, 2)', [NECKLACE]);
+      await cmd('offloadArmor', LORD, 20);
+      await cmd('offloadArmor', LORD, 20);
+      await cmd('equipArmor', LORD, NECKLACE, 20);
+
+      // 黄金 repairs lower the maximum; 元宝 / 礼金 renovations restore it.
+      await s.query('update mem_city_resource set gold = 10000000 where cid = ?', [cid]);
+      await damage(LONGYUAN_HELMET, 1000);
+      await cmd('repairArmor', cid, LONGYUAN_HELMET);
+      await cmd('repairArmor', cid, LONGYUAN_HELMET);
+      await damage(NECKLACE, 500);
+      await s.query('update mem_city_resource set gold = 100 where cid = ?', [cid]);
+      await cmd('repairArmor', cid, NECKLACE);
+      await s.query('update mem_city_resource set gold = 10000000 where cid = ?', [cid]);
+      await damage(SHOULDER, 1200);
+      await cmd('repairAllArmor', cid, LORD, `${NECKLACE},${SHOULDER}`);
+      await cmd('repairAllArmor', cid, LORD, '');
+      await cmd('renovateArmor', LONGYUAN_HELMET);
+      await cmd('renovateArmor', LONGYUAN_HELMET);
+      await cmd('renovateArmorWithGift', NECKLACE);
+      await damage(LONGYUAN_HELMET, 2000, 240);
+      await damage(SHOULDER, 900, 250);
+      await cmd('renovateAllArmor', LORD, `${LONGYUAN_HELMET},${SHOULDER}`);
+      await damage(NECKLACE, 100, 200);
+      await cmd('renovateAllArmorWithGift', LORD, `${NECKLACE}`);
+      await damage(NECKLACE, 100, 200);
+      await s.query('update sys_user set money = 0, gift = 0 where uid = ?', [uid]);
+      await cmd('renovateArmor', NECKLACE);
+      await cmd('renovateAllArmorWithGift', LORD, `${NECKLACE}`);
+
+      // A complete 白虎 set can be deified, with a 炼化鼎.
+      await cmd('deifyArmor', LORD);
+      await cmd('offloadAllArmor', LORD);
+      const set: [spart: number, sid: number, armorid: number][] = [
+        [10, 50939, 53041],
+        [20, 50938, 53042],
+        [30, 50941, 53043],
+        [40, 50942, 53044],
+        [50, 50943, 53045],
+        [60, 50944, 53046],
+        [70, 50945, 53047],
+        [80, 50946, 53048],
+        [90, 50947, 53049],
+        [91, 50948, 53049],
+        [100, 50949, 53050],
+        [101, 50950, 53050],
+        [110, 50951, 53051],
+        [111, 50952, 53051],
+        [112, 50953, 53051],
+        [120, 50954, 53052],
+      ];
+      for (const [spart, sid, armorid] of set) {
+        await s.query('insert into sys_hero_armor (hid, spart, sid, armorid) values (?, ?, ?, ?)', [
+          LORD,
+          spart,
+          sid,
+          armorid,
+        ]);
+        await s.query('update sys_user_armor set hid = ? where sid = ?', [LORD, sid]);
+      }
+      await damage(NECKLACE, 2550);
+      await cmd('getHeroArmor', LORD);
+      await s.query('delete from sys_goods where uid = ? and gid = 155', [uid]);
+      await cmd('deifyArmor', LORD);
+      await s.query(
+        'insert into sys_user_tie_deify_attribute (attid, sid, value) values (10003, 50945, 7)',
+      );
+      await cmd('getHeroArmor', LORD);
+      await cmd('offloadAllArmor', LORD);
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {
