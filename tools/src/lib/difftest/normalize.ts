@@ -32,6 +32,8 @@ const NUMERIC = /^-?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
 const ADDRESS_COLUMNS = new Set(['ip', 'sip']);
 /** Clock skew tolerated around a side's window. */
 const SLACK_SECONDS = 2;
+/** Offset times older than this before the case start are compared as absolute values. */
+const STALE_SECONDS = 365 * 86400;
 
 /** Numbers and numeric strings become the same canonical string; other values pass through. */
 export function canonicalScalar(value: unknown): unknown {
@@ -119,6 +121,10 @@ export function offsetOf(value: unknown, ctx: SideContext): unknown {
   if (typeof canonical !== 'string' || !/^\d+$/.test(canonical)) return canonical;
   // 0 stands for "no time set" (e.g. state_endtime of an idle queue).
   if (Number(canonical) === 0) return canonical;
+  // A time far in the past was not derived from "now" (e.g. a long-expired buff extended from
+  // its own end time). Its value is the same on both sides; as minutes from each side's start
+  // it would round differently when the sides started either side of a minute boundary.
+  if (Number(canonical) < ctx.start - STALE_SECONDS) return canonical;
   const minutes = Math.round((Number(canonical) - ctx.start) / 60);
   return `<now${minutes >= 0 ? '+' : ''}${minutes}m>`;
 }

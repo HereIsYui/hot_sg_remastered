@@ -6,6 +6,7 @@ import {
   maskAt,
   normalizeRow,
   normalizeTree,
+  offsetOf,
   sortAt,
   type SideContext,
 } from './normalize.ts';
@@ -96,5 +97,20 @@ describe('sortAt', () => {
     ]);
     expect(sortAt({ a: ['2', '1'] }, ['a'])).toEqual({ a: ['1', '2'] });
     expect(sortAt(['b', 'a'], [5])).toEqual(['b', 'a']);
+  });
+});
+
+describe('offsetOf', () => {
+  const ctx = (start: number): SideContext => ({ start, end: start + 5, aliases: new Map() });
+
+  it('shows now-relative times as minutes from the case start', () => {
+    expect(offsetOf(1_700_000_000 + 600, ctx(1_700_000_000))).toBe('<now+10m>');
+    expect(offsetOf(0, ctx(1_700_000_000))).toBe('0');
+  });
+
+  it('keeps long-past times absolute, whatever minute each side started in', () => {
+    const stale = 1_300_000_000;
+    expect(offsetOf(stale, ctx(1_700_000_029))).toBe(String(stale));
+    expect(offsetOf(stale, ctx(1_700_000_031))).toBe(String(stale));
   });
 });

@@ -11,6 +11,22 @@ function cid2wid(cid: number): number {
   return Math.floor(y / 10) * 10000 + Math.floor(x / 10) * 100 + (y % 10) * 10 + (x % 10);
 }
 
+/**
+ * New cities land on a random free tile. On a tile whose cid equals its wid, the `<cid>` and
+ * `<wid>` aliases collide and that side compares wrong; take those tiles out of the draw (state 1)
+ * before creating a city in `province`. The snapshot rollback puts them back.
+ */
+async function avoidCidWidTiles(side: Side, province: number): Promise<void> {
+  const rows = await side.query<{ wid: string }>(
+    'select wid from mem_world where type = 1 and province = ? and ownercid = 0 and state = 0',
+    [province],
+  );
+  const clash = rows.map((r) => Number(r.wid)).filter((wid) => wid2cid(wid) === wid);
+  if (clash.length) {
+    await side.query(`update mem_world set state = 1 where wid in (${clash.join(',')})`);
+  }
+}
+
 /** New cities land on a random tile; alias its ids so both sides compare equal. */
 async function aliasNewCity(side: Side, uid: number): Promise<void> {
   const [row] = await side.query<{ lastcid: string }>(
@@ -65,6 +81,7 @@ export const cases: DiffCase[] = [
     run: async (s) => {
       const session = await s.login('difftest_new');
       await s.command(session, 'loadUserInfo', 1);
+      await avoidCidWidTiles(s, 3);
       await s.command(session, 'createRole', '风云子', '新城', 3, '风', 1, 2, 0);
       await aliasNewCity(s, session.uid);
       await s.command(session, 'loadUserInfo', 1);
@@ -142,6 +159,7 @@ export const cases: DiffCase[] = [
     name: 'new role opens its city',
     run: async (s) => {
       const session = await s.login('difftest_city');
+      await avoidCidWidTiles(s, 5);
       await s.command(session, 'createRole', '城主', '新城', 5, '城', 0, 3, 0);
       await aliasNewCity(s, session.uid);
       const cid = await lastCity(s, session.uid);
@@ -1021,6 +1039,9 @@ export const cases: DiffCase[] = [
       ]);
       await s.command(session, 'useGoods', 58);
       await s.command(session, 'useGoods', 58);
+      // "请在71小时59分钟59秒后再使用": the countdown is to the second, so a clock tick between
+      // the two calls shifts it on one side only.
+      s.mask(1);
 
       await give(134, 2);
       await s.query('update sys_user set honour = 0 where uid = ?', [uid]);
@@ -1942,8 +1963,9 @@ export const cases: DiffCase[] = [
         await seed();
         await s.command(session, 'mergeBook', 4, 2, 0);
         s.unordered(4, 2, 0); // the merge reply carries the same tab list at result[2][0]
-        // forced failure, no protect: materials lost
-        await s.query('update cfg_book_rate set rate = 0 where level = 3');
+        // forced failure, no protect: materials lost. Not rate 0: both sides treat an empty
+        // rate as 10%, so a 0 still succeeds one time in ten (legacy rand() is unseeded).
+        await s.query('update cfg_book_rate set rate = -1 where level = 3');
         await seed();
         await s.command(session, 'mergeBook', 4, 2, 0);
         s.unordered(4, 2, 0);
