@@ -8,6 +8,7 @@ import UpgradeBuildingDialog from '../building/UpgradeBuildingDialog.vue';
 import ChangeNameDialog from './ChangeNameDialog.vue';
 import ChangeTaxDialog from './ChangeTaxDialog.vue';
 import GovernmentPanel from './GovernmentPanel.vue';
+import HeroExprDialog from './HeroExprDialog.vue';
 import LevyResourceDialog from './LevyResourceDialog.vue';
 import PacifyPeopleDialog from './PacifyPeopleDialog.vue';
 
@@ -42,6 +43,11 @@ function open(action: GovernmentAction) {
       <ChangeTaxDialog v-else-if="popup === 'tax'" @close="popup = null" />
       <LevyResourceDialog v-else-if="popup === 'levy'" @close="popup = null" />
       <PacifyPeopleDialog v-else-if="popup === 'pacify'" @close="popup = null" />
+      <HeroExprDialog
+        v-else-if="popup === 'heroExpr'"
+        :param="building.y * 10 + building.x"
+        @close="popup = null"
+      />
     </template>
   </UpgradeBuildingDialog>
 </template>

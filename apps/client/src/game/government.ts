@@ -3,8 +3,8 @@ import type { BuildingState } from '../stores/city';
 
 type Lang = (key: string) => string;
 
-/** The 官府 pop-ups: 调整税率, 安抚百姓, 征收物资 and 城池改名. */
-export type GovernmentAction = 'tax' | 'pacify' | 'levy' | 'rename';
+/** The 官府 pop-ups: 调整税率, 安抚百姓, 征收物资, 城池改名 and 将领历练. */
+export type GovernmentAction = 'tax' | 'pacify' | 'levy' | 'rename' | 'heroExpr';
 
 /** `Define.GAME_SPEED_RATE`. */
 const GAME_SPEED_RATE = 1;

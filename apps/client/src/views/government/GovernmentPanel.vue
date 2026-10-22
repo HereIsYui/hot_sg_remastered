@@ -21,20 +21,23 @@ const t = (n: number) => i18n(`Government_GovernmentPanel_${n}_1`);
  * `action` opens a pop-up of the 官府, `dialog` another dialog.
  */
 const buttons: {
-  x: number;
   label: number;
   action?: GovernmentAction;
   dialog?: PlainDialog;
 }[] = [
-  { x: 1, label: 1, dialog: 'buildingList' },
-  { x: 83, label: 5, dialog: 'resourceProduct' },
-  { x: 165, label: 2, action: 'tax' },
-  { x: 247, label: 3, action: 'pacify' },
-  { x: 329, label: 4, action: 'levy' },
-  { x: 411, label: 6, action: 'rename' },
-  { x: 493, label: 16, dialog: 'cityField' },
-  { x: 575, label: 17, dialog: 'cityList' },
+  { label: 1, dialog: 'buildingList' },
+  { label: 5, dialog: 'resourceProduct' },
+  { label: 2, action: 'tax' },
+  { label: 3, action: 'pacify' },
+  { label: 4, action: 'levy' },
+  { label: 6, action: 'rename' },
+  { label: 16, dialog: 'cityField' },
+  { label: 17, dialog: 'cityList' },
+  { label: 9, action: 'heroExpr' },
 ];
+
+/** Nine buttons share the 650px row; label 9 (将领历练) comes from the Office's HeroExprDialog. */
+const buttonLayout = computed(() => buttons.map((b, i) => ({ ...b, x: 1 + i * 72, w: 70 })));
 
 function onButton(b: (typeof buttons)[number]) {
   if (b.action) emit('open', b.action);
@@ -69,14 +72,14 @@ function onItemClick(row: UpgradingRow) {
     :fx="{ fontSize: 12, borderStyle: 'none' }"
   >
     <FxButton
-      v-for="b in buttons"
+      v-for="b in buttonLayout"
       :key="b.label"
       :x="b.x"
       :y="8"
-      :w="74"
+      :w="b.w"
       :h="37"
       style-name="ButtonYellow"
-      :label="t(b.label)"
+      :label="b.action === 'heroExpr' ? i18n('Office_HeroExprDialog_1_1') : t(b.label)"
       @click="onButton(b)"
     />
     <FxDataGrid

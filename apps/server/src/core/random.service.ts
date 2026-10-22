@@ -15,6 +15,12 @@ export class RandomService {
     return randomInt(PHP_RAND_MAX + 1);
   }
 
+  /** `rand($min, $max)`, both ends inclusive (libc rand; difftest scripts fix it). */
+  randRange(min: number, max: number): number {
+    if (max < min) return min;
+    return randomInt(min, max + 1);
+  }
+
   /** `mt_rand($min, $max)`, both ends inclusive. */
   mtRand(min: number, max: number): number {
     return randomInt(min, max + 1);
