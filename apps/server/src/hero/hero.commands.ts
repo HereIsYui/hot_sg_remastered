@@ -670,4 +670,30 @@ export class HeroCommands {
     }
     await this.cityRules.addCityResources(cid, 0, 0, 0, 0, -goldNeed);
   }
+
+  /**
+   * HeroFunc.php::getHeroBuffer — `[cid, hid]`: the hero's active 宝物 buffs for the
+   * HeroBufferDialog, `{hid, gid, name, endtime}` each. The 赤壁 goods (buftype 160040-160051 /
+   * 160023-160031) name themselves by `buftype`; every other buff names itself by `buftype + 25`
+   * (the cfg_goods row of the item that grants it). Read-only; a deterministic `order by` is added
+   * over the MyISAM original so both sides compare equal.
+   */
+  @GlobalCommand()
+  async getHeroBuffer(ctx: CommandContext, param: unknown[]): Promise<Row[]> {
+    void ctx;
+    const hid = phpIntval(param[1]);
+    const chibi = await this.rows(sql`select h.hid, c.gid, c.name, h.endtime
+      from mem_hero_buffer h left join cfg_goods c on c.gid = h.buftype
+      where h.hid = ${hid} and h.endtime > unix_timestamp()
+        and ((h.buftype >= 160040 and h.buftype <= 160051)
+          or (h.buftype >= 160023 and h.buftype <= 160031))
+      order by h.buftype`);
+    const world = await this.rows(sql`select h.hid, c.gid, c.name, h.endtime
+      from mem_hero_buffer h left join cfg_goods c on c.gid = h.buftype + 25
+      where h.buftype <> 5
+        and (h.buftype < 160023 or (h.buftype >= 19057 and h.buftype <= 19058))
+        and h.hid = ${hid} and h.endtime > unix_timestamp()
+      order by h.buftype`);
+    return [...chibi, ...world];
+  }
 }

@@ -2534,6 +2534,31 @@ export const cases: DiffCase[] = [
       await s.query('delete from sys_user_armor where sid = 900501', []);
     },
   },
+  {
+    name: 'hero buffer lists active treasure buffs',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      // 君主将 hid 80213. A world buff (buftype 1 -> name by gid 26) and a 赤壁 buff
+      // (buftype 160040, named directly); both end in the future. An expired buff and a
+      // buftype 5 (excluded) must not appear.
+      await s.query(
+        `insert into mem_hero_buffer (hid, buftype, endtime)
+         values (80213, 1, unix_timestamp() + 3600),
+                (80213, 160040, unix_timestamp() + 7200),
+                (80213, 2, unix_timestamp() - 3600),
+                (80213, 5, unix_timestamp() + 3600)
+         on duplicate key update endtime = values(endtime)`,
+        [],
+      );
+      await s.command(session, 'getHeroBuffer', 0, 80213);
+      // endtime is a future unix timestamp relative to each case start.
+      s.offset(4, '*', 'endtime');
+      await s.query(
+        'delete from mem_hero_buffer where hid = 80213 and buftype in (1, 160040, 2, 5)',
+        [],
+      );
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {
