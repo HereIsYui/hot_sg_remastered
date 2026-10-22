@@ -5,6 +5,7 @@ import {
   BLACKSMITH_TABS,
   PORTED_TABS,
   canMergeBook,
+  dismantleNeedCount,
   parseEmbedHoles,
   parseEmbedPearls,
   strongBlockReason,
@@ -21,6 +22,7 @@ import FxImage from '../../ui/FxImage.vue';
 import FxLabel from '../../ui/FxLabel.vue';
 import FxText from '../../ui/FxText.vue';
 import FxTextInput from '../../ui/FxTextInput.vue';
+import UseHuaShiFenDialog from '../goods/UseHuaShiFenDialog.vue';
 
 /**
  * BlackSmith.BSCommandDialog: the 铁匠铺 command dialog. 强化 / 镶嵌 / 合成 / 技能书合并 are
@@ -57,6 +59,8 @@ const embedHoles = ref<number[]>([3, 3, 3, 3, 3]);
 const embedPearls = ref<number[]>([0, 0, 0, 0, 0]);
 const pearlChoices = shallowRef<Row[]>([]);
 const choosingHole = ref<number | null>(null);
+/** 化石粉 dialog state: the hole whose pearl is being cleared. */
+const huaShiFen = ref<{ sid: number; pos: number; count: number } | null>(null);
 
 /** 合成: the pearl list, the chosen target, its recipe and the craft count. */
 const synthPearls = shallowRef<Row[]>([]);
@@ -137,10 +141,33 @@ const unregisterArmor = game.addGlobalReceiver('armor', (command, data) => {
   dealWithOtherInfoOfArmor(armorInfo, rest);
 });
 
+/**
+ * `openHoleSucc`: the 打孔器 / 化石粉 reply of useTypeGoods — `[armor, pearlObjs, gid]` — carries
+ * the piece with its new embed_holes / embed_pearls; refresh the picked piece's holes.
+ */
+const unregisterUser = game.addGlobalReceiver('user', (command, data) => {
+  if (command !== 'useTypeGoods' || !Array.isArray(data)) return;
+  const armor = (data as unknown[])[0];
+  if (!armor || typeof armor !== 'object') return;
+  const a = picked.value;
+  if (!a) return;
+  const row = armor as Row;
+  if (row.embed_holes !== undefined) {
+    a.row.embed_holes = row.embed_holes as never;
+    embedHoles.value = parseEmbedHoles(row.embed_holes);
+  }
+  if (row.embed_pearls !== undefined) {
+    a.row.embed_pearls = row.embed_pearls as never;
+    embedPearls.value = parseEmbedPearls(row.embed_pearls);
+  }
+  gameAlert(i18n('BlackSmith_OpenHoleSucc'));
+});
+
 onMounted(() => refreshAids());
 onUnmounted(() => {
   unregister();
   unregisterArmor();
+  unregisterUser();
 });
 
 function refreshAids() {
@@ -252,16 +279,29 @@ function selectHole(pos: number) {
     return;
   }
   const code = embedHoles.value[pos];
+  // A locked hole opens the matching 打孔器 picker (初级 24 / 高级 25 / 特级金刚钻 28).
   if (code === 1 || code === 2 || code === 4) {
-    // a locked hole: open it with the matching 打孔器 good
-    const gid = code === 1 ? 206 : code === 2 ? 207 : 208;
-    game.sendGlobalCommand('blacksmith', 'openHole', [a.sid, gid, pos]);
+    if (code === 4) {
+      // 特级金刚钻 only opens on 紫装 / 橙装 (type 5 / 6).
+      const type = int(a.row.type);
+      if (type !== 5 && type !== 6) {
+        void showAlert(i18n('BlackSmith_ArmorEmbed_not_purple'));
+        return;
+      }
+    }
+    const type = code === 1 ? 24 : code === 2 ? 25 : 28;
+    game.showUseGoodsDialog(0, type, [a.sid, pos]);
     return;
   }
   if (code === 0) {
-    if (embedPearls.value[pos] === 0) {
+    const pearl = embedPearls.value[pos] ?? 0;
+    if (pearl === 0) {
+      // an empty hole: pick a pearl to embed
       choosingHole.value = pos;
       game.sendGlobalCommand('blacksmith', 'loadEmbedPearl', [pos]);
+    } else {
+      // a filled hole: 化石粉 clears the pearl out
+      huaShiFen.value = { sid: a.sid, pos, count: dismantleNeedCount(pearl) };
     }
   }
 }
@@ -636,5 +676,13 @@ function mergeBook() {
         />
       </FxCanvas>
     </FxCanvas>
+
+    <UseHuaShiFenDialog
+      v-if="huaShiFen"
+      :sid="huaShiFen.sid"
+      :pos="huaShiFen.pos"
+      :count="huaShiFen.count"
+      @close="huaShiFen = null"
+    />
   </FxCanvas>
 </template>
