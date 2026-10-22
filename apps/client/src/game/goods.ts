@@ -195,3 +195,35 @@ export function treasureItems(list: unknown): TreasureItem[] {
       };
     });
 }
+
+/** 化石粉 (type 26) good gids: 化石粉 (goodType 0) and 五彩化石粉 (goodType 1). */
+export const HUA_SHI_FEN_GID = 201;
+export const WU_CAI_HUA_SHI_FEN_GID = 12156;
+
+/**
+ * `UseHuaShiFenDialog.onUseGoods`: by 化石粉 kind (`goodType` 0 = 化石粉, 1 = 五彩) and use way
+ * (`useType` 0 = one copy, 1 = the full count to keep the pearl), pick the confirm prompt key
+ * and the amount shown in it. Only 化石粉 + full use consumes the full `count`; everything else
+ * uses one. Returns the gid to send and the prompt parameters.
+ */
+export function huaShiFenUse(
+  goodType: number,
+  useType: number,
+  fullCount: number,
+): { gid: number; promptKey: string; amount: number; count: number } {
+  const promptKey =
+    goodType === 0
+      ? useType === 0
+        ? 'Goods_UseGoodsDialogSrc_12'
+        : 'Goods_UseGoodsDialogSrc_11'
+      : useType === 0
+        ? 'Goods_UseGoodsDialogSrc_13'
+        : 'Goods_UseGoodsDialogSrc_14';
+  const count = goodType === 0 && useType === 1 ? fullCount : 1;
+  return {
+    gid: goodType === 0 ? HUA_SHI_FEN_GID : WU_CAI_HUA_SHI_FEN_GID,
+    promptKey,
+    amount: count,
+    count,
+  };
+}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   goodsImage,
+  huaShiFenUse,
   itemPosition,
   pageCount,
   parseTypeGoods,
@@ -80,5 +81,34 @@ describe('goods', () => {
     expect(typeGoodsDialogWidth(2)).toBe(213);
     expect(typeGoodsDialogWidth(6)).toBe(585);
     expect(typeGoodsDialogWidth(7)).toBe(682);
+  });
+
+  it('picks the 化石粉 gid, prompt and amount like the original', () => {
+    // 化石粉 (goodType 0): single use spends 1 (Src_12), full use spends the whole count (Src_11).
+    expect(huaShiFenUse(0, 0, 60)).toEqual({
+      gid: 201,
+      promptKey: 'Goods_UseGoodsDialogSrc_12',
+      amount: 1,
+      count: 1,
+    });
+    expect(huaShiFenUse(0, 1, 60)).toEqual({
+      gid: 201,
+      promptKey: 'Goods_UseGoodsDialogSrc_11',
+      amount: 60,
+      count: 60,
+    });
+    // 五彩化石粉 (goodType 1): always one copy regardless of use way (Src_13 / Src_14).
+    expect(huaShiFenUse(1, 0, 60)).toEqual({
+      gid: 12156,
+      promptKey: 'Goods_UseGoodsDialogSrc_13',
+      amount: 1,
+      count: 1,
+    });
+    expect(huaShiFenUse(1, 1, 60)).toEqual({
+      gid: 12156,
+      promptKey: 'Goods_UseGoodsDialogSrc_14',
+      amount: 1,
+      count: 1,
+    });
   });
 });
