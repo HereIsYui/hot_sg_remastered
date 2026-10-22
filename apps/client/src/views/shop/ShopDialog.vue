@@ -18,6 +18,8 @@ import ExchangeLiquanDialog from './ExchangeLiquanDialog.vue';
  * Shop.ShopDialog: the 元宝 / 礼金 shop reached from 购买装备 / 购买技能书 / the shop button.
  * `getShopInfo` returns `[五铢, 积分, normal, recommended, 五铢goods, copperGoods]`; the normal
  * and recommended cfg_shop rows are merged and bucketed onto the tabs (特价 / 热卖 / group+2).
+ * NewShopDialog's 五铢钱 (commend 1) and 铜钱/积分 (commend 0) lists ride on tabs 6 and 7 and buy
+ * through `buyGoodsUsingCopper` (`[gid, type, count, commend]`).
  */
 const props = defineProps<{ targetTab?: number }>();
 
@@ -27,8 +29,12 @@ const int = (v: unknown) => parseInt(String(v), 10) || 0;
 
 type Item = Record<string, unknown> & { imageName: string };
 
+/** 五铢钱 tab type (commend 1) and 积分/铜钱 tab type (commend 0). */
+const TAB_WUZHU = 6;
+const TAB_COPPER = 7;
+
 const PER_PAGE = 16;
-/** 特价 (rebate), 热卖 (hot), then group+2: 宝物 2, 加速 3, 生产 4, 古匣 5, 战场 7. */
+/** 特价 (rebate), 热卖 (hot), group+2: 宝物 2, 加速 3, 生产 4, 古匣 5, 战场 7, then 五铢钱 / 铜钱. */
 const TABS = [
   { type: 0, label: i18n('Shop_ShopDialog_16_1'), style: 'ButtonGreen' },
   { type: 1, label: i18n('Shop_ShopDialog_17_1'), style: 'ButtonRed' },
@@ -36,6 +42,8 @@ const TABS = [
   { type: 3, label: i18n('Shop_ShopDialog_19_1'), style: 'ButtonYellow' },
   { type: 4, label: i18n('Shop_ShopDialog_20_1'), style: 'ButtonYellow' },
   { type: 5, label: i18n('Shop_ShopDialog_21_1'), style: 'ButtonYellow' },
+  { type: TAB_WUZHU, label: i18n('new_shop_button_3'), style: 'ButtonYellow' },
+  { type: TAB_COPPER, label: i18n('new_shop_button_4'), style: 'ButtonYellow' },
 ];
 
 const buckets = ref<Record<number, Item[]>>({});
@@ -44,7 +52,11 @@ const curPage = ref(0);
 const buying = shallowRef<Item | null>(null);
 const exchanging = ref(false);
 const treasure = shallowRef<TreasureItem[] | null>(null);
+/** 五铢钱 / 积分 balances, refreshed by every getShopInfo and buyGoodsUsingCopper reply. */
+const wuzhu = ref(0);
+const credit = ref(0);
 
+const isCopperTab = computed(() => curType.value === TAB_WUZHU || curType.value === TAB_COPPER);
 const tabItems = computed(() => buckets.value[curType.value] ?? []);
 const pageCount = computed(() => Math.max(1, Math.ceil(tabItems.value.length / PER_PAGE)));
 const pageItems = computed(() =>
@@ -68,10 +80,12 @@ function itemPos(i: number): { x: number; y: number } {
 /** `onLoadShopGoods`: bucket the merged list; default to the first non-empty of 特价 / 热卖. */
 function onLoadShopGoods(data: unknown[]) {
   const d = [...data];
-  d.shift(); // 五铢钱
-  d.shift(); // 积分
+  wuzhu.value = int(d.shift()); // 五铢钱
+  credit.value = int(d.shift()); // 积分
   const normal = (d.shift() as unknown[]) ?? [];
   const recommended = (d.shift() as unknown[]) ?? [];
+  const wuzhuGoods = (d.shift() as unknown[]) ?? []; // commend 1 copper list
+  const copperGoods = (d.shift() as unknown[]) ?? []; // commend 0 copper list
   const next: Record<number, Item[]> = {};
   const push = (type: number, item: Item) => (next[type] ??= []).push(item);
 
@@ -89,6 +103,17 @@ function onLoadShopGoods(data: unknown[]) {
       if (firstFilled > 1) firstFilled = 1;
     }
   }
+  // 五铢钱 / 铜钱 lists carry a `type` (0 goods / 1 things) and are bought with 五铢钱 / 积分.
+  const pushCopper = (tab: number, rows: unknown[]) => {
+    for (const raw of rows) {
+      if (!raw || typeof raw !== 'object') continue;
+      const item = { ...(raw as Record<string, unknown>) } as Item;
+      item.imageName = imageName(item);
+      push(tab, item);
+    }
+  };
+  pushCopper(TAB_WUZHU, wuzhuGoods);
+  pushCopper(TAB_COPPER, copperGoods);
   // 特价 by rebate rank, 热卖 by hot rank (the original keeps them sorted as it inserts).
   next[0]?.sort((a, b) => int(a.rebate) - int(b.rebate));
   next[1]?.sort((a, b) => int(a.hot) - int(b.hot));
@@ -119,6 +144,12 @@ const unregister = game.addGlobalReceiver('shop', (command, data) => {
     else if (payType === 1) user.gift = int(d.shift());
     const extra = d.length > 0 ? ` ${String(d.shift())}` : '';
     gameAlert(i18n('Shop_ShopDialogSrc_1') + extra);
+  } else if (command === 'buyGoodsUsingCopper') {
+    // `[commend, balanceLeft]`: commend 1 is 五铢钱, 0 is 积分.
+    const commend = int(d.shift());
+    if (commend === 1) wuzhu.value = int(d.shift());
+    else credit.value = int(d.shift());
+    gameAlert(i18n('BlackMarketSrc_1'));
   } else if (command === 'exchangeLiquan') {
     treasure.value = treasureItems(d.shift());
   }
@@ -255,6 +286,24 @@ const TITLE = { textAlign: 'center' } as const;
       <FxCanvas :x="182" :y="4" :w="84" :h="26" style-name="BoardListDown">
         <FxLabel :x="4" :y="4" :w="72" style-name="ItemValue" :text="user.gift" />
       </FxCanvas>
+      <!-- 五铢钱 / 积分 balance, shown only on the copper tabs -->
+      <FxLabel
+        v-if="isCopperTab"
+        :x="274"
+        :y="8"
+        :w="80"
+        style-name="ItemValue"
+        :text="`${curType === TAB_WUZHU ? i18n('new_shop_button_3') : i18n('new_shop_button_4')}`"
+      />
+      <FxCanvas v-if="isCopperTab" :x="274" :y="4" :w="80" :h="26" style-name="BoardListDown">
+        <FxLabel
+          :x="4"
+          :y="4"
+          :w="72"
+          style-name="ItemValue"
+          :text="curType === TAB_WUZHU ? wuzhu : credit"
+        />
+      </FxCanvas>
       <FxButton
         :x="360"
         :y="0"
@@ -273,7 +322,12 @@ const TITLE = { textAlign: 'center' } as const;
       />
     </FxCanvas>
 
-    <BuyGoodsDialog v-if="buying" :goods="buying" @close="buying = null" />
+    <BuyGoodsDialog
+      v-if="buying"
+      :goods="buying"
+      :copper="curType === TAB_WUZHU ? 1 : curType === TAB_COPPER ? 0 : null"
+      @close="buying = null"
+    />
     <ExchangeLiquanDialog v-if="exchanging" @close="exchanging = false" />
     <TreasureGetDialog v-if="treasure" :items="treasure" @close="treasure = null" />
   </FxCanvas>

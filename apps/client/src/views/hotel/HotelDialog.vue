@@ -10,13 +10,15 @@ import HeroRecruitDialog from './HeroRecruitDialog.vue';
 import HotelRecruitPanel from './HotelRecruitPanel.vue';
 
 /**
- * Hotel.HotelDialog: the 客栈's upgrade dialog with its recruit list. 市井传闻, 结交名将 and
- * 鉴定宝藏 open dialogs that are not ported.
+ * Hotel.HotelDialog: the 客栈's upgrade dialog with its recruit list. 鉴定宝藏 is wired to
+ * `treasureIdentify`; 市井传闻 (RumorDialog) and 结交名将 (LionizeDialog) have their server
+ * commands ported (getRumorList/askDetail/…, getJiejiaoHero/lionizeHero/…) but their full
+ * dialog UIs are a follow-up, so their buttons still show NotYetValid.
  */
 defineProps<{ x: number; y: number; building: BuildingState }>();
 const emit = defineEmits<{ destroyPanel: [handlers: { all: () => void; level: () => void }] }>();
 
-/** 市井传闻 opens at 客栈 level 5. */
+/** 市井传闻 and 鉴定宝藏 open at 客栈 level 5. */
 const RUMOR_MIN_LEVEL = 5;
 
 const recruiting = shallowRef<HeroRecruit | null>(null);
@@ -35,6 +37,19 @@ async function onReset(send: (cmd: string, args: CommandArg[]) => void) {
 
 function onRumor(level: number) {
   void showAlert(i18n(level < RUMOR_MIN_LEVEL ? 'Hotel_HotelRecruitPanelSrc_1' : 'NotYetValid'));
+}
+
+/**
+ * `HotelRecruitPanel.onClickTreasure`: 鉴定宝藏 needs 客栈 level 5 and spends a 藏宝图, then
+ * `treasureIdentify` throws the result message (shown by the global command receiver).
+ */
+async function onTreasure(level: number, send: (cmd: string, args: CommandArg[]) => void) {
+  if (level < RUMOR_MIN_LEVEL) {
+    void showAlert(i18n('Hotel_HotelRecruitPanelSrc_1'));
+    return;
+  }
+  const answer = await showAlert(i18n('Hotel_HotelRecruitPanelSrc_3'), '', ['yes', 'no']);
+  if (answer === 'yes') send('treasureIdentify', [0]);
 }
 </script>
 
@@ -55,7 +70,7 @@ function onRumor(level: number) {
         @reset="onReset(send)"
         @rumor="onRumor(level)"
         @make-friends="showAlert(i18n('NotYetValid'))"
-        @treasure="showAlert(i18n('NotYetValid'))"
+        @treasure="onTreasure(level, send)"
         @recruit="recruiting = $event"
       />
       <HeroRecruitDialog

@@ -2271,6 +2271,174 @@ export const cases: DiffCase[] = [
       await s.command(session, 'useTypeGoods', 145, 10957, cid); // 成长卷 picker not ported
     },
   },
+  {
+    name: 'hotel 结交 befriends a famous hero and handles its error branches',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const hotel = (func: string, ...args: unknown[]) =>
+        s.dialog(session, cid, 10, 42, func, ...args);
+
+      // A famous NPC hero of a known level, and a rumour pointing at it.
+      await s.query('delete from sys_lionize where uid = ?', [uid]);
+      await s.query('delete from sys_city_hero where hid = 900500', []);
+      await s.query(
+        `insert into sys_city_hero (hid, uid, npcid, name, sex, face, cid, state, level, exp,
+            affairs_base, bravery_base, wisdom_base, loyalty, herotype)
+          values (900500, 900001, 500, '名将甲', 1, 1001, 1, 0, 20, 4500, 50, 60, 55, 70, 100)`,
+        [],
+      );
+      await s.query('delete from sys_city_rumor where cid = ? and id = 900700', [cid]);
+      await s.query(
+        `insert into sys_city_rumor (id, cid, name, type, typeid, price)
+          values (900700, ?, '名将甲', 0, 500, 100)`,
+        [cid],
+      );
+
+      // tryLionizeHero resolves the fee (level * 500).
+      await hotel('tryLionizeHero', 900700);
+
+      // Too low a nobility first; then raise it and befriend.
+      await s.query('update sys_user set nobility = 1 where uid = ?', [uid]);
+      await s.query('update mem_city_resource set gold = 1000000 where cid = ?', [cid]);
+      await hotel('lionizeHero', 500);
+      await s.query('update sys_user set nobility = 5 where uid = ?', [uid]);
+      await s.query('delete from sys_lionize where uid = ?', [uid]);
+      // Not enough gold.
+      await s.query('update mem_city_resource set gold = 100 where cid = ?', [cid]);
+      await hotel('lionizeHero', 500);
+      // Succeeds (throws the success message).
+      await s.query('update mem_city_resource set gold = 1000000 where cid = ?', [cid]);
+      await hotel('lionizeHero', 500);
+      // Already befriended.
+      await hotel('lionizeHero', 500);
+      // 断交 drops it.
+      await hotel('onCancelFriend', 500);
+
+      await s.query('delete from sys_lionize where uid = ?', [uid]);
+      await s.query('delete from sys_city_hero where hid = 900500', []);
+      await s.query('delete from sys_city_rumor where cid = ? and id = 900700', [cid]);
+    },
+  },
+  {
+    name: 'hotel 市井传闻 lists rumours, asks for detail and records a task',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const hotel = (func: string, ...args: unknown[]) =>
+        s.dialog(session, cid, 10, 42, func, ...args);
+
+      // Hold the refresh clock ahead so the shipped rumour list is not regenerated (random).
+      await s.query(
+        'update mem_city_schedule set last_reset_rumor = unix_timestamp() + 3600 where cid = ?',
+        [cid],
+      );
+      // A famous NPC hero standing in a known city, and a rumour for it.
+      await s.query('delete from sys_city_hero where hid = 900501', []);
+      await s.query(
+        `insert into sys_city_hero (hid, uid, npcid, name, sex, face, cid, state, level, exp,
+            affairs_base, bravery_base, wisdom_base, loyalty, herotype)
+          values (900501, 900001, 501, '名将乙', 1, 1001, ?, 0, 15, 2500, 40, 45, 42, 70, 100)`,
+        [cid],
+      );
+      await s.query('delete from sys_city_rumor where cid = ? and id = 900701', [cid]);
+      await s.query(
+        `insert into sys_city_rumor (id, cid, name, type, typeid, price)
+          values (900701, ?, '名将乙', 0, 501, 30)`,
+        [cid],
+      );
+
+      await hotel('getRumorList');
+      await hotel('getRumor', 900701);
+      // Not enough 元宝 for the detail, then pay for it.
+      await s.query('update sys_user set money = 0 where uid = ?', [uid]);
+      await hotel('askDetail', 900701, 0);
+      await s.query('update sys_user set money = 100000 where uid = ?', [uid]);
+      await hotel('askDetail', 900701, 0);
+      // Record it as a 捉将 task pair.
+      await s.query('delete from sys_user_task where uid = ? and tid in (20501, 30501)', [uid]);
+      await hotel('recordTask', 900701);
+      // Already recorded.
+      await hotel('recordTask', 900701);
+
+      await s.query('delete from sys_user_task where uid = ? and tid in (20501, 30501)', [uid]);
+      await s.query('delete from sys_things where uid = ? and tid = 20501', [uid]);
+      await s.query('delete from sys_report where uid = ? and title = 19', [uid]);
+      await s.query('delete from sys_city_hero where hid = 900501', []);
+      await s.query('delete from sys_city_rumor where cid = ? and id = 900701', [cid]);
+    },
+  },
+  {
+    name: 'hotel 鉴定宝藏 consumes a map or refuses without one',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const hotel = (func: string, ...args: unknown[]) =>
+        s.dialog(session, cid, 10, 42, func, ...args);
+
+      // No 鉴宝图 (thing 118): refuses with the buy popup.
+      await s.query('delete from sys_things where uid = ? and tid = 118', [uid]);
+      await hotel('treasureIdentify', 0);
+      // With a map, it picks a wild field and files a report. mt_rand is fixed in difftest, so
+      // both servers pick the same field; the report time is masked.
+      await s.query('insert into sys_things (uid, tid, count) values (?, 118, 1)', [uid]);
+      await hotel('treasureIdentify', 0);
+
+      await s.query('delete from mem_treasure_map where uid = ?', [uid]);
+      await s.query('delete from sys_report where uid = ? and title = 31', [uid]);
+      await s.query('delete from sys_things where uid = ? and tid = 118', [uid]);
+    },
+  },
+  {
+    name: 'shop buyGoodsUsingCopper buys for 积分 and 五铢钱',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const copper = (func: string, ...args: unknown[]) => s.command(session, func, ...args);
+
+      // A copper-shop offer of a known goods id; keep it unlimited so no box caps trip.
+      const COPPER_GID = 10525;
+      await s.query('delete from cfg_goods_copper where gid = ? and type = 0', [COPPER_GID]);
+      await s.query(
+        `insert into cfg_goods_copper (gid, type, price, onsale, commend, rate)
+          values (?, 0, 5, 1, 1, 100)`,
+        [COPPER_GID],
+      );
+      await s.query('delete from sys_goods_copper', []);
+      await s.query('insert into sys_goods_copper (gid, type) values (?, 0)', [COPPER_GID]);
+      // Give the player 积分 (888888) and 五铢钱 (10960).
+      await s.query(
+        'insert into sys_goods (uid, gid, count) values (?, 888888, 1000) on duplicate key update count = 1000',
+        [uid],
+      );
+      await s.query(
+        'insert into sys_goods (uid, gid, count) values (?, 10960, 1000) on duplicate key update count = 1000',
+        [uid],
+      );
+
+      // Invalid amount, then a 积分 buy, then a 五铢钱 buy.
+      await copper('buyGoodsUsingCopper', COPPER_GID, 0, 0, 0);
+      await copper('buyGoodsUsingCopper', COPPER_GID, 0, 2, 0);
+      await copper('buyGoodsUsingCopper', COPPER_GID, 0, 1, 1);
+      // Not enough 积分.
+      await s.query('update sys_goods set count = 1 where uid = ? and gid = 888888', [uid]);
+      await copper('buyGoodsUsingCopper', COPPER_GID, 0, 5, 0);
+
+      await s.query('delete from cfg_goods_copper where gid = ? and type = 0', [COPPER_GID]);
+      await s.query('delete from sys_goods_copper', []);
+      await s.query('delete from sys_goods where uid = ? and gid in (888888, 10960, ?)', [
+        uid,
+        COPPER_GID,
+      ]);
+      await s.query('delete from log_goods where uid = ? and gid in (888888, 10960, ?)', [
+        uid,
+        COPPER_GID,
+      ]);
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {

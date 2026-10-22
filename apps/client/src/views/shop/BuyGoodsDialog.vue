@@ -13,15 +13,18 @@ import FxTextInput from '../../ui/FxTextInput.vue';
 
 /**
  * Shop.BuyGoodsDialog: confirms a shop purchase. The player types a count and picks the pay
- * type (元宝 / 礼金), then `buyGoods` carries `[id, count, payType]`. The reply is handled by
- * ShopDialog's `shop` receiver.
+ * type (元宝 / 礼金), then `buyGoods` carries `[id, count, payType]`. For a 五铢钱 / 铜钱 item
+ * (`copper` is the commend: 1 五铢钱, 0 积分) it instead carries `buyGoodsUsingCopper`
+ * `[gid, type, count, commend]`, as NewShopDialog / BuyGoodsDialog.as do. ShopDialog's `shop`
+ * receiver handles both replies.
  */
-const props = defineProps<{ goods: Record<string, unknown> }>();
+const props = defineProps<{ goods: Record<string, unknown>; copper?: number | null }>();
 const emit = defineEmits<{ close: [] }>();
 
 const game = useGame();
 const int = (v: unknown) => parseInt(String(v), 10) || 0;
 
+const isCopper = computed(() => props.copper === 0 || props.copper === 1);
 const PAY_TYPES = [i18n('new_shop_button_16_1'), i18n('new_shop_button_16_2')];
 const countText = ref('1');
 const payType = ref(0);
@@ -38,6 +41,17 @@ const imageName = computed(() =>
 function onSubmit() {
   if (count.value <= 0) {
     void showAlert(i18n('Shop_BuyGoodsDialog_8_1'));
+    return;
+  }
+  if (isCopper.value) {
+    // `[gid, type, count, commend]`: type 0 goods / 1 things; commend 1 五铢钱 / 0 积分.
+    game.sendGlobalCommand('shop', 'buyGoodsUsingCopper', [
+      int(props.goods.gid),
+      int(props.goods.type),
+      count.value,
+      props.copper === 1 ? 1 : 0,
+    ]);
+    emit('close');
     return;
   }
   game.sendGlobalCommand('shop', 'buyGoods', [int(props.goods.id), count.value, payType.value]);
@@ -115,7 +129,7 @@ function onSubmit() {
           :w="104"
           style-name="ItemValue"
           :fx="{ textAlign: 'center', fontWeight: 'bold' }"
-          :text="`${int(goods.price)}${PAY_TYPES[payType]}`"
+          :text="`${int(goods.price)}${isCopper ? (copper === 1 ? i18n('new_shop_button_3') : i18n('new_shop_button_4')) : PAY_TYPES[payType]}`"
         />
       </FxCanvas>
 
@@ -152,10 +166,11 @@ function onSubmit() {
         />
       </FxCanvas>
 
-      <FxCanvas :right="235" :bottom="15" :w="44" :h="26" style-name="BoardListUp">
+      <FxCanvas v-if="!isCopper" :right="235" :bottom="15" :w="44" :h="26" style-name="BoardListUp">
         <FxLabel :x="7" :y="3" style-name="ItemTitle" :text="i18n('Shop_BuyGoodsDialog_7_1')" />
       </FxCanvas>
       <FxComboBox
+        v-if="!isCopper"
         v-model:selected-index="payType"
         :right="151"
         :bottom="15"

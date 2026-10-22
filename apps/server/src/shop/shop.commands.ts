@@ -4,6 +4,7 @@ import { GameError } from '../common/game-error';
 import { LangService } from '../common/lang.service';
 import { GoodsRules } from '../core/goods-rules.service';
 import { phpEmpty, phpIntval, phpNum, phpString } from '../core/php';
+import { RandomService } from '../core/random.service';
 import { TaskRules } from '../core/task-rules.service';
 import { UserRules } from '../core/user-rules.service';
 import { DbScope } from '../db/database.module';
@@ -43,13 +44,21 @@ const LIQUAN_LOG = { goods: 8, armor: 3, things: 8, money: 3 };
 const SRC_SHOP_ACT = 5000;
 const ACT_SHOP_BOX = 5001;
 
+/** 五铢钱 copper shop: log_goods reason, and the 黑市 limit actid. */
+const LOG_COPPER_BUY = 22;
+const BLACK_MARKET_ACTID = 152;
+/** buyGoodsUsingCopper pay channels. */
+const PAY_CREDIT = 0;
+const PAY_WUZHU = 1;
+
 /** The 五铢钱 copper shop sublist of getShopInfo: cfg_goods / cfg_things joined to cfg_goods_copper. */
 type CopperType = 0 | 1;
 
 /**
  * ShopFunc.php: the shop list, buying for 元宝 / 礼金, buy-and-use (the `not_enough_goods`
- * popup), and 礼券 redemption. The 五铢钱 copper shop (buyGoodsUsingCopper) and 赤壁 / 孟获
- * remote item grants belong to other modules and are not ported here.
+ * popup), and 礼券 redemption. Also HotelFunc.php's 五铢钱 / 积分 copper shop
+ * (getBlackMarketGoodsList + buyGoodsUsingCopper), wired into ShopDialog's 五铢钱 lists. The
+ * 赤壁 / 孟获 remote item grants belong to other modules and are not ported here.
  */
 @Injectable()
 export class ShopCommands {
@@ -61,6 +70,7 @@ export class ShopCommands {
     private readonly users: UserRules,
     private readonly tasks: TaskRules,
     private readonly defaultBox: DefaultBoxService,
+    private readonly random: RandomService,
   ) {}
 
   /**
@@ -108,6 +118,167 @@ export class ShopCommands {
       : sql`(c.commend = '0' or c.commend = 2)`;
     return this.rows(sql`select t.*, c.price, c.type from cfg_goods_copper c
       left join cfg_things t on c.gid = t.tid where c.type = '1' and c.onsale = '1' and ${commend}`);
+  }
+
+  /**
+   * HotelFunc.php::getBlackMarketGoodsList `[]`: the 黑市 (daily-refreshed 五铢钱 / 积分 goods).
+   * Answers `[积分, goods]`. The daily refresh (resetBlackMarketGoods -> getCandidateGoods) is
+   * random and only runs once past 05:00, so a difftest fixes the window; here we read the
+   * current sys_goods_copper selection as the original does after its reset.
+   */
+  @GlobalCommand()
+  async getBlackMarketGoodsList(ctx: CommandContext): Promise<unknown[]> {
+    const uid = ctx.uid;
+    await this.resetBlackMarketGoods();
+    const copper = await this.cell(
+      sql`select count from sys_goods where uid = ${uid} and gid = ${CREDIT_GID}`,
+    );
+    const goods = await this.rows(sql`select g.*, cc.price, cc.type from sys_goods_copper c
+      left join cfg_goods_copper cc on cc.gid = c.gid and cc.type = c.type
+      left join cfg_goods g on g.gid = c.gid where c.type = 0`);
+    const things = await this.rows(sql`select t.*, cc.price, cc.type from sys_goods_copper c
+      left join cfg_goods_copper cc on cc.gid = c.gid and cc.type = c.type
+      left join cfg_things t on t.tid = c.gid where c.type = 1`);
+    return [phpEmpty(copper) ? 0 : copper, [...goods, ...things]];
+  }
+
+  /**
+   * HotelFunc.php::buyGoodsUsingCopper `[id, type, count, commend]`: buys a 黑市 item for 积分
+   * (commend 0) or 五铢钱 (commend 1). `type` is 0 goods / 1 things. Enforces the per-day / total
+   * / server box limits for 积分 buys, then grants the item and takes the currency. Answers
+   * `[commend, balanceLeft]`. Wired into ShopDialog where the original's 五铢钱 lists are bought.
+   */
+  @GlobalCommand()
+  async buyGoodsUsingCopper(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const uid = ctx.uid;
+    const id = phpIntval(param[0]);
+    const type = phpIntval(param[1]);
+    const cnt = phpIntval(param[2]);
+    const commend = phpIntval(param[3]);
+    if (cnt < 1) throw GameError.lang('blackMarket.invalid_amount');
+
+    return this.scope.transaction(async () => {
+      const goods = await this.row(
+        sql`select * from cfg_goods_copper where gid = ${id} and type = ${type}`,
+      );
+      if (!goods) throw GameError.lang('blackMarket.no_this_goods');
+      const moneyNeed = cnt * phpNum(goods.price);
+      const gid = phpIntval(goods.gid);
+      let goodLeft = 0;
+
+      if (commend === PAY_CREDIT) {
+        // 积分 buy: box-detail caps (per-day / total / server), then pay with 积分 (888888).
+        const sort = type === 0 ? 2 : 5;
+        await this.enforceCopperLimits(uid, gid, sort, cnt);
+        const jifen = phpNum(
+          await this.cell(
+            sql`select count from sys_goods where uid = ${uid} and gid = ${CREDIT_GID}`,
+          ),
+        );
+        if (jifen < moneyNeed) throw GameError.lang('blackMarket.no_enough_copper');
+        if (type === 0) await this.goods.addGoods(uid, gid, cnt, LOG_COPPER_BUY);
+        else await this.goods.addThings(uid, gid, cnt, LOG_COPPER_BUY);
+        await this.goods.addGoods(uid, CREDIT_GID, -moneyNeed, LOG_COPPER_BUY);
+        await sql`update sys_user set last_pay = '2' where uid = ${uid}`.execute(this.scope.db);
+        goodLeft = jifen - moneyNeed;
+      } else if (commend === PAY_WUZHU) {
+        // 五铢钱 buy (10960).
+        const wuzhu = phpNum(
+          await this.cell(
+            sql`select count from sys_goods where uid = ${uid} and gid = ${WUZHU_GID}`,
+          ),
+        );
+        if (wuzhu < moneyNeed) throw GameError.lang('shop.wuZhu_not_enough');
+        if (type === 0) await this.goods.addGoods(uid, gid, cnt, LOG_COPPER_BUY);
+        else await this.goods.addThings(uid, gid, cnt, LOG_COPPER_BUY);
+        await this.goods.addGoods(uid, WUZHU_GID, -moneyNeed, LOG_COPPER_BUY);
+        await sql`update sys_user set last_pay = '3' where uid = ${uid}`.execute(this.scope.db);
+        goodLeft = wuzhu - moneyNeed;
+      }
+      return [commend, goodLeft];
+    });
+  }
+
+  /** The per-day / total / server box caps a 积分 黑市 buy enforces, then its log row. */
+  private async enforceCopperLimits(
+    uid: number,
+    gid: number,
+    sort: number,
+    cnt: number,
+  ): Promise<void> {
+    const row = await this.row(sql`select * from cfg_box_details
+      where srctype = 0 and srcid = ${BLACK_MARKET_ACTID} and sort = ${sort} and type = ${gid}`);
+    if (!row) return;
+    const limited =
+      phpNum(row.dayopencount) > 0 || phpNum(row.totalopencount) > 0 || phpNum(row.owncount) > 0;
+    const sumLog = (extra: RawBuilder<unknown>) =>
+      this.cell(sql`select sum(count) from log_act where actid = ${BLACK_MARKET_ACTID}
+        and sort = ${sort} and type = ${gid} and log_type = 0 and ${extra}`);
+    if (phpNum(row.dayopencount) > 0) {
+      const cur = phpNum(await sumLog(sql`uid = ${uid} and time >= unix_timestamp(curdate())`));
+      if (cur + cnt > phpNum(row.dayopencount)) throw GameError.lang('blackMarket.exceed_limit');
+    }
+    if (phpNum(row.totalopencount) > 0) {
+      const cur = phpNum(await sumLog(sql`uid = ${uid}`));
+      if (cur + cnt > phpNum(row.totalopencount)) throw GameError.lang('blackMarket.exceed_limit');
+    }
+    if (phpNum(row.owncount) > 0) {
+      const cur = phpNum(await sumLog(sql`1 = 1`));
+      if (cur + cnt > phpNum(row.owncount)) throw GameError.lang('blackMarket.exceed_limit');
+    }
+    if (limited) {
+      await sql`insert into log_act (uid, actid, sort, type, count, log_type, time)
+        values (${uid}, ${BLACK_MARKET_ACTID}, ${sort}, ${gid}, ${cnt}, 0, unix_timestamp())`.execute(
+        this.scope.db,
+      );
+    }
+  }
+
+  /**
+   * HotelFunc.php::resetBlackMarketGoods: past 05:00, refills sys_goods_copper with
+   * getCandidateGoods (recommended first, then a rate roll over the rest). Random, so a difftest
+   * pins the window; the selection logic follows getCandidateGoods / getUnCommendGoods.
+   */
+  private async resetBlackMarketGoods(): Promise<void> {
+    const db = this.scope.db;
+    const last = phpNum(await this.cell(sql`select value from mem_state where state = 1999`));
+    const now = phpNum(await this.cell(sql`select unix_timestamp()`));
+    const lastDay = Math.floor((last + 3 * 3600) / 86400);
+    const currDay = Math.floor((now + 3 * 3600) / 86400);
+    if (currDay <= lastDay) return;
+    await sql`insert into mem_state (\`value\`, \`state\`, \`description\`)
+      values (${now}, 1999, '黑市商人') on duplicate key update \`value\` = ${now}`.execute(db);
+    const goods = await this.candidateCopperGoods();
+    await sql`delete from sys_goods_copper`.execute(db);
+    for (const good of goods) {
+      await sql`insert into sys_goods_copper (\`gid\`, \`type\`) values (${good.gid}, ${good.type})`.execute(
+        db,
+      );
+    }
+  }
+
+  /** getCandidateGoods: recommended first (capped at 16), then a rate roll to fill 3..remaining. */
+  private async candidateCopperGoods(): Promise<Row[]> {
+    const MIN = 3;
+    const MAX = 16;
+    const commend = await this.rows(sql`select * from cfg_goods_copper
+      where commend = 1 and onsale = 1 order by rate desc limit ${MAX}`);
+    if (commend.length >= MAX) return commend.slice(0, MAX);
+    const remainingMax = MAX - commend.length;
+    const remainingMin = Math.max(0, MIN - commend.length);
+    const uncommend = await this.rateRollCopperGoods(remainingMin, remainingMax);
+    return [...commend, ...uncommend];
+  }
+
+  /** getUnCommendGoods: each non-recommended item passes a mt_rand(1,100) <= rate roll. */
+  private async rateRollCopperGoods(min: number, max: number): Promise<Row[]> {
+    const goods = await this.rows(
+      sql`select * from cfg_goods_copper where commend <> 1 and onsale = 1`,
+    );
+    const candidates = goods.filter((g) => this.random.mtRand(1, 100) <= phpNum(g.rate));
+    if (candidates.length < min) return goods.slice(0, Math.min(min, goods.length));
+    if (candidates.length > max) return candidates.slice(0, max);
+    return candidates;
   }
 
   /** `[hid]`: the cfg_hero row for a shop hero's attribute tooltip. */
