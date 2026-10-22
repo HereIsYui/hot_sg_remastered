@@ -32,6 +32,11 @@ const UserState = {
 const GRANT_NEW_ROLE = 4;
 /** 1级新手礼包 */
 const STARTER_PACK_GID = 50101;
+/** 旌旗 (useFlagChar): the item, and the growth goal completing it marks. */
+const FLAG_CHAR_GID = 39;
+const FLAG_CHAR_GOAL = 371;
+/** 名帖 (useMingTie): renames the player and the lord hero. */
+const MINGTIE_GID = 84;
 /** Tasks every new role starts with; 291 starts completed. */
 const STARTING_TASKS = [1, 80, 290];
 const COMPLETED_STARTING_TASK = 291;
@@ -269,6 +274,67 @@ export class UserCommands {
       await this.mail.deliver(uid, 2, this.lang.t('sys.restart_mail_title'));
       await this.mail.raiseAlarm(uid, 'mail');
     });
+  }
+
+  /**
+   * `[flagChar]` (旌旗, gid 39): UserFunc.php::changeUserFlagchar -> useFlagChar. Sets the lord's
+   * one-character flag, completes growth goal 371, and consumes the 旌旗. Answers `[flagChar]`.
+   */
+  @GlobalCommand()
+  async changeUserFlagchar(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const uid = ctx.uid;
+    const newChar = addslashes(phpString(param[0]));
+    await this.scope.transaction(async () => {
+      if (!(await this.goods.checkGoods(uid, FLAG_CHAR_GID))) {
+        throw GameError.raw(`not_enough_goods${FLAG_CHAR_GID}`);
+      }
+      const charLen = mbStrlen(newChar);
+      if (charLen === 0) throw GameError.lang('useFlagChar.type_flag_name');
+      if (charLen > MAX_FLAG_CHAR) throw GameError.lang('useFlagChar.only_one_char');
+      await sql`update sys_user set flagchar = ${newChar} where uid = ${uid}`.execute(
+        this.scope.db,
+      );
+      await this.tasks.completeTask(uid, FLAG_CHAR_GOAL);
+      await this.goods.reduceGoods(uid, FLAG_CHAR_GID, 1);
+    });
+    return [newChar];
+  }
+
+  /**
+   * `[name]` (名帖, gid 84; also the lord-rename button on the hero detail): validates the new
+   * name as createRole does, then UserFunc.php::useMingTie renames the player and the lord hero
+   * and consumes the 名帖. Answers `[name]`.
+   */
+  @GlobalCommand()
+  async changeUserName(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const uid = ctx.uid;
+    const username = phpTrim(param[0]);
+    if (phpEmpty(username)) throw GameError.lang('createRole.no_illege_char');
+    if (NAME_WHITESPACE.test(username) || !NAME_CHARS.test(username)) {
+      throw GameError.lang('username.rules');
+    }
+    if (mbStrlen(username) < 1) throw GameError.lang('createRole.city_holder_name_notNull');
+    if (mbStrlen(username) > MAX_USER_NAME)
+      throw GameError.lang('createRole.city_holder_name_tooLong');
+    if (/[<'\\]/.test(username)) throw GameError.lang('createRole.no_illege_char');
+    if (await this.containsBannedWord(username)) throw GameError.lang('createRole.invalid_char');
+    await this.scope.transaction(async () => {
+      const db = this.scope.db;
+      const taken = await db
+        .selectFrom('sys_user')
+        .select('uid')
+        .where('name', '=', username)
+        .executeTakeFirst();
+      if (taken) throw GameError.lang('createRole.used_city_holder_name');
+      if (!(await this.goods.checkGoods(uid, MINGTIE_GID))) {
+        throw GameError.raw(`not_enough_goods${MINGTIE_GID}`);
+      }
+      await sql`update sys_user set name = ${username} where uid = ${uid}`.execute(db);
+      await sql`update sys_city_hero set name = ${username}
+        where uid = ${uid} and herotype = ${LORD_HERO_TYPE}`.execute(db);
+      await this.goods.reduceGoods(uid, MINGTIE_GID, 1);
+    });
+    return [username];
   }
 
   private async checkCityName(cityName: string): Promise<void> {

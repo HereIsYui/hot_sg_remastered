@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { CityModule } from '../city/city.module';
 import { GoodsModule } from '../goods/goods.module';
 import { TaskModule } from '../task/task.module';
@@ -12,7 +12,7 @@ import { SkillCommands } from './skill.commands';
 
 /** HotelFunc.php, HeroFunc.php, ArmorFunc.php, HeroSkillFunc.php, EquipmentFunc.php and the 将领历练 settlement. */
 @Module({
-  imports: [CityModule, GoodsModule, TaskModule],
+  imports: [CityModule, forwardRef(() => GoodsModule), TaskModule],
   providers: [
     ArmorCommands,
     BlackSmithCommands,
@@ -22,5 +22,6 @@ import { SkillCommands } from './skill.commands';
     HotelCommands,
     SkillCommands,
   ],
+  exports: [BlackSmithCommands],
 })
 export class HeroModule {}

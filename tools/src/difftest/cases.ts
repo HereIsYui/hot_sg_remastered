@@ -2178,6 +2178,99 @@ export const cases: DiffCase[] = [
       await s.query('update sys_city_hero set exp = 1000 where hid = 900102', []);
     },
   },
+  {
+    name: 'goods with their own dialogs: 旌旗, 名帖/君主改名, 盟主令, 武器架, 打孔器/化石粉',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const give = (gid: number, count: number) =>
+        s.query(
+          `insert into sys_goods (uid, gid, count) values (?, ?, ?)
+            on duplicate key update count = values(count)`,
+          [uid, gid, count],
+        );
+
+      // --- 旌旗 (changeUserFlagchar, gid 39) ---
+      await s.query('delete from sys_goods where uid = ? and gid = 39', [uid]);
+      await s.command(session, 'changeUserFlagchar', '龙'); // no 旌旗 owned
+      await give(39, 2);
+      await s.command(session, 'changeUserFlagchar', ''); // empty
+      await s.command(session, 'changeUserFlagchar', '旗号'); // more than one char
+      await s.command(session, 'changeUserFlagchar', '龙'); // ok
+
+      // --- 名帖 / 君主改名 (changeUserName, gid 84) ---
+      await s.query('delete from sys_goods where uid = ? and gid = 84', [uid]);
+      await s.command(session, 'changeUserName', '  '); // whitespace -> illegal
+      await s.command(session, 'changeUserName', 'A.CN'); // punctuation -> rules
+      await s.command(session, 'changeUserName', '一二三四五六七八九'); // too long
+      await s.command(session, 'changeUserName', '新君主'); // no 名帖 owned
+      await give(84, 1);
+      await s.command(session, 'changeUserName', '新君主'); // ok (renames lord hero too)
+      await give(84, 1);
+      await s.command(session, 'changeUserName', EXISTING_PLAYER); // name taken by self
+
+      // --- 盟主令 (useGoods, gid 15) ---
+      await s.query('delete from sys_goods where uid = ? and gid = 15', [uid]);
+      await s.query('update sys_user set union_id = 0 where uid = ?', [uid]);
+      await give(15, 2);
+      await s.command(session, 'useGoods', 15); // not in a union
+      const UNION = 990001;
+      await s.query('delete from sys_union where id = ?', [UNION]);
+      await s.query(
+        `insert into sys_union (id, name, creator, leader, announcement, intro, chieforder)
+         values (?, '盟', ?, ?, '', '', 0)`,
+        [UNION, uid, uid],
+      );
+      await s.query('update sys_user set union_id = ? where uid = ?', [UNION, uid]);
+      await s.command(session, 'useGoods', 15); // ok -> chieforder = 1
+      await s.command(session, 'useGoods', 15); // already used
+      await s.query('update sys_user set union_id = 0 where uid = ?', [uid]);
+      await s.query('delete from sys_union where id = ?', [UNION]);
+
+      // --- 武器架 (useGoods gid 145/146, and useTypeGoods type 30) ---
+      await s.query('delete from sys_goods where uid = ? and gid in (145, 146)', [uid]);
+      await s.query('update sys_user set armor_column = 100 where uid = ?', [uid]);
+      await s.command(session, 'useGoods', 145); // none owned
+      await give(145, 1);
+      await s.command(session, 'useGoods', 145); // +5 -> 105
+      await give(146, 1);
+      await s.command(session, 'useTypeGoods', 30, 146, cid); // +50 -> 155
+      await s.query('update sys_user set armor_column = 500 where uid = ?', [uid]);
+      await give(145, 1);
+      await s.command(session, 'useGoods', 145); // already full
+      await s.query('update sys_user set armor_column = 100 where uid = ?', [uid]);
+
+      // --- 打孔器 / 化石粉 via useTypeGoods (routes to the smithy's openHole) ---
+      const ARMOR = 900050;
+      await s.query('delete from sys_user_armor where sid = ?', [ARMOR]);
+      await s.query(
+        `insert into sys_user_armor (sid, uid, armorid, hp, hp_max, hid, strong_level,
+           strong_value, embed_pearls, embed_holes, combine_level)
+         values (?, ?, 53047, 2550, 255, 0, 9, 21, '305,0,0,0,0', '3,1,3,0,0', 7)`,
+        [ARMOR, uid],
+      );
+      for (const [gid, n] of [
+        [206, 5],
+        [201, 10],
+      ]) {
+        await give(gid as number, n as number);
+      }
+      try {
+        // type 24 (打孔器 206): open the locked hole 1 -> `[sid, gid, position, useType, count]`
+        await s.command(session, 'useTypeGoods', 24, 206, cid, ARMOR, 1, 0, 0);
+        // type 26 (化石粉 201): clear the pearl in hole 0, keeping it (useType 1, 8 needed)
+        await s.command(session, 'useTypeGoods', 26, 201, cid, ARMOR, 0, 1, 8);
+        // error: missing piece
+        await s.command(session, 'useTypeGoods', 24, 206, cid, 999999, 1, 0, 0);
+      } finally {
+        await s.query('delete from sys_user_armor where sid = ?', [ARMOR]);
+      }
+
+      // --- 武魂 (type > 110000) and other world/battle items stay 此功能尚未开放 ---
+      await s.command(session, 'useTypeGoods', 145, 10957, cid); // 成长卷 picker not ported
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {
