@@ -2439,6 +2439,101 @@ export const cases: DiffCase[] = [
       ]);
     },
   },
+  {
+    name: 'store saves the resource split',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const cid = await lastCity(s, session.uid);
+      // Make sure the city has a sys_city_res_add row the update can land on.
+      await s.query(
+        'insert into sys_city_res_add (cid) values (?) on duplicate key update cid = cid',
+        [cid],
+      );
+      // modifyStoreRate always ends by throwing a message; its effect is the saved row.
+      await s.dialog(session, cid, 17, 0, 'modifyStoreRate', 40, 20, 10, 0);
+      await s.query(
+        'select food_store, wood_store, rock_store, iron_store, resource_changing from sys_city_res_add where cid = ?',
+        [cid],
+      );
+      // Error branches: a negative rate, and a sum over 100.
+      await s.dialog(session, cid, 17, 0, 'modifyStoreRate', -1, 0, 0, 0);
+      await s.dialog(session, cid, 17, 0, 'modifyStoreRate', 60, 30, 20, 10);
+      // Another lord's city is refused before the command runs.
+      await s.dialog(session, FOREIGN_CITY, 17, 0, 'modifyStoreRate', 10, 10, 10, 10);
+    },
+  },
+  {
+    name: 'store packs resources into goods',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const cid = await lastCity(s, session.uid);
+      // Give the city resources and the player 铜钱 to pay the pack fee.
+      await s.query('update mem_city_resource set food = 100000, wood = 100000 where cid = ?', [
+        cid,
+      ]);
+      await s.query(
+        'insert into sys_goods (uid, gid, count) values (?, 152, 100000) on duplicate key update count = 100000',
+        [session.uid],
+      );
+      // Pack 100 units of food1 (gid 91) and wood2 (gid 88), 50 铜钱 each.
+      await s.dialog(
+        session,
+        cid,
+        17,
+        0,
+        'payToPack',
+        ['food1', 100, 100, 50],
+        ['wood2', 100, 100, 50],
+      );
+      await s.query(
+        'select gid, count from sys_goods where uid = ? and gid in (91, 88, 152) order by gid',
+        [session.uid],
+      );
+      await s.query('select food, wood from mem_city_resource where cid = ?', [cid]);
+      // Error: an unknown resource type.
+      await s.dialog(session, cid, 17, 0, 'payToPack', ['bogus1', 1, 1, 1]);
+      // Error: not enough resource.
+      await s.query('update mem_city_resource set food = 0 where cid = ?', [cid]);
+      await s.dialog(session, cid, 17, 0, 'payToPack', ['food1', 100, 100, 50]);
+      // Error: not enough 铜钱.
+      await s.query('update mem_city_resource set food = 100000 where cid = ?', [cid]);
+      await s.query('update sys_goods set count = 0 where uid = ? and gid = 152', [session.uid]);
+      await s.dialog(session, cid, 17, 0, 'payToPack', ['food1', 100, 100, 50]);
+    },
+  },
+  {
+    name: 'barn loads goods and zuoji armor',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      // loadBarnGoods for each 洗练 index, and an out-of-range index.
+      await s.command(session, 'loadBarnGoods', 0);
+      await s.command(session, 'loadBarnGoods', 2);
+      await s.command(session, 'loadBarnGoods', 3);
+      // loadZuojiArmor filters the player's goods by 坐骑装备 type.
+      await s.command(session, 'loadZuojiArmor', 1, 0);
+    },
+  },
+  {
+    name: 'barn unlades a zuoji pearl',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      // A zuoji with gid 502 embedded in hole 0 (isFitPos: 502 belongs in pos 0).
+      await s.query(
+        `insert into sys_user_armor (sid, uid, armorid, embed_holes, embed_pearls)
+         values (900501, ?, 1, '0,0,0,0,0', '502,0,0,0,0')
+         on duplicate key update embed_pearls = '502,0,0,0,0'`,
+        [session.uid],
+      );
+      await s.command(session, 'doUnlade', 900501, 502, 0);
+      await s.query('select embed_pearls from sys_user_armor where sid = 900501', []);
+      await s.query('select count from sys_goods where uid = ? and gid = 502', [session.uid]);
+      // Error branches: bad position, wrong gid for the position, and a missing armor.
+      await s.command(session, 'doUnlade', 900501, 502, 9);
+      await s.command(session, 'doUnlade', 900501, 503, 1);
+      await s.command(session, 'doUnlade', 900999, 502, 0);
+      await s.query('delete from sys_user_armor where sid = 900501', []);
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {

@@ -9,6 +9,7 @@ import { BuildingRules } from './building-rules.service';
 import { DefenceRules } from './defence-rules.service';
 import { HotelRules } from './hotel-rules.service';
 import { SoldierRules } from './soldier-rules.service';
+import { StoreBarnCommands } from './store-barn.commands';
 import { TechnicRules } from './technic-rules.service';
 
 type Row = Record<string, unknown>;
@@ -24,13 +25,15 @@ export class BuildingInfoService {
     private readonly defences: DefenceRules,
     private readonly hotel: HotelRules,
     private readonly users: UserRules,
+    private readonly storeBarn: StoreBarnCommands,
   ) {}
 
   /**
    * The current and the next level; the buildings with their own dialogs append that dialog's
    * data (书院 its technics, 兵营 its soldiers, queue and conversions, 客栈 its recruits, free
    * hero slots and whether the lord may befriend famous heroes, 城墙 its defences, queue and
-   * space). The other dialogs' data is added as those dialogs are ported.
+   * space, 仓库 its resource bases, capacity and split). The other dialogs' data is added as
+   * those dialogs are ported.
    */
   async buildingInfo(
     uid: number,
@@ -65,6 +68,8 @@ export class BuildingInfoService {
       ret.push(await this.defences.reinforceQueue(cid));
       ret.push(await this.defences.cityArea(cid));
       ret.push(await this.defences.cityAreaOccupied(cid));
+    } else if (bid === Building.Store) {
+      ret.push(await this.storeBarn.storeInfo(uid, cid));
     }
     return ret;
   }

@@ -10,6 +10,7 @@ export const BUILDING_COLLEGE = 7;
 export const BUILDING_ARMY = 9;
 export const BUILDING_HOTEL = 10;
 export const BUILDING_BLACKSMITH = 14;
+export const BUILDING_STORE = 17;
 export const BUILDING_WALL = 20;
 
 export const INNER_GRID_LEFT = 356;
