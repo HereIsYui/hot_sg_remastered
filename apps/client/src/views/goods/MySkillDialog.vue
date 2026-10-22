@@ -173,7 +173,7 @@ game.sendGlobalCommand('myskill', 'loadUserValidSkillBook');
       :w="80"
       style-name="ButtonYellow"
       :label="i18n('BuySkillBook')"
-      @click="showAlert(i18n('NotYetValid'))"
+      @click="game.showShop()"
     />
     <FxButton
       :x="108"
