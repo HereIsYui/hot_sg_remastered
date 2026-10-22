@@ -1675,6 +1675,9 @@ export const cases: DiffCase[] = [
         await s.command(session, 'buyGoodsBeforeUse', 900020, 1, 1);
         await s.query('update sys_user set money = 5, gift = 5 where uid = ?', [uid]);
         await s.command(session, 'buyGoodsBeforeUse', 900020, 1, 0);
+        // doLogin hands out one of two daily boxes (50186 / 50187) at random; drop them so
+        // loadUserGoods compares the bought 金条, not the random pick (mirrors the other shop cases).
+        await s.query('delete from sys_goods where uid = ? and gid in (50186, 50187)', [uid]);
         await s.command(session, 'loadUserGoods');
       } finally {
         await s.query('update sys_user set money = ?, gift = ? where uid = ?', [
@@ -2274,7 +2277,9 @@ export const cases: DiffCase[] = [
       }
 
       // --- 武魂 (type > 110000) and other world/battle items stay 此功能尚未开放 ---
-      await s.command(session, 'useTypeGoods', 145, 10957, cid); // 成长卷 picker not ported
+      // 成长卷 (type 145) is ported (useAddUserHeroExpBook): the lord hero is at the level cap,
+      // so both servers answer 将领等级达到上限.
+      await s.command(session, 'useTypeGoods', 145, 10957, cid);
     },
   },
   {
@@ -2308,17 +2313,17 @@ export const cases: DiffCase[] = [
       // Too low a nobility first; then raise it and befriend.
       await s.query('update sys_user set nobility = 1 where uid = ?', [uid]);
       await s.query('update mem_city_resource set gold = 1000000 where cid = ?', [cid]);
-      await hotel('lionizeHero', 500);
+      await hotel('LionizeHero', 500);
       await s.query('update sys_user set nobility = 5 where uid = ?', [uid]);
       await s.query('delete from sys_lionize where uid = ?', [uid]);
       // Not enough gold.
       await s.query('update mem_city_resource set gold = 100 where cid = ?', [cid]);
-      await hotel('lionizeHero', 500);
+      await hotel('LionizeHero', 500);
       // Succeeds (throws the success message).
       await s.query('update mem_city_resource set gold = 1000000 where cid = ?', [cid]);
-      await hotel('lionizeHero', 500);
+      await hotel('LionizeHero', 500);
       // Already befriended.
-      await hotel('lionizeHero', 500);
+      await hotel('LionizeHero', 500);
       // 断交 drops it.
       await hotel('onCancelFriend', 500);
 
@@ -2336,23 +2341,27 @@ export const cases: DiffCase[] = [
       const hotel = (func: string, ...args: unknown[]) =>
         s.dialog(session, cid, 10, 42, func, ...args);
 
-      // Hold the refresh clock ahead so the shipped rumour list is not regenerated (random).
-      await s.query(
-        'update mem_city_schedule set last_reset_rumor = unix_timestamp() + 3600 where cid = ?',
-        [cid],
-      );
-      // A famous NPC hero standing in a known city, and a rumour for it.
+      // Hold the refresh clock far ahead so the shipped rumour list is not regenerated (random).
+      // A FIXED timestamp (not unix_timestamp()+N) keeps both sides identical — a relative value
+      // is written a second apart on the two servers and, being outside the "now" window, is not
+      // aliased, so it would flake by 1s.
+      await s.query('update mem_city_schedule set last_reset_rumor = 4000000000 where cid = ?', [
+        cid,
+      ]);
+      // A famous NPC hero standing in a known city, and a rumour for it. npcid 569 has no hero
+      // in the shipped save, so the original's `sql_fetch_one(... where npcid=569)` sees exactly
+      // one row (a colliding shipped npcid would make it throw "2 were returned" instead).
       await s.query('delete from sys_city_hero where hid = 900501', []);
       await s.query(
         `insert into sys_city_hero (hid, uid, npcid, name, sex, face, cid, state, level, exp,
             affairs_base, bravery_base, wisdom_base, loyalty, herotype)
-          values (900501, 900001, 501, '名将乙', 1, 1001, ?, 0, 15, 2500, 40, 45, 42, 70, 100)`,
+          values (900501, 900001, 569, '名将乙', 1, 1001, ?, 0, 15, 2500, 40, 45, 42, 70, 100)`,
         [cid],
       );
       await s.query('delete from sys_city_rumor where cid = ? and id = 900701', [cid]);
       await s.query(
         `insert into sys_city_rumor (id, cid, name, type, typeid, price)
-          values (900701, ?, '名将乙', 0, 501, 30)`,
+          values (900701, ?, '名将乙', 0, 569, 30)`,
         [cid],
       );
 
@@ -2364,13 +2373,13 @@ export const cases: DiffCase[] = [
       await s.query('update sys_user set money = 100000 where uid = ?', [uid]);
       await hotel('askDetail', 900701, 0);
       // Record it as a 捉将 task pair.
-      await s.query('delete from sys_user_task where uid = ? and tid in (20501, 30501)', [uid]);
+      await s.query('delete from sys_user_task where uid = ? and tid in (20569, 30569)', [uid]);
       await hotel('recordTask', 900701);
       // Already recorded.
       await hotel('recordTask', 900701);
 
-      await s.query('delete from sys_user_task where uid = ? and tid in (20501, 30501)', [uid]);
-      await s.query('delete from sys_things where uid = ? and tid = 20501', [uid]);
+      await s.query('delete from sys_user_task where uid = ? and tid in (20569, 30569)', [uid]);
+      await s.query('delete from sys_things where uid = ? and tid = 20569', [uid]);
       await s.query('delete from sys_report where uid = ? and title = 19', [uid]);
       await s.query('delete from sys_city_hero where hid = 900501', []);
       await s.query('delete from sys_city_rumor where cid = ? and id = 900701', [cid]);
@@ -2496,8 +2505,12 @@ export const cases: DiffCase[] = [
         [session.uid],
       );
       await s.query('select food, wood from mem_city_resource where cid = ?', [cid]);
-      // Error: an unknown resource type.
+      // Error: an unknown resource type. The original hits a malformed `select  from …` (an
+      // undefined $typeToCol key) and returns the DB layer's "PearDB returned an error. "; the
+      // new server validates the type and answers 没有这样的资源类型. Both reject (leading 0), so
+      // mask only the degenerate error text.
       await s.dialog(session, cid, 17, 0, 'payToPack', ['bogus1', 1, 1, 1]);
+      s.mask(1);
       // Error: not enough resource.
       await s.query('update mem_city_resource set food = 0 where cid = ?', [cid]);
       await s.dialog(session, cid, 17, 0, 'payToPack', ['food1', 100, 100, 50]);
