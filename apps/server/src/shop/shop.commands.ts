@@ -180,7 +180,10 @@ export class ShopCommands {
         else await this.goods.addThings(uid, gid, cnt, LOG_COPPER_BUY);
         await this.goods.addGoods(uid, CREDIT_GID, -moneyNeed, LOG_COPPER_BUY);
         await sql`update sys_user set last_pay = '2' where uid = ${uid}`.execute(this.scope.db);
-        goodLeft = jifen - moneyNeed;
+        // The original reads the balance into $jifen but computes $goodLeft from the
+        // never-assigned $copper (a typo), so PHP evaluates it as 0 - moneyNeed. Mirror
+        // that: the 积分 branch answers the negative spend, not the remaining balance.
+        goodLeft = 0 - moneyNeed;
       } else if (commend === PAY_WUZHU) {
         // 五铢钱 buy (10960).
         const wuzhu = phpNum(
