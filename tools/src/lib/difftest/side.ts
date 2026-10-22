@@ -7,6 +7,7 @@ import type { SideDb } from './side-db.ts';
 
 /** cfg_js.php's settlement functions and the server's TickOrder slot porting each. */
 export const TICK_SLOTS = {
+  HandleHeroHexprs: 30,
   UpdateUsersCurse: 40,
   UpdateUsersTechnic: 50,
   UpdateUsersSoldier: 60,

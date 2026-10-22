@@ -1527,6 +1527,99 @@ export const cases: DiffCase[] = [
       await s.query('update sys_user_book set hid = 0 where id = ?', [HARVEST_1]);
     },
   },
+  {
+    // 将领历练 (HeroFunc.php + HeroExpr.php). The Office dialog (Define.ID_BUILDING_OFFICE = 11)
+    // lists expr-eligible heroes, starts/cancels/speeds an expr; the settlement frees the hero.
+    name: 'hero expr: list, start, cancel and speed',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const [u] = await s.query<{ lastcid: string }>('select lastcid from sys_user where uid = ?', [
+        uid,
+      ]);
+      const cid = Number(u?.lastcid ?? 0);
+      const OFFICE = 11; // Define.ID_BUILDING_OFFICE
+      const dlg = (func: string, ...args: unknown[]) =>
+        s.dialog(session, cid, OFFICE, 0, func, ...args);
+
+      // A spare idle hero (900101) and plenty of city gold / 元宝 to afford the expr.
+      await s.query(
+        `insert into sys_city_hero (hid, uid, cid, name, state, level, loyalty, herotype,
+            affairs_base, bravery_base, wisdom_base, command_base)
+          values (900101, ?, ?, '历练甲', 0, 5, 80, 0, 30, 40, 50, 20)`,
+        [uid, cid],
+      );
+      await s.query(
+        'insert into mem_hero_blood (hid, force, force_max, energy, energy_max) values (900101, 100, 100, 100, 100)',
+        [],
+      );
+      await s.query('update mem_city_resource set gold = 1000000 where cid = ?', [cid]);
+      await s.query('update sys_user set money = 1000000 where uid = ?', [uid]);
+      // 通关文书 (143) and 急召令 (144) for fasterHeroExpr.
+      await s.query('insert into sys_goods (uid, gid, count) values (?, 143, 5), (?, 144, 5)', [
+        uid,
+        uid,
+      ]);
+
+      // Lists the expr types and the city's heroes.
+      await dlg('getExprHeros');
+      s.mask(7, 0, '*'); // [now, heros, types] — now is the clock
+      s.unordered(7, 1); // hero list has no ORDER BY
+      s.unordered(7, 2);
+
+      // Error branches of beginExprHero.
+      await dlg('beginExprHero', 900101, cid, 1, 0, 0); // hours < 1 -> waigua.invalid
+      await dlg('beginExprHero', 900101, cid, 1, 999, 0); // outside the type band
+      await dlg('beginExprHero', 80213, cid, 1, 2, 0); // the 君主将 cannot expr
+      await s.query('update mem_city_resource set gold = 0 where cid = ?', [cid]);
+      await dlg('beginExprHero', 900101, cid, 1, 2, 0); // not enough city gold
+      await s.query('update mem_city_resource set gold = 1000000 where cid = ?', [cid]);
+
+      // Success: pays and queues the expr, hero -> state 10.
+      await dlg('beginExprHero', 900101, cid, 1, 2, 10);
+      s.mask(7, '*', 'starttime');
+      s.mask(7, '*', 'endtime');
+
+      // Speed it up with 通关文书 (state 0), then cancel and end it with 急召令.
+      await dlg('fasterHeroExpr', 900101);
+      await dlg('cancelHeroExpr', 900101);
+      await dlg('fasterHeroExpr', 900101);
+    },
+  },
+  {
+    // HeroExpr.php::ordinaryHeroExpr via the settlement loop: a cancelled expr (state 1) whose
+    // time is up refunds the carried 元宝, adds a small exp bonus, deletes the row and frees the
+    // hero. Random fields are not diffed; the deterministic side effects are asserted directly.
+    name: 'hero expr settlement finishes a cancelled expr',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const [u] = await s.query<{ lastcid: string }>('select lastcid from sys_user where uid = ?', [
+        uid,
+      ]);
+      const cid = Number(u?.lastcid ?? 0);
+      await s.query(
+        `insert into sys_city_hero (hid, uid, cid, name, state, level, loyalty, herotype,
+            affairs_base, bravery_base, wisdom_base, command_base, exp)
+          values (900102, ?, ?, '历练乙', 10, 5, 80, 0, 30, 40, 50, 20, 1000)`,
+        [uid, cid],
+      );
+      await s.query(
+        `insert into sys_hero_expr (uid, cid, hid, type, starttime, endtime, hours, carrymoney,
+            accTimes, state)
+          values (?, ?, 900102, 1, unix_timestamp() - 7200, unix_timestamp() - 1, 1, 50, 0, 1)`,
+        [uid, cid],
+      );
+      await s.tick('HandleHeroHexprs');
+      const [hero] = await s.query<{ state: string }>(
+        'select state from sys_city_hero where hid = 900102',
+        [],
+      );
+      if (Number(hero?.state) !== 0) throw new Error('expr hero was not freed');
+      const left = await s.query('select id from sys_hero_expr where hid = 900102', []);
+      if (left.length !== 0) throw new Error('expr row was not cleared');
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {
