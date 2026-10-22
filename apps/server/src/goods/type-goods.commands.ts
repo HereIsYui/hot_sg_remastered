@@ -74,8 +74,10 @@ const PLAIN_USE_TYPES = new Set([
   4, 5, 6, 7, 8, 9, 10, 142, 143, 12, 13, 14, 15, 16, 17, 18, 19, 10333, 161501, 165, 20, 21, 22,
   23, 10083, 10084, 10085, 42, 48, 47, 51, 50, 166, -16656,
 ]);
-/** Types with their own use that is not ported yet: 君主经验书 (145, 成长卷). */
-const UNPORTED_TYPES = new Set([145]);
+/** Types with their own use that is not ported yet. */
+const UNPORTED_TYPES = new Set<number>([]);
+/** 君主经验书 / 成长卷 (type 145) gids and the experience each copy grants. */
+const KING_EXP_BOOK_ADD: Record<number, number> = { 10957: 5000, 10958: 15000, 10959: 30000 };
 /** Types routed to the smithy's openHole: 打孔器 (24/25), 化石粉 (26), 特级金刚钻 (28). */
 const OPEN_HOLE_TYPES = new Set([24, 25, 26, 28]);
 
@@ -236,6 +238,9 @@ export class TypeGoodsCommands {
     if (type === 49) {
       return this.scope.transaction(() => this.useBigForceGoods(uid, cid, gid, rest));
     }
+    if (type === 145) {
+      return this.scope.transaction(() => this.useAddUserHeroExpBook(uid, cid, gid));
+    }
     if (OPEN_HOLE_TYPES.has(type)) {
       // 打孔器 / 化石粉 / 特级金刚钻: the smithy's openHole, `[sid, gid, position, useType, count]`.
       return this.blacksmith.openHole(ctx, [rest[0], gid, rest[1], rest[2], rest[3]]);
@@ -336,6 +341,54 @@ export class TypeGoodsCommands {
     await sql`update sys_city_hero set exp = exp + ${expadd} where hid = ${hid}`.execute(db);
     await this.goods.reduceGoods(uid, gid, goodCnt);
     return this.cityInfo.heroInfo(uid, cid);
+  }
+
+  /**
+   * GoodsFunc.php::useAddUserHeroExpBook (type 145, 成长卷): adds experience to the lord hero
+   * (herotype 1000). The picker always sends useCount 1, but the original then consumes and
+   * credits ALL owned copies at once (`$realCnt = $goodCnt`) unless one copy already overfills
+   * the cap, in which case it tops the hero to the cap and consumes none. Level cap is 100, or
+   * 125 for a level-10 lord. Answers `[heroInfo]` as getCityInfoHero does.
+   */
+  private async useAddUserHeroExpBook(uid: number, cid: number, gid: number): Promise<Row[][]> {
+    const db = this.scope.db;
+    const useCount = 1;
+    const goodCnt = phpIntval(
+      await this.cell(sql`select count from sys_goods where gid = ${gid} and uid = ${uid}`),
+    );
+    if (goodCnt < useCount) throw GameError.lang('duihuan.not_enogh');
+
+    const hero = await this.row(
+      sql`select * from sys_city_hero where uid = ${uid} and herotype = ${String(LORD_HEROTYPE)}`,
+    );
+    if (!hero) throw GameError.lang('useGoods.king_cannot_find');
+
+    const level = phpNum(await this.cell(sql`select level from sys_user_level where uid = ${uid}`));
+    const levelLimit = level === 10 ? 125 : 100;
+    if (phpNum(hero.level) >= levelLimit) throw GameError.lang('useGoods.hero_level_full');
+    if (!isHeroInCity(hero.state)) throw GameError.lang('useGoods.hero_state_wrong');
+
+    const heroCurExp = phpNum(
+      await this.cell(sql`select exp from sys_city_hero where hid = ${hero.hid}`),
+    );
+    const maxExp = phpNum(
+      await this.cell(sql`select total_exp from cfg_hero_level where level = ${levelLimit}`),
+    );
+    const leaveExp = maxExp - heroCurExp;
+    const perBook = KING_EXP_BOOK_ADD[gid] ?? 0;
+    const needCnt = Math.ceil(leaveExp / perBook);
+
+    let realCnt = goodCnt;
+    if (useCount > needCnt) {
+      // One book already fills the cap: top the hero to maxExp and consume nothing.
+      realCnt = needCnt;
+      await sql`update sys_city_hero set exp = ${maxExp} where hid = ${hero.hid}`.execute(db);
+    } else {
+      const expadd = perBook * realCnt;
+      await sql`update sys_city_hero set exp = exp + ${expadd} where hid = ${hero.hid}`.execute(db);
+    }
+    await this.goods.reduceGoods(uid, gid, realCnt);
+    return [await this.cityInfo.heroInfo(uid, cid)];
   }
 
   /**
