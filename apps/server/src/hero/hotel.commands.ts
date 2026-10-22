@@ -237,12 +237,16 @@ export class HotelCommands {
    * `[hid]`: 结交 a famous hero — spends the city's gold and marks sys_lionize state 1 with a
    * starting friendship of 10. Requires a free 结交 slot (2, or 5 with a 求贤诏 buff) and a 爵位
    * of at least 上造. Throws the success message (the original signals 结交 that way).
+   * The client (HotelDialog.as) and the legacy openfunc name it `LionizeHero` (capital L).
    */
-  @DialogCommand()
+  @DialogCommand('LionizeHero')
   async lionizeHero(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
     const { uid, cid } = ctx;
     const hid = phpIntval(param[0]);
-    return this.scope.transaction(async () => {
+    // Like the original, success is signalled by throwing AFTER the writes have committed
+    // (autocommit). Commit inside the transaction, then throw outside — otherwise the 结交 insert
+    // rolls back and a repeat 结交 of the same hero would not be refused as 已结交.
+    await this.scope.transaction(async () => {
       const db = this.scope.db;
       if (
         phpIntval(await this.cell(sql`select npcid from sys_city_hero where hid = ${hid}`)) === 0
@@ -284,8 +288,8 @@ export class HotelCommands {
       await this.tasks.completeTask(uid, GOAL_JIEJIAO);
       await this.tasks.completeTaskWithTaskid(uid, TASK_JIEJIAO);
       await this.users.logUserAction(uid, ACTION_JIEJIAO);
-      throw GameError.lang('recruitHero.jiejiao_succ');
     });
+    throw GameError.lang('recruitHero.jiejiao_succ');
   }
 
   /**
@@ -404,8 +408,11 @@ export class HotelCommands {
       ret.push(this.lang.t('getRumor.dont_know_where_he_is'));
       ret.push(false);
     } else {
-      const place = await this.posDescription(phpIntval(hero.cid));
-      ret.push(this.lang.t('getRumor.pay_for_hero', rumor.name, place, rumor.price));
+      // The original names only the province of the hero's location here (askDetail later gives
+      // the city + coordinates). `select p.name from mem_world w, cfg_province p …`.
+      const place = await this.cell(sql`select p.name from mem_world w, cfg_province p
+        where w.province = p.id and w.wid = ${cid2wid(phpIntval(hero.cid))}`);
+      ret.push(this.lang.t('getRumor.pay_for_hero', rumor.name, place ?? '', rumor.price));
       ret.push(true);
     }
     ret.push(true);
@@ -536,7 +543,10 @@ export class HotelCommands {
       const npcid = phpIntval(rumor.typeid);
       const taskid1 = 20000 + npcid;
       const taskid2 = 30000 + npcid;
-      return this.scope.transaction(async () => {
+      // The original signals success by throwing AFTER the writes have already committed
+      // (autocommit). Run the writes in the transaction, let it commit, then throw the success
+      // message outside — otherwise the throw rolls the inserts back and a repeat records again.
+      await this.scope.transaction(async () => {
         const db = this.scope.db;
         if (
           await this.exists(sql`select uid from sys_user_task where uid = ${uid}
@@ -558,8 +568,8 @@ export class HotelCommands {
         await sql`insert into sys_user_task (uid, tid, state) values (${uid}, ${taskid2}, 0)
           on duplicate key update state = 0`.execute(db);
         await this.users.logUserAction(uid, ACTION_RECORD_TASK);
-        throw GameError.lang('recordTask.task_record_succ');
       });
+      throw GameError.lang('recordTask.task_record_succ');
     }
     if (rumor && phpNum(rumor.type) === 1) {
       throw new Error('recordTask(type=1): 任务物品 cfg_thing_task not ported');
