@@ -104,6 +104,7 @@ export class DefaultBoxService {
     cid: number,
     srcid: number,
     srctype: number,
+    basecount = 1,
   ): Promise<string | false> {
     const details = await this.rows(sql`select * from cfg_box_details
       where srctype = ${srctype} and srcid = ${srcid}`);
@@ -111,7 +112,7 @@ export class DefaultBoxService {
     const pick = await this.pickWithLimit(uid, srctype, srcid, details);
     if (!pick) return false;
     if (phpIntval(pick.sort) === 7) throw new Error(`openDefaultHeroBox(${srcid}) not ported`);
-    const given = await this.give(uid, cid, srcid, srctype, pick);
+    const given = await this.give(uid, cid, srcid, srctype, pick, basecount);
     return typeof given === 'string' ? given : false;
   }
 
@@ -201,6 +202,7 @@ export class DefaultBoxService {
     srcid: number,
     srctype: number,
     pick: Row,
+    basecount = 1,
   ): Promise<unknown[] | string | false | CommittedMessage> {
     const sort = phpIntval(pick.sort);
     const type = phpIntval(pick.type);
@@ -208,8 +210,10 @@ export class DefaultBoxService {
       where srcid = ${srcid} and srctype = ${srctype} and sort = ${sort} and type = ${type}
         and count = ${phpIntval(pick.count)}`);
     if (!row) return false;
+    // openDefaultGoodsNow: the detail count is multiplied by the caller's basecount, then capped.
     const limit = phpNum(pick.limit);
-    const count = limit > 0 ? Math.min(phpNum(row.count), limit) : phpNum(row.count);
+    const scaled = phpNum(row.count) * basecount;
+    const count = limit > 0 ? Math.min(scaled, limit) : scaled;
     const reward = { ...row, count };
     let gotten = await this.rewards.giveReward(
       uid,

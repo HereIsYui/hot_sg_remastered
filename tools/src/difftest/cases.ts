@@ -1541,6 +1541,11 @@ export const cases: DiffCase[] = [
             (900002, 86, '测试金砖', '测试', 50, 1, 0, 1, 0, 2000000000, 2000000000, 2)`,
       );
       await s.command(session, 'getShopInfo');
+      // The 元宝/礼金 lists carry `order by position, id`; the two 五铢钱 copper lists
+      // (copperList + copperThings) have none, so MyISAM and InnoDB return them in different
+      // orders — compare them as sets.
+      s.unordered(4, 4);
+      s.unordered(4, 5);
       // Config lookups for a shop hero (cfg_hero id 1) and gear (cfg_armor id 1), and misses.
       await s.command(session, 'getGoodsHeroAttr', 1);
       await s.command(session, 'getGoodsHeroAttr', 99999999);
@@ -1570,6 +1575,17 @@ export const cases: DiffCase[] = [
         [uid],
       );
       await s.query('update sys_user set money = 1000, gift = 500 where uid = ?', [uid]);
+      // The shipped DB has running 商城活动 (累计充值) whose gift count depends on the exact
+      // log_shop timestamps; in difftest both servers log within the same second, so the
+      // cumulative boundary is ambiguous. Park the events so the compare is the purchase itself.
+      const actRows = await s.query<{ actid: string; endtime: string }>(
+        `select actid, endtime from cfg_act where type in (5001, 5002, 5101, 5201, 5010)
+          and starttime <= unix_timestamp() and endtime >= unix_timestamp()`,
+      );
+      await s.query(
+        `update cfg_act set endtime = 0 where type in (5001, 5002, 5101, 5201, 5010)
+          and starttime <= unix_timestamp() and endtime >= unix_timestamp()`,
+      );
       try {
         // Validation: bad pay type, bad amount, unknown / unsold item.
         await s.command(session, 'buyGoods', 900001, 1, 2);
@@ -1594,6 +1610,9 @@ export const cases: DiffCase[] = [
           user?.gift,
           uid,
         ]);
+        for (const act of actRows) {
+          await s.query('update cfg_act set endtime = ? where actid = ?', [act.endtime, act.actid]);
+        }
       }
     },
   },

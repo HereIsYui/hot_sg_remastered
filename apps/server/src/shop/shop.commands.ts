@@ -139,7 +139,9 @@ export class ShopCommands {
     let id = phpIntval(param[0]);
     const cnt = phpIntval(param[1]);
     const paytype = phpIntval(param[2]);
-    if (paytype !== 0 && paytype !== 1) throw GameError.lang('buyGoods.invalid_pay_type');
+    //  is unset in the legacy lang, so the original
+    // throws an empty message; GameError.raw('') matches that rather than echoing the key.
+    if (paytype !== 0 && paytype !== 1) throw GameError.raw('');
     if (cnt < 1) throw GameError.lang('buyGoods.invalid_amount');
 
     // The PHP checks `!empty($gid)`: 0 / absent keeps id, otherwise gid wins.
@@ -220,7 +222,9 @@ export class ShopCommands {
     const id = phpIntval(param[0]);
     const cnt = phpIntval(param[1]);
     const paytype = phpIntval(param[2]);
-    if (paytype !== 0 && paytype !== 1) throw GameError.lang('buyGoods.invalid_pay_type');
+    //  is unset in the legacy lang, so the original
+    // throws an empty message; GameError.raw('') matches that rather than echoing the key.
+    if (paytype !== 0 && paytype !== 1) throw GameError.raw('');
     if (cnt < 1) throw GameError.lang('buyGoods.invalid_amount');
 
     return this.scope.transaction(async () => {
@@ -514,8 +518,9 @@ export class ShopCommands {
     msg += await this.payActsCumulative(uid, cid, 5201, true);
     msg += await this.payActsCumulative(uid, cid, 5010, false);
 
-    const trimmed = msg.trim();
-    return trimmed === '' ? false : trimmed;
+    // ShopFunc.php returns $msg as built (with each gift's trailing space); buyGoods treats any
+    // non-empty string as truthy. Keep the trailing space, only map "" to false.
+    return msg === '' ? false : msg;
   }
 
   private async payActs(
@@ -530,7 +535,13 @@ export class ShopCommands {
       if (money < phpNum(payAct.money_limit)) continue;
       const count = giveCount(payAct, money);
       if (count <= 0) continue;
-      const gift = await this.defaultBox.openEvent(uid, cid, phpIntval(payAct.actid), SRC_SHOP_ACT);
+      const gift = await this.defaultBox.openEvent(
+        uid,
+        cid,
+        phpIntval(payAct.actid),
+        SRC_SHOP_ACT,
+        count,
+      );
       if (gift) msg += `${gift} `;
     }
     return msg;
@@ -581,7 +592,13 @@ export class ShopCommands {
         Math.floor(totalMoney / phpNum(payAct.money_limit)) -
         Math.floor(beforeTotal / phpNum(payAct.money_limit));
       if (giveCount <= 0) continue;
-      const gift = await this.defaultBox.openEvent(uid, cid, phpIntval(payAct.actid), SRC_SHOP_ACT);
+      const gift = await this.defaultBox.openEvent(
+        uid,
+        cid,
+        phpIntval(payAct.actid),
+        SRC_SHOP_ACT,
+        giveCount,
+      );
       if (gift) msg += `${gift} `;
     }
     return msg;
@@ -630,7 +647,8 @@ export class ShopCommands {
           await this.goods.addGoods(uid, gid, cnt, LIQUAN_LOG.goods);
         }
         const good = (await this.row(sql`select * from cfg_goods where gid = ${gid}`)) ?? {};
-        ret.push({ ...good, count: cnt, gtype: 0 });
+        // The original selects `'0' as gype` (a typo for gtype) alongside gtype on the goods row.
+        ret.push({ ...good, count: cnt, gype: '0', gtype: 0 });
       } else if (type === 1) {
         const armor = (await this.row(sql`select * from cfg_armor where id = ${gid}`)) ?? {};
         ret.push({
