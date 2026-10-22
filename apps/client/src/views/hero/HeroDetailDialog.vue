@@ -24,6 +24,7 @@ import FxLabel from '../../ui/FxLabel.vue';
 import ArmorRenovatePayDialog from './ArmorRenovatePayDialog.vue';
 import ChangeArmorDialog from './ChangeArmorDialog.vue';
 import ChangeHeroNameDialog from './ChangeHeroNameDialog.vue';
+import ChangeUserNameDialog from '../goods/ChangeUserNameDialog.vue';
 import HeroArmorPanel from './HeroArmorPanel.vue';
 import IntroduceDialog from './IntroduceDialog.vue';
 import { useHeroArmor } from './heroArmor';
@@ -181,13 +182,14 @@ async function onDismiss() {
   }
 }
 
-const panel = ref<'changeName' | 'largess' | null>(null);
+const panel = ref<'changeName' | 'kingName' | 'largess' | null>(null);
 
+/** `onShowChangeNamePanel`: the king opens the 君主改名 dialog (changeUserName), others rename the hero. */
 function onShowChangeName() {
   const h = hero.value;
   if (!h) return;
   if (!h.healthy) void showAlert(i18n('Hero_HeroArmorPanelSrc_19'));
-  else if (h.king) notYet();
+  else if (h.king) panel.value = 'kingName';
   else panel.value = 'changeName';
 }
 
@@ -627,6 +629,11 @@ const points = computed(() => {
       v-if="panel === 'changeName' && hero"
       :name="hero.name"
       @change="(name) => send('changeHeroName', hero!.hid, name)"
+      @close="panel = null"
+    />
+    <ChangeUserNameDialog
+      v-if="panel === 'kingName'"
+      @change="(name) => game.sendGlobalCommand('user', 'changeUserName', [name])"
       @close="panel = null"
     />
     <IntroduceDialog v-if="introduce" :npc="introduce" @close="introduce = null" />

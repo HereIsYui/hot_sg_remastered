@@ -21,14 +21,17 @@ import FxCanvas from '../../ui/FxCanvas.vue';
 import FxImage from '../../ui/FxImage.vue';
 import FxLabel from '../../ui/FxLabel.vue';
 import MySkillDialog from './MySkillDialog.vue';
+import ChangeFlagDialog from './ChangeFlagDialog.vue';
+import ChangeUserNameDialog from './ChangeUserNameDialog.vue';
 import SellGoodsPanel from './SellGoodsPanel.vue';
 import TreasureGetDialog from './TreasureGetDialog.vue';
 import UserGoodsItem from './UserGoodsItem.vue';
 
 /**
- * Goods.MyGoodsDialog: the player's items by kind, 21 to a page, to use or sell. The items
- * with a dialog of their own (迁城令, 免战牌, 旌旗, 名帖, 武魂, 离间符 ...), card mixing,
- * recharging and the shop are not ported; the skill books open in a dialog of their own.
+ * Goods.MyGoodsDialog: the player's items by kind, 21 to a page, to use or sell. 旌旗 (39) and
+ * 名帖 (84) open a dialog of their own (ChangeFlagDialog / ChangeUserNameDialog); the other
+ * items with a dedicated dialog (迁城令, 免战牌, 武魂, 离间符 ...), card mixing and recharging
+ * are not ported; the skill books open in a dialog of their own.
  */
 const game = useGame();
 const user = useUserStore();
@@ -48,6 +51,9 @@ const TABS: { x: number; type: number; label: string }[] = [
 ];
 const SKILL_TAB = 7;
 const MARKET_BID = 13;
+/** 旌旗 (gid 39) and 名帖 (gid 84): the items that open a rename dialog of their own. */
+const GOODS_FLAGCHAR = 39;
+const GOODS_MINGTIE = 84;
 /** Items whose use changes the city's resources or people at once. */
 const REFRESH_CITY_GIDS = new Set([54, 55, 57, 58, 139]);
 /** 聚魂珠 and 马鞭: the only items 合成 takes. */
@@ -68,6 +74,9 @@ const shown = computed(() =>
 const treasure = shallowRef<TreasureItem[] | null>(null);
 const selling = shallowRef<GoodsItem | null>(null);
 const skillOpen = ref(false);
+/** 旌旗 (39) and 名帖 (84) each open a dialog of their own instead of the use-confirm. */
+const changeFlagOpen = ref(false);
+const changeNameOpen = ref(false);
 
 function loadUserGoods() {
   game.sendGlobalCommand('goods', 'loadUserGoods');
@@ -117,6 +126,15 @@ async function useGoods(item: GoodsItem) {
   }
   if (item.autouse === 0) {
     void showAlert(item.useguide);
+    return;
+  }
+  // 旌旗 (39) / 名帖 (84) open a dialog of their own (changeUserFlagchar / changeUserName).
+  if (item.gid === GOODS_FLAGCHAR) {
+    changeFlagOpen.value = true;
+    return;
+  }
+  if (item.gid === GOODS_MINGTIE) {
+    changeNameOpen.value = true;
     return;
   }
   const box = (item.gid >= 16 && item.gid <= 18) || item.gid === 119;
@@ -228,6 +246,18 @@ const unregister = game.addGlobalReceiver('goods', (command, data) => {
 });
 onMounted(loadUserGoods);
 onUnmounted(unregister);
+
+/** 旌旗: send changeUserFlagchar, then reload the item list (the 旌旗 is consumed). */
+function onChangeFlag(flagchar: string) {
+  game.sendGlobalCommand('user', 'changeUserFlagchar', [flagchar]);
+  loadUserGoods();
+}
+
+/** 名帖: send changeUserName, then reload the item list (the 名帖 is consumed). */
+function onChangeName(name: string) {
+  game.sendGlobalCommand('user', 'changeUserName', [name]);
+  loadUserGoods();
+}
 </script>
 
 <script lang="ts">
@@ -320,4 +350,10 @@ const remembered = { type: 0, page: 0 };
     <SellGoodsPanel v-if="selling" :goods="selling" @sell="doSellGoods" @close="selling = null" />
   </FxCanvas>
   <MySkillDialog v-if="skillOpen" @close="skillOpen = false" />
+  <ChangeFlagDialog v-if="changeFlagOpen" @change="onChangeFlag" @close="changeFlagOpen = false" />
+  <ChangeUserNameDialog
+    v-if="changeNameOpen"
+    @change="onChangeName"
+    @close="changeNameOpen = false"
+  />
 </template>
