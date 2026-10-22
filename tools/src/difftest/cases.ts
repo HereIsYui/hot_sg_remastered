@@ -1933,6 +1933,128 @@ export const cases: DiffCase[] = [
       }
     },
   },
+  {
+    name: 'hero consumables restore force, energy and experience',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const use = (type: number, gid: number, hid: number) =>
+        s.command(session, 'useTypeGoods', type, gid, cid, hid);
+      const LORD = 80213;
+      const HERO = 900101;
+      const give = (gid: number, count: number) =>
+        s.query(
+          `insert into sys_goods (uid, gid, count) values (?, ?, ?)
+            on duplicate key update count = values(count)`,
+          [uid, gid, count],
+        );
+      // A free, undamaged NPC hero with room to spend 体力/精力/经验.
+      await s.query(
+        `insert into sys_city_hero (hid, uid, name, npcid, sex, face, cid, state, level, exp,
+          hero_health, command_base, affairs_base, bravery_base, wisdom_base, loyalty, herotype)
+        values (?, ?, '丙丁', 0, 1, 10, ?, 0, 30, 100, 20, 40, 60, 60, 60, 0)`,
+        [HERO, uid, cid],
+      );
+      await s.query(
+        `insert into mem_hero_blood (hid, \`force\`, force_max, energy, energy_max)
+        values (?, 10, 120, 10, 120)`,
+        [HERO],
+      );
+
+      // 体力药 (type 2): not owned, then a 30% (gid 75) and a full (gid 77) restore.
+      await use(2, 75, HERO);
+      await give(75, 1);
+      await give(77, 1);
+      await use(2, 75, HERO);
+      await use(2, 77, HERO);
+      // Refuses a 重伤 hero.
+      await s.query('update sys_city_hero set hero_health = 1 where hid = ?', [HERO]);
+      await use(2, 77, HERO);
+      await s.query('update sys_city_hero set hero_health = 0 where hid = ?', [HERO]);
+
+      // 精力药 (type 3): 60% (gid 80) then full (gid 81).
+      await give(80, 1);
+      await give(81, 1);
+      await use(3, 80, HERO);
+      await use(3, 81, HERO);
+
+      // 护命金丹 (type 49, gid 151): full force even for a 重伤 hero.
+      await s.query('update mem_hero_blood set `force` = 0 where hid = ?', [HERO]);
+      await s.query('update sys_city_hero set hero_health = 1 where hid = ?', [HERO]);
+      await use(49, 151, HERO);
+      await give(151, 1);
+      await use(49, 151, HERO);
+
+      // 经验书 (type 11): up to ten copies at once; a lord hero and a capped hero are refused.
+      await give(113, 3);
+      await use(11, 113, HERO);
+      await use(11, 114, HERO); // not owned
+      await give(114, 12); // capped at ten used
+      await use(11, 114, HERO);
+      await give(115, 1);
+      await use(11, 115, LORD); // 君主将不能使用
+      await s.query('update sys_city_hero set level = 120 where hid = ?', [HERO]);
+      await use(11, 115, HERO); // level cap
+      await s.query('update sys_city_hero set level = 30 where hid = ?', [HERO]);
+    },
+  },
+  {
+    name: 'captives are summoned or freed, defectors accepted or turned away',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const hero = (func: string, ...args: unknown[]) => s.command(session, func, cid, ...args);
+      const CAPTIVE = 900201;
+      const DEFECTOR = 900202;
+      const NPC = 900203;
+      // A low-level captive (needs no jewels), a defector, and a famous captive with a biography.
+      await s.query(
+        `insert into sys_city_hero (hid, uid, name, npcid, sex, face, cid, state, level, exp,
+          command_base, affairs_base, bravery_base, wisdom_base, loyalty, herotype)
+        values (?, ?, '俘甲', 0, 1, 10, ?, 5, 8, 0, 20, 40, 60, 60, 20, 0),
+          (?, ?, '投乙', 0, 1, 10, ?, 6, 8, 0, 20, 40, 60, 60, 20, 0),
+          (?, ?, '名丙', 36, 1, 10, ?, 5, 10, 0, 20, 40, 60, 60, 20, 0)`,
+        [CAPTIVE, uid, cid, DEFECTOR, uid, cid, NPC, uid, cid],
+      );
+      for (const hid of [CAPTIVE, NPC]) {
+        await s.query(
+          'insert into sys_hero_captive (hid, uid, captivetime) values (?, ?, unix_timestamp())',
+          [hid, uid],
+        );
+      }
+      await s.query('update mem_city_resource set gold = 1000000 where cid = ?', [cid]);
+      await s.query('update sys_user set nobility = 19 where uid = ?', [uid]);
+
+      // 说明: a famous hero has one, an ordinary hero does not.
+      await hero('getNpcIntroduce', NPC);
+      await hero('getNpcIntroduce', CAPTIVE);
+
+      // 招降 a captive: the need prompt, then recruit (loyalty 50, state 0).
+      await hero('trySummonHero', CAPTIVE);
+      await hero('sureSummonHero', CAPTIVE);
+      await hero('sureSummonHero', CAPTIVE); // already recruited
+
+      // 释放 a captive back to the wilds (random tile, so compare the deletes only).
+      await hero('releaseHero', DEFECTOR); // not a captive
+      await hero('releaseHero', CAPTIVE); // already free now
+      await s.query('update sys_city_hero set state = 5 where hid = ?', [NPC]);
+      await hero('releaseHero', NPC);
+
+      // 接纳 a defector (loyalty 80) and 回绝 another.
+      await hero('tryAcceptHero', DEFECTOR);
+      await s.query(
+        `insert into sys_city_hero (hid, uid, name, npcid, sex, face, cid, state, level,
+          command_base, affairs_base, bravery_base, wisdom_base, loyalty, herotype)
+        values (900204, ?, '投丁', 0, 1, 10, ?, 6, 8, 0, 20, 40, 60, 60, 20, 0)`,
+        [uid, cid],
+      );
+      await hero('sureAcceptHero', DEFECTOR);
+      await hero('rejectHero', 900204);
+      await hero('rejectHero', CAPTIVE); // not a defector
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {

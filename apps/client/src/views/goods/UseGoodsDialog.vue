@@ -45,6 +45,8 @@ const PLAIN_TYPES = new Set([
 /** Types answered `[gid, kind, message]` / `[gid, kind, message, end time]`. */
 const MESSAGE_TYPES = new Set([47, 54]);
 const MESSAGE_END_TYPE = 50;
+/** 体力药 / 精力药 / 经验书 / 护命金丹: the reply is the city's hero list. */
+const HERO_LIST_TYPES = new Set([2, 3, 11, 49]);
 
 const items = shallowRef<TypeGoodsItem[]>([]);
 const cost = ref(0);
@@ -119,6 +121,9 @@ function onUseGoodsSucc(d: unknown[]) {
     gameAlert(String(d[2] ?? ''));
   } else if (type === MESSAGE_END_TYPE) {
     void showAlert(String(d[2] ?? '') + endTimeText(parseInt(String(d[3]), 10)));
+  } else if (HERO_LIST_TYPES.has(type)) {
+    game.onLoadHeroList(d);
+    gameAlert(i18n('Goods_UseGoodsDialogSrc_7'));
   }
   close();
 }
