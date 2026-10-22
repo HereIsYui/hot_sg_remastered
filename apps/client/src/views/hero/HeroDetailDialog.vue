@@ -25,6 +25,7 @@ import ArmorRenovatePayDialog from './ArmorRenovatePayDialog.vue';
 import ChangeArmorDialog from './ChangeArmorDialog.vue';
 import ChangeHeroNameDialog from './ChangeHeroNameDialog.vue';
 import HeroArmorPanel from './HeroArmorPanel.vue';
+import IntroduceDialog from './IntroduceDialog.vue';
 import { useHeroArmor } from './heroArmor';
 import { useHeroSkill } from './heroSkill';
 import LargessDialog from './LargessDialog.vue';
@@ -197,22 +198,93 @@ function onShowLargess() {
   else panel.value = 'largess';
 }
 
+/**
+ * `showUseGoodsDialog(0, type, [hid])`: the item picker of the hero buttons. 体力/精力/经验
+ * (`onAddForce` / `onAddEnergy` / `onAddExp`) open straight away; the attribute items
+ * (`onAddCommand` / `onAddAttack` / `onAddDefence` / `onAddAffairs` / `onAddBravery` /
+ * `onAddWisdom`) refuse a wounded hero first.
+ */
+function useItem(type: number) {
+  const h = hero.value;
+  if (h) game.showUseGoodsDialog(0, type, [h.hid]);
+}
+function useItemHealthy(type: number) {
+  const h = hero.value;
+  if (!h) return;
+  if (!h.healthy) void showAlert(i18n('Hero_HeroArmorPanelSrc_18'));
+  else game.showUseGoodsDialog(0, type, [h.hid]);
+}
+
+/** `onReleaseHero`: set a captive (state 5) free after confirming. */
+async function onRelease() {
+  const h = hero.value;
+  if (!h) return;
+  if ((await showAlert(src(12) + h.name + src(13), '', ['yes', 'no'])) === 'yes') {
+    send('releaseHero', h.hid);
+  }
+}
+
+/** `onRejectHero`: turn a defector (state 6) away after confirming. */
+async function onReject() {
+  const h = hero.value;
+  if (!h) return;
+  if ((await showAlert(src(14) + h.name + src(15), '', ['yes', 'no'])) === 'yes') {
+    send('rejectHero', h.hid);
+  }
+}
+
+/** `onTrySummonHero` / `onTryAcceptHero`: the server answers with the need, confirmed below. */
+function onTrySummon() {
+  const h = hero.value;
+  if (h) send('trySummonHero', h.hid);
+}
+function onTryAccept() {
+  const h = hero.value;
+  if (h) send('tryAcceptHero', h.hid);
+}
+
+/** `onShowIntroducePanel`: the famous hero's biography. */
+function onShowIntroduce() {
+  const h = hero.value;
+  if (h) send('getNpcIntroduce', h.hid);
+}
+
 /** `onCommand`: every reply carries the city's hero list. */
 const unregister = game.addGlobalReceiver('hero', (command, data) => {
   const done: Record<string, string | null> = {
     dismissHero: null,
     upgradeHero: null,
     clearHeroPoint: null,
+    releaseHero: null,
+    rejectHero: null,
     addHeroPoint: src(1),
     changeHeroName: src(2),
     largessHero: src('3_1'),
+    sureSummonHero: src(4),
+    sureAcceptHero: src('4_1'),
   };
+  const d = Array.isArray(data) ? [...(data as unknown[])] : [];
+  if (command === 'trySummonHero' || command === 'tryAcceptHero') {
+    const hid = int(d.shift());
+    const sure = command === 'trySummonHero' ? 'sureSummonHero' : 'sureAcceptHero';
+    void showAlert(String(d.shift() ?? ''), '', ['yes', 'no']).then((button) => {
+      if (button === 'yes') send(sure, hid);
+    });
+    return;
+  }
+  if (command === 'getNpcIntroduce') {
+    introduce.value = (d[0] ?? null) as Record<string, unknown> | null;
+    return;
+  }
   if (!(command in done)) return;
   game.onLoadHeroList(data);
   const message = done[command];
   if (message) gameAlert(message);
 });
 onUnmounted(unregister);
+
+/** `IntroduceDialog`: the famous hero's cfg_npc_hero row, shown on 说明. */
+const introduce = ref<Record<string, unknown> | null>(null);
 
 const TITLE = { textAlign: 'center' } as const;
 const VALUE = { textAlign: 'center' } as const;
@@ -236,9 +308,9 @@ const boxes = computed(() => {
 const points = computed(() => {
   const h = hero.value;
   return [
-    [270, 35, 36, h?.affairsText, 'affairs', '35_2'],
-    [293, 37, 38, h?.braveryText, 'bravery', '37_2'],
-    [316, 39, 40, h?.wisdomText, 'wisdom', '39_2'],
+    [270, 35, 36, h?.affairsText, 'affairs', '35_2', 44],
+    [293, 37, 38, h?.braveryText, 'bravery', '37_2', 45],
+    [316, 39, 40, h?.wisdomText, 'wisdom', '39_2', 46],
   ] as const;
 });
 </script>
@@ -321,7 +393,7 @@ const points = computed(() => {
           :h="30"
           style-name="ButtonYellow"
           :label="t(8)"
-          @click="notYet"
+          @click="onShowIntroduce"
         />
 
         <FxLabel :x="75" :y="40" :w="35" style-name="ItemTitle" :fx="TITLE" :text="t(9)" />
@@ -356,7 +428,7 @@ const points = computed(() => {
           style-name="Plus"
           :tip="t(11)"
           :enabled="hero.canAddExp && !hero.king"
-          @click="notYet"
+          @click="useItem(11)"
         />
 
         <template v-for="[x, y, title, color, w, value, tip] in boxes" :key="`${x},${y}`">
@@ -373,15 +445,15 @@ const points = computed(() => {
             <FxLabel :x="0" :y="0" :w="w" style-name="ItemValue" :fx="VALUE" :text="value" />
           </FxCanvas>
         </template>
-        <FxButton :x="113" :y="114" style-name="Plus" :tip="t(15)" @click="notYet" />
-        <FxButton :x="233" :y="114" style-name="Plus" :tip="t(18)" @click="notYet" />
+        <FxButton :x="113" :y="114" style-name="Plus" :tip="t(15)" @click="useItem(2)" />
+        <FxButton :x="233" :y="114" style-name="Plus" :tip="t(18)" @click="useItem(3)" />
         <FxButton
           :x="113"
           :y="141"
           style-name="Plus"
           :tip="t('20_2')"
           :enabled="!hero.king"
-          @click="notYet"
+          @click="useItemHealthy(43)"
         />
         <FxButton
           :x="113"
@@ -389,7 +461,7 @@ const points = computed(() => {
           style-name="Plus"
           :tip="t('20_3')"
           :enabled="!hero.king"
-          @click="notYet"
+          @click="useItemHealthy(52)"
         />
         <FxButton
           :x="233"
@@ -397,7 +469,7 @@ const points = computed(() => {
           style-name="Plus"
           :tip="t('20_4')"
           :enabled="!hero.king"
-          @click="notYet"
+          @click="useItemHealthy(53)"
         />
         <FxButton
           :x="233"
@@ -467,7 +539,7 @@ const points = computed(() => {
           @click="onClearPoint"
         />
 
-        <template v-for="[y, title, tip, value, attr, itemTip] in points" :key="attr">
+        <template v-for="[y, title, tip, value, attr, itemTip, itemType] in points" :key="attr">
           <FxLabel
             :x="9"
             :y="y"
@@ -495,7 +567,7 @@ const points = computed(() => {
             style-name="Plus"
             :tip="t(itemTip)"
             :enabled="!hero.king"
-            @click="notYet"
+            @click="useItemHealthy(itemType)"
           />
         </template>
         <FxButton
@@ -539,12 +611,12 @@ const points = computed(() => {
           @click="onDismiss"
         />
         <template v-if="hero.state === 5">
-          <FxButton :x="10" :y="339" :w="60" :h="32" :label="t(42)" @click="notYet" />
-          <FxButton :x="80" :y="339" :w="60" :h="32" :label="t(43)" @click="notYet" />
+          <FxButton :x="10" :y="339" :w="60" :h="32" :label="t(42)" @click="onTrySummon" />
+          <FxButton :x="80" :y="339" :w="60" :h="32" :label="t(43)" @click="onRelease" />
         </template>
         <template v-if="hero.state === 6">
-          <FxButton :x="10" :y="339" :w="60" :h="32" :label="t(44)" @click="notYet" />
-          <FxButton :x="80" :y="339" :w="60" :h="32" :label="t(45)" @click="notYet" />
+          <FxButton :x="10" :y="339" :w="60" :h="32" :label="t(44)" @click="onTryAccept" />
+          <FxButton :x="80" :y="339" :w="60" :h="32" :label="t(45)" @click="onReject" />
         </template>
       </FxCanvas>
 
@@ -557,6 +629,7 @@ const points = computed(() => {
       @change="(name) => send('changeHeroName', hero!.hid, name)"
       @close="panel = null"
     />
+    <IntroduceDialog v-if="introduce" :npc="introduce" @close="introduce = null" />
     <LargessDialog
       v-if="panel === 'largess' && hero"
       :hero="hero"
