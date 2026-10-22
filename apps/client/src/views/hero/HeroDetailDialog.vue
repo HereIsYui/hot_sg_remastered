@@ -26,6 +26,7 @@ import ChangeArmorDialog from './ChangeArmorDialog.vue';
 import ChangeHeroNameDialog from './ChangeHeroNameDialog.vue';
 import ChangeUserNameDialog from '../goods/ChangeUserNameDialog.vue';
 import HeroArmorPanel from './HeroArmorPanel.vue';
+import HeroBufferDialog from './HeroBufferDialog.vue';
 import IntroduceDialog from './IntroduceDialog.vue';
 import { useHeroArmor } from './heroArmor';
 import { useHeroSkill } from './heroSkill';
@@ -182,7 +183,7 @@ async function onDismiss() {
   }
 }
 
-const panel = ref<'changeName' | 'kingName' | 'largess' | null>(null);
+const panel = ref<'changeName' | 'kingName' | 'largess' | 'buffer' | null>(null);
 
 /** `onShowChangeNamePanel`: the king opens the 君主改名 dialog (changeUserName), others rename the hero. */
 function onShowChangeName() {
@@ -198,6 +199,14 @@ function onShowLargess() {
   if (!h) return;
   if (!h.healthy) void showAlert(i18n('Hero_HeroArmorPanelSrc_18'));
   else panel.value = 'largess';
+}
+
+/** `onClickBuffer`: the 宝物 button — the hero's active treasure buffs (getHeroBuffer). */
+function onShowBuffer() {
+  const h = hero.value;
+  if (!h) return;
+  if (!h.healthy) void showAlert(i18n('Hero_HeroArmorPanelSrc_18'));
+  else panel.value = 'buffer';
 }
 
 /**
@@ -600,7 +609,7 @@ const points = computed(() => {
           style-name="ButtonGreen"
           :label="t(46)"
           :enabled="!hero.king"
-          @click="notYet"
+          @click="onShowBuffer"
         />
 
         <FxButton
@@ -641,6 +650,12 @@ const points = computed(() => {
       v-if="panel === 'largess' && hero"
       :hero="hero"
       @largess="(typeidx) => send('largessHero', hero!.hid, typeidx)"
+      @close="panel = null"
+    />
+    <HeroBufferDialog
+      v-if="panel === 'buffer' && hero"
+      :hid="hero.hid"
+      :cid="city.cid"
       @close="panel = null"
     />
     <ChangeArmorDialog

@@ -25,6 +25,8 @@ const emit = defineEmits<{
   destroyPanel: [handlers: { all: () => void; level: () => void }];
   /** Every building info reply, after it has been shown. */
   reply: [data: unknown[]];
+  /** Every dialog reply with its ttype, including non-buildinginfo ones (e.g. payToPack = 2). */
+  replyTtype: [data: unknown[], ttype: number];
 }>();
 defineSlots<{
   default(props: {
@@ -34,7 +36,7 @@ defineSlots<{
     level: number;
     now: number;
     /** `sendDialogCommand` addressed to this dialog, as the special dialogs' commands are. */
-    send: (cmd: string, args: CommandArg[]) => void;
+    send: (cmd: string, args: CommandArg[], ttype?: number) => void;
     reload: () => void;
   }): unknown;
 }>();
@@ -70,8 +72,8 @@ watch(
   },
 );
 
-function send(cmd: string, args: CommandArg[]) {
-  game.sendDialogCommand(cmd, state.value.bid, param.value, args);
+function send(cmd: string, args: CommandArg[], ttype = 0) {
+  game.sendDialogCommand(cmd, state.value.bid, param.value, args, ttype);
 }
 
 function reloadBuildingInfo() {
@@ -82,9 +84,12 @@ function reloadBuildingInfo() {
 const unregister = game.addDialogReceiver({
   isTarget: (id, p) => id === state.value.bid && p === param.value,
   onData(reply, ttype) {
-    // A building dialog with its own sibling dialogs (the 客栈's 市井传闻 / 结交名将) shares the
-    // (bid, param) address; only the building-info reply (ttype 0) belongs here.
-    if (ttype !== 0 || !Array.isArray(reply)) return;
+    if (!Array.isArray(reply)) return;
+    // A non-buildinginfo reply (e.g. 仓库 payToPack with ttype 2) is forwarded untouched; sibling
+    // dialogs sharing the (bid, param) address (客栈's 市井传闻 / 结交名将) also get theirs elsewhere.
+    // Only ttype 0 carries the two-level building info this base parses.
+    emit('replyTtype', reply, ttype);
+    if (ttype !== 0) return;
     let data: unknown[] = reply;
     // `ArmyDialog.onBuildingInfo`: dissolveSoldier wraps the reply as `[info, message]`.
     if (data.length === 2 && Array.isArray(data[0])) {

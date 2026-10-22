@@ -2,6 +2,7 @@
 import { computed, shallowRef, watch } from 'vue';
 import {
   BUILDING_ARMY,
+  BUILDING_BARN,
   BUILDING_BLACKSMITH,
   BUILDING_COLLEGE,
   BUILDING_GOVERNMENT,
@@ -12,6 +13,7 @@ import {
 import type { BuildingState } from '../../stores/city';
 import { useSessionStore } from '../../stores/session';
 import ArmyDialog from '../army/ArmyDialog.vue';
+import BarnDialog from '../barn/BarnDialog.vue';
 import BlackSmithDialog from '../blacksmith/BlackSmithDialog.vue';
 import BuildingExchangePanel from '../building/BuildingExchangePanel.vue';
 import BuildingListDialog from '../building/BuildingListDialog.vue';
@@ -133,6 +135,14 @@ function choose(action: 'all' | 'level') {
     <StoreDialog
       v-else-if="dialog?.name === 'building' && ownDialog(dialog.building, BUILDING_STORE)"
       :key="`store ${buildingKey}`"
+      :x="0"
+      :y="0"
+      :building="dialog.building"
+      @destroy-panel="destroy = $event"
+    />
+    <BarnDialog
+      v-else-if="dialog?.name === 'building' && ownDialog(dialog.building, BUILDING_BARN)"
+      :key="`barn ${buildingKey}`"
       :x="0"
       :y="0"
       :building="dialog.building"
