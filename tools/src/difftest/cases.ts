@@ -1570,6 +1570,9 @@ export const cases: DiffCase[] = [
             (900003, 87, '测试辎重', '测试', 10, 1, 0, 1, 0, 2000000000, 2000000000, 3, 1)`,
       );
       await s.query('delete from sys_goods where uid = ? and gid in (85, 86, 87)', [uid]);
+      // The login hands out one of two daily boxes (50186 / 50187) at random; drop them so
+      // loadUserGoods compares the purchased goods, not the random pick.
+      await s.query('delete from sys_goods where uid = ? and gid in (50186, 50187)', [uid]);
       const [user] = await s.query<{ money: number; gift: number }>(
         'select money, gift from sys_user where uid = ?',
         [uid],
@@ -1700,6 +1703,9 @@ export const cases: DiffCase[] = [
           (900032, 'BINDCODE34', 900030, 123456, 0)`,
       );
       await s.query('delete from sys_goods where uid = ? and gid = 85', [uid]);
+      // The login hands out one of two daily boxes (50186 / 50187) at random; drop them so
+      // loadUserGoods compares the redeemed goods, not the random pick.
+      await s.query('delete from sys_goods where uid = ? and gid in (50186, 50187)', [uid]);
       try {
         // Empty, malformed, unknown, used, bound, then a valid redemption.
         await s.command(session, 'exchangeLiquan', '');
