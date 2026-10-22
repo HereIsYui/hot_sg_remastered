@@ -1527,6 +1527,241 @@ export const cases: DiffCase[] = [
       await s.query('update sys_user_book set hid = 0 where id = ?', [HARVEST_1]);
     },
   },
+  {
+    name: 'blacksmith strengthens a piece, each outcome forced through its config',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const ARMOR = 900001;
+      // A purple (type 5) piece has no colour cap, so only 打造技巧 (tid 21) bounds it.
+      const reset = async (level: number) => {
+        await s.query(
+          `insert into sys_user_armor (sid, uid, armorid, hp, hp_max, hid, strong_level,
+             strong_value, embed_pearls, embed_holes, strong_times, combine_level)
+           values (?, ?, 53047, 2550, 255, 0, ?, 0, '', '', 0, 7)
+           on duplicate key update strong_level = ?, strong_value = 0, strong_times = 0,
+             best_quality = null`,
+          [ARMOR, uid, level, level],
+        );
+      };
+      const giveAids = async () => {
+        for (const [gid, n] of [
+          [203, 9],
+          [204, 9],
+          [205, 9],
+          [11170, 9],
+        ]) {
+          await s.query(
+            'insert into sys_goods (uid, gid, count) values (?, ?, ?) on duplicate key update count = ?',
+            [uid, gid, n, n],
+          );
+        }
+      };
+      await s.query('delete from sys_user_armor where sid = ?', [ARMOR]);
+      await s.query(
+        'insert into sys_city_technic (cid, tid, level) values (?, 21, 15) on duplicate key update level = 15',
+        [cid],
+      );
+      await giveAids();
+      // 强化成功时有极品洗练随机，关掉它(xilian_rate=0)让结果确定。
+      await s.query('update cfg_strong_probability set xilian_rate = 0');
+      try {
+        // forced success
+        await s.query('update cfg_strong_probability set suc_value = 100 where level = 1');
+        await reset(0);
+        await s.command(session, 'doStrong', cid, 203, 1, 204, 0, ARMOR);
+
+        // forced failure -> 归零 (zero_value 100)
+        await s.query(
+          'update cfg_strong_probability set suc_value = 0, zero_value = 100, degrade_value = 0, intact_value = 0 where level = 5',
+        );
+        await reset(4);
+        await s.command(session, 'doStrong', cid, 203, 0, 204, 0, ARMOR);
+
+        // forced failure -> 降级 (degrade_value 100)
+        await s.query(
+          'update cfg_strong_probability set suc_value = 0, zero_value = 0, degrade_value = 100, intact_value = 0 where level = 5',
+        );
+        await reset(4);
+        await s.command(session, 'doStrong', cid, 203, 0, 204, 0, ARMOR);
+
+        // forced failure -> 无损失 (intact_value 100)
+        await s.query(
+          'update cfg_strong_probability set suc_value = 0, zero_value = 0, degrade_value = 0, intact_value = 100 where level = 5',
+        );
+        await reset(4);
+        await s.command(session, 'doStrong', cid, 203, 0, 204, 0, ARMOR);
+
+        // 乾坤宝珠 bought: never drops on failure
+        await reset(4);
+        await s.command(session, 'doStrong', cid, 203, 0, 204, 1, ARMOR);
+
+        // error branches: wrong item, missing piece, maxed, strong pearl missing
+        await s.command(session, 'doStrong', cid, 999, 0, 204, 0, ARMOR);
+        await s.command(session, 'doStrong', cid, 203, 0, 204, 0, 999999);
+        await reset(15);
+        await s.command(session, 'doStrong', cid, 203, 0, 204, 0, ARMOR);
+        await reset(2);
+        await s.query('update sys_goods set count = 0 where uid = ? and gid = 205', [uid]);
+        await s.command(session, 'doStrong', cid, 203, 0, 204, 0, ARMOR);
+      } finally {
+        await s.query(
+          'update cfg_strong_probability set suc_value = elt(level, 70,70,60,45,45,30,20,15,10,5,10,10,5,3,1), zero_value = 0, degrade_value = elt(level, 0,0,0,50,50,50,100,100,100,100,100,100,100,100,100), intact_value = elt(level, 100,100,100,50,50,50,0,0,0,0,0,0,0,0,0), xilian_rate = elt(level, 1,2,3,4,5,6,7,8,9,100,100,100,100,100,100)',
+        );
+        await s.query('delete from sys_user_armor where sid = ?', [ARMOR]);
+      }
+    },
+  },
+  {
+    name: 'blacksmith embeds pearls, opens holes and reports errors',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const ARMOR = 900002;
+      await s.query('delete from sys_user_armor where sid = ?', [ARMOR]);
+      // strong_level 9 so a mid pearl passes embedLimit; holes: open, locked(初), no-hole, open, open.
+      await s.query(
+        `insert into sys_user_armor (sid, uid, armorid, hp, hp_max, hid, strong_level,
+           strong_value, embed_pearls, embed_holes, combine_level)
+         values (?, ?, 53047, 2550, 255, 0, 9, 21, '0,0,0,0,0', '0,1,3,0,0', 7)`,
+        [ARMOR, uid],
+      );
+      for (const [gid, n] of [
+        [305, 5],
+        [206, 5],
+        [201, 10],
+      ]) {
+        await s.query(
+          'insert into sys_goods (uid, gid, count) values (?, ?, ?) on duplicate key update count = ?',
+          [uid, gid, n, n],
+        );
+      }
+      try {
+        await s.command(session, 'onLoadDaKong', 1);
+        await s.command(session, 'loadEmbedPearl', 0);
+        await s.command(session, 'loadEmbedPearlByArmor', '0,0,0,0,0');
+        // embed a 6级统率 pearl (305) in hole 0
+        await s.command(session, 'doEmbed', ARMOR, 0, 305);
+        // open the locked hole 1 with a 初级打孔器 (206)
+        await s.command(session, 'openHole', ARMOR, 206, 1);
+        // clear the pearl in hole 0 with 化石粉 (201), keeping the pearl (useType 1, 8 needed)
+        await s.command(session, 'openHole', ARMOR, 201, 0, 1, 8);
+        // errors: missing piece, taken hole, missing pearl
+        await s.command(session, 'doEmbed', 999999, 0, 305);
+        await s.query("update sys_user_armor set embed_pearls = '305,0,0,0,0' where sid = ?", [
+          ARMOR,
+        ]);
+        await s.command(session, 'doEmbed', ARMOR, 0, 305);
+        await s.query('update sys_goods set count = 0 where uid = ? and gid = 305', [uid]);
+        await s.query("update sys_user_armor set embed_pearls = '0,0,0,0,0' where sid = ?", [
+          ARMOR,
+        ]);
+        await s.command(session, 'doEmbed', ARMOR, 0, 305);
+      } finally {
+        await s.query('delete from sys_user_armor where sid = ?', [ARMOR]);
+      }
+    },
+  },
+  {
+    name: 'blacksmith activates holes and synthesizes materials',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const ARMOR = 900003;
+      await s.query('delete from sys_user_armor where sid = ?', [ARMOR]);
+      await s.query(
+        `insert into sys_user_armor (sid, uid, armorid, hp, hp_max, hid, embed_holes, embed_pearls)
+         values (?, ?, 53047, 2550, 255, 0, '', '')`,
+        [ARMOR, uid],
+      );
+      await s.query('update mem_city_resource set gold = 100000000 where cid = ?', [cid]);
+      // Make the piece's hole rule deterministic (no 打孔 probability roll).
+      const type = Number(
+        (await s.query<{ type: string }>('select type from cfg_armor where id = 53047'))[0]?.type ??
+          7,
+      );
+      await s.query('update cfg_armor_hole_rule set rule = ? where type = ?', [
+        '-1,-1,-1,N/A,N/A',
+        type,
+      ]);
+      try {
+        await s.command(session, 'initHoles', cid, ARMOR);
+        await s.command(session, 'initHoles', cid, ARMOR); // already active
+      } finally {
+        await s.query('delete from sys_user_armor where sid = ?', [ARMOR]);
+        await s.query('update cfg_armor_hole_rule set rule = ? where type = ?', [
+          '49,10,-1,-1,-2',
+          type,
+        ]);
+      }
+
+      // 合成: 强化宝珠 (205) is deterministic (100%); give exactly the recipe (209,210,211 ×1).
+      for (const gid of [209, 210, 211]) {
+        await s.query(
+          'insert into sys_goods (uid, gid, count) values (?, ?, 3) on duplicate key update count = 3',
+          [uid, gid],
+        );
+      }
+      await s.query('delete from sys_goods where uid = ? and gid = 205', [uid]);
+      await s.command(session, 'loadStuff', 205);
+      await s.command(session, 'synthStuff', cid, 205, 2, 0, 0);
+      // errors: non-positive count, a level-1 pearl, missing materials
+      await s.command(session, 'synthStuff', cid, 205, 0, 0, 0);
+      await s.command(session, 'synthStuff', cid, 300, 1, 0, 0);
+      await s.query('delete from sys_goods where uid = ? and gid in (209,210,211)', [uid]);
+      await s.command(session, 'synthStuff', cid, 205, 1, 0, 0);
+    },
+  },
+  {
+    name: 'blacksmith merges skill books, both outcomes forced',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      // cfg_book has no ORDER BY in loadSkillBook_OpenTab: MyISAM vs InnoDB row order.
+      const skillTab = () => s.unordered(4, 0);
+      // 运筹帷幄 (skill 4) three level-2 books -> one level-3.
+      const seed = async () => {
+        await s.query('delete from sys_user_book where uid = ? and bid = 4', [uid]);
+        for (const id of [900201, 900202, 900203]) {
+          await s.query(
+            'insert into sys_user_book (id, bid, uid, hid, level) values (?, 4, ?, 0, 2)',
+            [id, uid],
+          );
+        }
+      };
+      await s.query(
+        'insert into sys_goods (uid, gid, count) values (?, 10667, 9) on duplicate key update count = 9',
+        [uid],
+      );
+      try {
+        await s.command(session, 'loadSkillBook_OpenTab');
+        skillTab();
+        // forced success
+        await s.query('update cfg_book_rate set rate = 100 where level = 3');
+        await seed();
+        await s.command(session, 'mergeBook', 4, 2, 0);
+        s.unordered(4, 2, 0); // the merge reply carries the same tab list at result[2][0]
+        // forced failure, no protect: materials lost
+        await s.query('update cfg_book_rate set rate = 0 where level = 3');
+        await seed();
+        await s.command(session, 'mergeBook', 4, 2, 0);
+        s.unordered(4, 2, 0);
+        // forced failure, with protect: materials kept, 保护符 spent
+        await seed();
+        await s.command(session, 'mergeBook', 4, 2, 1);
+        s.unordered(4, 2, 0);
+        // error: level out of range
+        await s.command(session, 'mergeBook', 4, 10, 0);
+      } finally {
+        await s.query(
+          'update cfg_book_rate set rate = elt(level, 100,95,85,70,60,35,25,15,7,3) where level between 1 and 10',
+        );
+        await s.query('delete from sys_user_book where uid = ? and bid = 4', [uid]);
+      }
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {
