@@ -284,6 +284,16 @@ export class Game {
     }
     if (command === 'createRole' || command === 'createCity') this.loadUserInfo();
     if (command === 'createRole') this.session.welcome = true;
+    // 旌旗 / 名帖: the reply is the new flag / name; update the store, reload, and report.
+    if (command === 'changeUserFlagchar' && Array.isArray(data)) {
+      this.user.flagchar = String((data as unknown[])[0] ?? '');
+      this.loadUserInfo();
+      gameAlert(i18n('_BloodWarSrc_14'));
+    } else if (command === 'changeUserName' && Array.isArray(data)) {
+      this.user.username = String((data as unknown[])[0] ?? '');
+      this.loadUserInfo();
+      gameAlert(i18n('_BloodWarSrc_15'));
+    }
   }
 
   private onCityCommand(command: string, data: unknown): void {
