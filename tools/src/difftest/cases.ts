@@ -1952,7 +1952,7 @@ export const cases: DiffCase[] = [
       // A free, undamaged NPC hero with room to spend 体力/精力/经验.
       await s.query(
         `insert into sys_city_hero (hid, uid, name, npcid, sex, face, cid, state, level, exp,
-          hero_health, command_base, affairs_base, bravery_base, wisdom_base, loyalty, herotype)
+          command_base, affairs_base, bravery_base, wisdom_base, loyalty, herotype)
         values (?, ?, '丙丁', 0, 1, 10, ?, 0, 30, 100, 20, 40, 60, 60, 60, 0)`,
         [HERO, uid, cid],
       );
@@ -2045,7 +2045,7 @@ export const cases: DiffCase[] = [
       // 接纳 a defector (loyalty 80) and 回绝 another.
       await hero('tryAcceptHero', DEFECTOR);
       await s.query(
-        `insert into sys_city_hero (hid, uid, name, npcid, sex, face, cid, state, level,
+        `insert into sys_city_hero (hid, uid, name, npcid, sex, face, cid, state, level, exp,
           command_base, affairs_base, bravery_base, wisdom_base, loyalty, herotype)
         values (900204, ?, '投丁', 0, 1, 10, ?, 6, 8, 0, 20, 40, 60, 60, 20, 0)`,
         [uid, cid],
@@ -2053,6 +2053,10 @@ export const cases: DiffCase[] = [
       await hero('sureAcceptHero', DEFECTOR);
       await hero('rejectHero', 900204);
       await hero('rejectHero', CAPTIVE); // not a defector
+
+      // releaseHero / rejectHero throw the hero onto a random empty tile (throwHeroToField's
+      // `order by rand()`); pin the landing cid so the freed rows compare on state/uid, not luck.
+      await s.query('update sys_city_hero set cid = 999000 where hid in (?, ?)', [NPC, 900204]);
     },
   },
   {
@@ -2078,7 +2082,7 @@ export const cases: DiffCase[] = [
         [uid, cid],
       );
       await s.query(
-        'insert into mem_hero_blood (hid, force, force_max, energy, energy_max) values (900101, 100, 100, 100, 100)',
+        'insert into mem_hero_blood (hid, `force`, force_max, energy, energy_max) values (900101, 100, 100, 100, 100)',
         [],
       );
       await s.query('update mem_city_resource set gold = 1000000 where cid = ?', [cid]);
@@ -2112,6 +2116,10 @@ export const cases: DiffCase[] = [
       await dlg('fasterHeroExpr', 900101);
       await dlg('cancelHeroExpr', 900101);
       await dlg('fasterHeroExpr', 900101);
+
+      // The settlement adds a random exp bonus (10 * mt_rand()%band); pin it so the hero row
+      // compares on its deterministic fields (state freed, expr row cleared) rather than the roll.
+      await s.query('update sys_city_hero set exp = 0 where hid = 900101', []);
     },
   },
   {
@@ -2146,6 +2154,9 @@ export const cases: DiffCase[] = [
       if (Number(hero?.state) !== 0) throw new Error('expr hero was not freed');
       const left = await s.query('select id from sys_hero_expr where hid = 900102', []);
       if (left.length !== 0) throw new Error('expr row was not cleared');
+      // The bonus is 10 * mt_rand()%band; pin the exp so the freed hero row compares on its
+      // deterministic fields (state, carried-gold refund) rather than the random roll.
+      await s.query('update sys_city_hero set exp = 1000 where hid = 900102', []);
     },
   },
 ];

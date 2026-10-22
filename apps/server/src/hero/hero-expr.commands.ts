@@ -6,6 +6,7 @@ import { GoodsRules } from '../core/goods-rules.service';
 import { phpEmpty, phpIntval, phpLooseEquals, phpNum } from '../core/php';
 import { RandomService } from '../core/random.service';
 import { TaskRules } from '../core/task-rules.service';
+import { UserRules } from '../core/user-rules.service';
 import { DbScope } from '../db/database.module';
 import { DialogCommand, type CommandContext } from '../gateway/decorators';
 
@@ -30,6 +31,8 @@ const TASK_BEGIN_EXPR = 312;
 /** addMoney reasons: 120 paying for an expr, 121 getting carried gold back. */
 const MONEY_PAY_EXPR = 120;
 const MONEY_REFUND_CARRY = 121;
+/** log_user_action id of a 将领历练 (logged on start, counted back on cancel). */
+const ACTION_HERO_EXPR = 21;
 /** The 2011 history freeze beginExprHero still carries (now always in the past). */
 const EXP_FREEZE_START = 1301043600;
 const EXP_FREEZE_END = 1301472000;
@@ -46,6 +49,7 @@ export class HeroExprCommands {
     private readonly goods: GoodsRules,
     private readonly tasks: TaskRules,
     private readonly random: RandomService,
+    private readonly users: UserRules,
   ) {}
 
   private async rows(query: RawBuilder<unknown>): Promise<Row[]> {
@@ -186,6 +190,7 @@ export class HeroExprCommands {
       await sql`update mem_city_resource set gold = gold - ${needGold}
         where cid = ${cid}`.execute(db);
       await this.addMoney(uid, -(carrymoney + needMoney), MONEY_PAY_EXPR);
+      await this.users.logUserAction(uid, ACTION_HERO_EXPR);
       await sql`insert into sys_hero_expr (uid, cid, hid, type, starttime, endtime, hours,
           carrymoney, accTimes, state)
         values (${uid}, ${cid}, ${hid}, ${exprType}, unix_timestamp(),
@@ -202,7 +207,8 @@ export class HeroExprCommands {
    * end time forward; under half the booked hours the hero returns in the time already served.
    */
   @DialogCommand()
-  async cancelHeroExpr(_ctx: CommandContext, param: unknown[]): Promise<void> {
+  async cancelHeroExpr(ctx: CommandContext, param: unknown[]): Promise<void> {
+    const { uid } = ctx;
     const hid = phpIntval(param[0]);
     return this.scope.transaction(async () => {
       const db = this.scope.db;
@@ -211,7 +217,7 @@ export class HeroExprCommands {
         from sys_hero_expr a, cfg_hero_expr_types b
         where a.type = b.type and hid = ${hid}`);
       if (phpEmpty(item)) return;
-      // logActionCountback(uid, 21) is a non-ported analytics write.
+      await this.users.logActionCountback(uid, ACTION_HERO_EXPR);
       await sql`update sys_hero_expr set state = 1,
           endtime = if(unix_timestamp() - starttime > hours * 1800, endtime,
             2 * unix_timestamp() - starttime)

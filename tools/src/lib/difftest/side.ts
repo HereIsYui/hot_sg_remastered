@@ -45,11 +45,14 @@ export function legacyTarget(client = new LegacyClient()): Target {
     call: (service, method, args) => client.call(`${service}.${method}`, args),
     async tick(fn, clock) {
       // cfg_js.php's includes and the helper it defines for ReportCron.php, without the other
-      // handlers it calls at the top level.
+      // handlers it calls at the top level. HandleHeroHexprs() is defined in cfg_js.php itself
+      // (not ReportCron.php) and wraps HeroExpr::checkHeroExpr(), so source it and its class too.
       const reportCron = clock ? patchedReportCron(clock) : 'require_once "ReportCron.php";';
       const script = `require_once "BattleFunc.php"; require_once "UtilsExtend.php";
-        preg_match('/function getNamePosition\\b.*?(?=function SoBitSo)/s',
-          file_get_contents("cfg_js.php"), $m); eval($m[0]);
+        require_once "HeroExpr.php";
+        $cfg = file_get_contents("cfg_js.php");
+        preg_match('/function getNamePosition\\b.*?(?=function SoBitSo)/s', $cfg, $m); eval($m[0]);
+        preg_match('/function HandleHeroHexprs\\b.*?(?=function HandleTroop)/s', $cfg, $h); eval($h[0]);
         ${reportCron} ${fn}();`;
       const out = capture('docker', [
         'compose',
