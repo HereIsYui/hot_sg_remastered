@@ -28,6 +28,7 @@ const props = defineProps<{
   /** `sendDialogCommand` addressed to the 仓库 dialog. */
   send: (cmd: string, args: CommandArg[]) => void;
 }>();
+const emit = defineEmits<{ pack: [] }>();
 
 const city = useCityStore();
 
@@ -159,6 +160,13 @@ function onModify() {
       :w="626"
       :fx="{ color: 0xe7d18d, textAlign: 'left', fontWeight: 'bold' }"
       :text="summary"
+    />
+    <FxButton
+      :x="334"
+      :bottom="10"
+      style-name="ButtonGreen"
+      :label="i18n('Store_StorePanel_9_1')"
+      @click="emit('pack')"
     />
     <FxButton
       :x="434"
