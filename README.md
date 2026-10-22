@@ -2,7 +2,7 @@
 
 把基于 Flash 的《热血三国》1.12 单机版重制为现代浏览器可运行的 H5 版本：
 
-- 客户端：TypeScript + Vite + Vue 3 + PixiJS，设计分辨率 1000×600，沿用原版美术素材。
+- 客户端：TypeScript + Vite + Vue 3 + Pinia + PixiJS，设计分辨率 1000×600，沿用原版美术素材。
 - 服务端：Node.js + NestJS，按模块重写原 PHP 业务逻辑，沿用原 MySQL 数据库结构。
 - 原版 PHP 服务端在 Docker 中原样运行，作为差分测试的对照基准。
 
@@ -75,6 +75,102 @@ design/          设计文档
 docs/            参考资料
 legacy/          本地生成的原版文件（不提交）
 ```
+
+## 开发进度
+
+阶段划分见 [开发计划](design/02-开发计划.md) 第 7 节。每完成一个功能点就单独提交并推送到 `main`，提交历史就是最细的进度记录（`git log --oneline`）。
+
+| 阶段 | 状态 |
+|---|---|
+| 0 基础设施与资料提取 | 完成 |
+| 1 后端基础框架（命令网关、会话、用户锁、Tick、推送骨架、登录与创建角色、差分测试工具） | 完成 |
+| 2 前端框架（舞台、素材加载、Fx 皮肤组件、DialogManager、登录到主界面） | 完成 |
+| 3 城池经济 | 完成 |
+| 4 将领与道具 | **进行中** |
+| 5–11 世界与战斗、社交、成长、活动、独立战场、GM、发布 | 未开始 |
+
+### 阶段 3 已完成
+
+城池加载与 `CityCommand` 轮询、信息面板；建筑建造 / 升级 / 拆除与队列；书院科技与研究结算；兵营造兵、遣散（二级密码）、兵种转换；城墙城防与结算；天灾人祸结算、排行重建与排行奖励；官府（税率、安抚、征收、改名、生产率、建筑总览）；城池列表与废弃城池；附属野地列表与详情、资源地转换；任务对话框与任务奖励、君主任务刷新；新手引导。
+
+### 阶段 4 已完成
+
+- 宝物对话框：物品列表、使用礼包与礼匣、出售。
+- 物品加速（鲁班 / 墨家道具）、增益道具（神农锄、鲁班斧、战鼓、阵图、青囊书、徭役令、推恩令、典民令、安民告示等）、默认宝箱。
+- 客栈：招募列表、刷新、招募将领、招贤榜。
+- 将领详情：升级、加点、洗点、改名、赏赐、解雇。
+- 将领装备：穿戴、卸下、修理、修复（元宝 / 礼金）、一键修理 / 修复 / 卸下。
+- 将领技能：领悟、穿戴 / 卸下技能书；宝物里的「技能书」页（筛选、回收、扩充书栏）。
+
+### 阶段 4 待完成（建议按顺序）
+
+1. 将领详情里还显示“暂未开放”的按钮：
+   - 体力 / 精力药，经验书与提升统率 / 攻击 / 防御的宝物；
+   - 俘虏的招降 / 释放，投奔将领的接纳 / 回绝；
+   - 君主改名、君主「学习」面板、「宝物」按钮、「说明」。
+2. 将领历练：`HeroExpr.php` 与结算循环中的历练处理。
+3. 铁匠铺：强化、合成、镶嵌，技能书合并（`mergeBook`、`loadSkillBook_OpenTab`）。
+4. 商城（`ShopFunc.php`）：将领详情「购买装备」、技能书「购买技能书」、物品不足时的 `buyanduse` 都依赖它。
+5. 有独立对话框的物品：迁城令、免战牌、盟主令、旌旗、名帖、武魂、离间符、卡牌合成；以及 `type-goods.commands.ts` 中未实现的体力 / 精力药、经验书、打孔器、武器架、护命金丹。
+6. 客栈的结交、传闻、鉴定宝藏。
+7. 仓库（`StoreFunc.php`）、粮仓（`BarnFunc.php`）。
+
+代码里尚未移植的分支都会抛出 `... not ported` 错误或显示 `NotYetValid` 提示，可用 `rg "not ported|NotYetValid" apps` 查找。其中委托任务、世界事件任务、名将任务、洛阳相关奖励属于后续阶段。
+
+## 开发流程
+
+每个功能点按同样的步骤推进：
+
+1. **读原版**：
+   - PHP 在 `legacy/raw/APMServ5.2.6/www/htdocs/server/game/*.php`；
+   - AS3 在 `legacy/decompiled/BloodWar/scripts/<模块>/*.as`（例如 `Hero/HeroDetailDialog.as`）；
+   - 界面提纲在 `legacy/ui/BloodWar/<模块>/*.txt`，坐标、尺寸、样式名都照抄；
+   - 客户端文案在 `apps/client/public/assets/lang/zh_CN.json`，服务端文案在 `legacy/lang/zh_CN.json`。
+2. **服务端**：在对应模块里写命令类，加入模块的 `providers`。
+3. **差分测试**：在 `tools/src/difftest/cases.ts` 末尾加用例，覆盖成功路径和各个错误分支，`pnpm difftest "用例名"` 通过后再跑全部用例。
+4. **客户端**：纯逻辑放 `apps/client/src/game/*.ts` 并写 `*.test.ts`，界面放 `apps/client/src/views/<模块>/`。
+5. **检查**：`pnpm exec prettier --write <改动的文件>`，然后 `pnpm format:check && pnpm lint && pnpm typecheck && pnpm test`。
+6. **浏览器实测**：启动开发服务，用 Playwright 脚本走一遍流程并截图，测完把测试数据恢复原样（见下文）。
+7. **提交并推送**到 `main`。提交信息说明这一步做了什么，**不要带 `Co-authored-by: Cursor` 之类的署名**。
+
+### 服务端约定
+
+- 命令用 `@GlobalCommand()` / `@DialogCommand()` 注册，方法签名 `(ctx, param)`，按方法名路由；注册表就是原版的 `openfunc` 白名单。
+- 原版 `function f($uid, $param)` 一对一改写，查询用 Kysely 的 `sql` 模板照搬原 SQL，并改为参数绑定。需要多条写入时包在 `this.scope.transaction` 里。
+- 错误：`GameError.lang('分组.键', ...参数)` 对应原版 `$GLOBALS[...]` 文案，`GameError.raw(msg)` 用于原样字符串（如 `not_enough_goods10668`，客户端会弹出购买框）。
+- PHP 语义用 `core/php.ts` 中的 `phpIntval`、`phpNum`、`phpEmpty`、`phpLooseEquals` 等复现，不要自己用 JS 隐式转换。
+- 随机数统一走 `RandomService`（`mtRand` / `rand`），差分测试才能固定结果。
+- 常用公共服务：`OwnershipService`（城池 / 将领归属）、`CityRules`（资源增减、产量刷新）、`HeroRules`（重算属性、俸禄）、`GoodsRules`（扣物品）、`TaskRewards.addMoney`（元宝与日志）、`CityInfoService`（返回给客户端的城池 / 将领数据）。
+- 与原版不同的地方要有意为之：例如补上归属校验、给查询加确定性的 `order by`（原库是 MyISAM，开发库是 InnoDB，行序可能不同）。
+
+### 差分测试要点
+
+- 每次运行开始时两边都回滚到快照，每个用例结束后也会把它改动过的表回滚，所以用例之间互不影响；用例需要的数据在用例里自己插入（用 9000xx 一类不冲突的 id）。
+- `s.command(session, 函数名, ...参数)` 发命令，`s.query` 比对数据库；行序不稳定的结果用 `s.unordered(...路径)`，时间戳等不确定字段用 `s.mask(...路径)`。
+- 有随机的命令，把对应配置表临时改成确定值（如把 `cfg_skill_rate` 固定为某个技能），在 `finally` 中还原。
+- `--dump` 会把两边的返回写到 `legacy/.cache/difftest-*.json`，用来定位差异。
+- `pnpm difftest` 会先构建服务端；只改了 tools 时可以 `pnpm --filter @hot/tools difftest`。
+
+### 客户端约定
+
+- 照原版组件结构拆分：一个 AS3 对话框对应一个 `.vue`，方法上的注释写出对应的原版函数名（如 ``/** `onClickSell` */``）。
+- 界面只用 `ui/` 下的 Fx 组件（`FxCanvas`、`FxButton`、`FxImage`、`FxLabel`、`FxText`、`FxToggle`、`FxComboBox`、`FxDataGrid` 等），用原版的 `x/y/w/h` 和 `style-name`。
+- 通信：`game.sendGlobalCommand(action, cmd, args)` 发送，`game.addGlobalReceiver(action, fn)` 接收，返回值是取消注册的函数，在 `onUnmounted` 里调用。
+- 提示：`showAlert(text, '', ['yes','no'])`（确认后得到 `'yes'`）、`gameAlert(text)`（浮动提示）、`showMenu(items, x, y)`（弹出菜单，坐标用 `stagePoint` 换算）。悬停提示用 `tip` 属性，类型见 `ui/tooltip.ts`。
+- 文案一律 `i18n('原版键名')`；只有原版写死在代码里的少量中文可以直接写。
+- 状态：`useCityStore`（当前城池、资源、建筑、将领）、`useUserStore`（君主、元宝、礼金）。
+
+### 本地调试要点
+
+- 开发库容器 `hot-dev-db-1`（`mysql -uroot -phot bloodwar`），对照库容器 `hot-legacy-db-1`（`mysql -uroot -plegacy bloodwar`），两边都是 `lower_case_table_names=1`。
+- 测试账号：`changle` / `123456`，uid 1001，主城 cid 209355，君主将领 hid 80213。
+- 原库里的账号是 `passtype='testpassport'`（差分测试用它登录），浏览器客户端登录时发的是 `uuyx`：浏览器实测前在开发库执行 `update sys_user set passtype='uuyx' where uid=1001`，测完改回 `testpassport`。
+- 浏览器实测时插入的测试数据（物品、装备、技能书、元宝、黄金等）测完都要删除或还原，并和对照库的同一行比对。`difftest` 启动时虽然会把改动过的表回滚到快照，但平时开发和实测看到的都是开发库，保持它与快照一致可以避免后续测试被残留数据干扰。
+- 停止开发服务后，终端里出现退出码 143 是被终止的正常结果。
+
+### 不提交的内容
+
+`start.exe` 等可执行文件、`legacy/`（含 `.cache`、`lang`）、`apps/client/public/assets/`、任何 SQL 与原版文案、构建产物（`dist/`）、原版数据库的账号密码。只在移植代码里出现的少量中文字符串可以提交。
 
 ## 说明
 
