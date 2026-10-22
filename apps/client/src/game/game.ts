@@ -234,8 +234,9 @@ export class Game {
     receiverId: number,
     receiverParam: number,
     args: CommandArg[],
+    ttype = 0,
   ): void {
-    void this.cmd.sendDialogCommand(command, receiverId, receiverParam, args);
+    void this.cmd.sendDialogCommand(command, receiverId, receiverParam, args, ttype);
   }
 
   /** `sendGlobalCommand` whose reply goes to whoever registered for `action`. */

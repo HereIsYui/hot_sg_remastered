@@ -81,8 +81,10 @@ function reloadBuildingInfo() {
 
 const unregister = game.addDialogReceiver({
   isTarget: (id, p) => id === state.value.bid && p === param.value,
-  onData(reply) {
-    if (!Array.isArray(reply)) return;
+  onData(reply, ttype) {
+    // A building dialog with its own sibling dialogs (the 客栈's 市井传闻 / 结交名将) shares the
+    // (bid, param) address; only the building-info reply (ttype 0) belongs here.
+    if (ttype !== 0 || !Array.isArray(reply)) return;
     let data: unknown[] = reply;
     // `ArmyDialog.onBuildingInfo`: dissolveSoldier wraps the reply as `[info, message]`.
     if (data.length === 2 && Array.isArray(data[0])) {
