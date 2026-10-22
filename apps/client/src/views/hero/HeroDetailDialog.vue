@@ -261,7 +261,7 @@ const points = computed(() => {
       :fx="{ fontSize: 16 }"
       @click="game.closeDialog()"
     />
-    <FxButton :x="481" :y="444" :w="90" :label="t(48)" @click="notYet" />
+    <FxButton :x="481" :y="444" :w="90" :label="t(48)" @click="game.showShop()" />
 
     <FxCanvas :x="15" :y="60" :w="652" :h="375">
       <FxCanvas :x="0" :y="0" :w="160" :h="375" style-name="BoardListDown">

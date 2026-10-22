@@ -26,6 +26,8 @@ import ResourceProductDialog from '../government/ResourceProductDialog.vue';
 import HotelDialog from '../hotel/HotelDialog.vue';
 import ModifyPasswordDialog from '../system/ModifyPasswordDialog.vue';
 import OpenLockDialog from '../system/OpenLockDialog.vue';
+import BuyAndUseGoodsDialog from '../shop/BuyAndUseGoodsDialog.vue';
+import ShopDialog from '../shop/ShopDialog.vue';
 import TaskDialog from '../task/TaskDialog.vue';
 import WallDialog from '../wall/WallDialog.vue';
 
@@ -138,6 +140,8 @@ function choose(action: 'all' | 'level') {
       :building="session.exchange"
     />
     <UseGoodsDialog v-if="session.useGoods" :request="session.useGoods" />
+    <ShopDialog v-if="session.shop" :target-tab="session.shop.tab" />
+    <BuyAndUseGoodsDialog v-if="session.buyAndUse" :request="session.buyAndUse" />
   </div>
 </template>
 

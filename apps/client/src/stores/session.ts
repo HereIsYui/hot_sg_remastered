@@ -37,6 +37,11 @@ export interface UseGoodsRequest {
   param: (number | string)[];
 }
 
+/** `DialogManager.showBuyAndUseDialog`: the shop row the `not_enough_goods` popup offers. */
+export interface BuyAndUseRequest {
+  goods: Record<string, unknown>;
+}
+
 /** Client-side flow state of BloodWar.as (which top-level view is shown, busy cursor). */
 export const useSessionStore = defineStore('session', {
   state: () => ({
@@ -65,6 +70,10 @@ export const useSessionStore = defineStore('session', {
     exchange: null as BuildingState | null,
     exchangeOpen: false,
     useGoods: null as UseGoodsRequest | null,
+    /** Shop (ShopDialog) open over the scene; the 购买装备 / 购买技能书 / 商城 entry points. */
+    shop: null as { tab?: number } | null,
+    /** BuyAndUseGoodsDialog: the `not_enough_goods` buy-and-use popup. */
+    buyAndUse: null as BuyAndUseRequest | null,
     /** JackarooDialog: the welcome shown once a role is created. */
     welcome: false,
   }),

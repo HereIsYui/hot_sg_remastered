@@ -13,6 +13,7 @@ import { HealthController } from './health/health.controller';
 import { HeroModule } from './hero/hero.module';
 import { PushModule } from './push/push.module';
 import { RankModule } from './rank/rank.module';
+import { ShopModule } from './shop/shop.module';
 import { TaskModule } from './task/task.module';
 import { TickModule } from './tick/tick.module';
 import { UserModule } from './user/user.module';
@@ -35,6 +36,7 @@ import { UserModule } from './user/user.module';
     GuideModule,
     GoodsModule,
     HeroModule,
+    ShopModule,
   ],
   controllers: [HealthController],
 })

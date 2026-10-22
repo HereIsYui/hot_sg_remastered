@@ -1527,6 +1527,177 @@ export const cases: DiffCase[] = [
       await s.query('update sys_user_book set hid = 0 where id = ?', [HARVEST_1]);
     },
   },
+  {
+    name: 'shop lists its wares and item tooltips',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      // A controlled wares table: the shipped cfg_shop rows carry 赤壁 / 孟获 items whose grants
+      // are not ported, so replace the live list with two plain items for a stable compare.
+      await s.query('delete from cfg_shop');
+      await s.query(
+        `insert into cfg_shop (id, gid, name, description, price, pack, commend, onsale,
+            starttime, endtime, totalCount, position)
+          values (900001, 85, '测试金条', '测试', 100, 1, 2, 1, 0, 2000000000, 2000000000, 1),
+            (900002, 86, '测试金砖', '测试', 50, 1, 0, 1, 0, 2000000000, 2000000000, 2)`,
+      );
+      await s.command(session, 'getShopInfo');
+      // Config lookups for a shop hero (cfg_hero id 1) and gear (cfg_armor id 1), and misses.
+      await s.command(session, 'getGoodsHeroAttr', 1);
+      await s.command(session, 'getGoodsHeroAttr', 99999999);
+      await s.command(session, 'getGoodsArmorAttr', 1);
+      await s.command(session, 'getGoodsArmorAttr', 99999999);
+      await s.command(session, 'showDlg', 85);
+      await s.command(session, 'showDlg', 99999999);
+    },
+  },
+  {
+    name: 'shop buys goods for 元宝 and 礼金',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      await s.query('delete from cfg_shop');
+      // 900001 both-pay normal item (pack 2), 900002 元宝-only recommended, 900003 特价 (no 礼金).
+      await s.query(
+        `insert into cfg_shop (id, gid, name, description, price, pack, commend, onsale,
+            starttime, endtime, totalCount, position, rebate)
+          values (900001, 85, '测试金条', '测试', 100, 2, 2, 1, 0, 2000000000, 2000000000, 1, 0),
+            (900002, 86, '测试金砖', '测试', 50, 1, 1, 1, 0, 2000000000, 2000000000, 2, 0),
+            (900003, 87, '测试辎重', '测试', 10, 1, 0, 1, 0, 2000000000, 2000000000, 3, 1)`,
+      );
+      await s.query('delete from sys_goods where uid = ? and gid in (85, 86, 87)', [uid]);
+      const [user] = await s.query<{ money: number; gift: number }>(
+        'select money, gift from sys_user where uid = ?',
+        [uid],
+      );
+      await s.query('update sys_user set money = 1000, gift = 500 where uid = ?', [uid]);
+      try {
+        // Validation: bad pay type, bad amount, unknown / unsold item.
+        await s.command(session, 'buyGoods', 900001, 1, 2);
+        await s.command(session, 'buyGoods', 900001, 0, 0);
+        await s.command(session, 'buyGoods', 99999999, 1, 0);
+        // 元宝 purchase of a pack of two, then a 礼金 purchase.
+        await s.command(session, 'buyGoods', 900001, 2, 0);
+        await s.command(session, 'buyGoods', 900002, 1, 1);
+        // 礼金 for a 元宝-only recommended item: balance already matches, but it is allowed.
+        await s.command(session, 'buyGoods', 900002, 1, 0);
+        // 特价 cannot be bought with 礼金.
+        await s.command(session, 'buyGoods', 900003, 1, 1);
+        await s.command(session, 'buyGoods', 900003, 1, 0);
+        // Not enough 元宝 / 礼金.
+        await s.query('update sys_user set money = 5, gift = 5 where uid = ?', [uid]);
+        await s.command(session, 'buyGoods', 900001, 1, 0);
+        await s.command(session, 'buyGoods', 900002, 1, 1);
+        await s.command(session, 'loadUserGoods');
+      } finally {
+        await s.query('update sys_user set money = ?, gift = ? where uid = ?', [
+          user?.money,
+          user?.gift,
+          uid,
+        ]);
+      }
+    },
+  },
+  {
+    name: 'shop enforces the per-player buy limit',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      await s.query('delete from cfg_shop');
+      await s.query('delete from log_shop where uid = ?', [uid]);
+      await s.query('delete from log_shop_buy_cnt where uid = ?', [uid]);
+      // Capped at two per player.
+      await s.query(
+        `insert into cfg_shop (id, gid, name, description, price, pack, commend, onsale,
+            starttime, endtime, totalCount, position, userbuycnt)
+          values (900010, 85, '限购金条', '测试', 10, 1, 0, 1, 0, 2000000000, 2000000000, 1, 2)`,
+      );
+      await s.query('delete from sys_goods where uid = ? and gid = 85', [uid]);
+      const [user] = await s.query<{ money: number }>('select money from sys_user where uid = ?', [
+        uid,
+      ]);
+      await s.query('update sys_user set money = 1000 where uid = ?', [uid]);
+      try {
+        await s.command(session, 'buyGoods', 900010, 1, 0);
+        await s.command(session, 'buyGoods', 900010, 1, 0);
+        // The third purchase is over the per-player cap.
+        await s.command(session, 'buyGoods', 900010, 1, 0);
+      } finally {
+        await s.query('update sys_user set money = ? where uid = ?', [user?.money, uid]);
+        await s.query('delete from log_shop where uid = ?', [uid]);
+        await s.query('delete from log_shop_buy_cnt where uid = ?', [uid]);
+      }
+    },
+  },
+  {
+    name: 'shop buy-and-use delivers the item to use',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      await s.query('delete from cfg_shop');
+      await s.query(
+        `insert into cfg_shop (id, gid, name, description, price, pack, commend, onsale,
+            starttime, endtime, totalCount, position)
+          values (900020, 85, '即用金条', '测试', 100, 1, 2, 1, 0, 2000000000, 2000000000, 1)`,
+      );
+      await s.query('delete from sys_goods where uid = ? and gid = 85', [uid]);
+      const [user] = await s.query<{ money: number; gift: number }>(
+        'select money, gift from sys_user where uid = ?',
+        [uid],
+      );
+      await s.query('update sys_user set money = 1000, gift = 500 where uid = ?', [uid]);
+      try {
+        await s.command(session, 'buyGoodsBeforeUse', 900020, 1, 2);
+        await s.command(session, 'buyGoodsBeforeUse', 900020, 0, 0);
+        await s.command(session, 'buyGoodsBeforeUse', 99999999, 1, 0);
+        await s.command(session, 'buyGoodsBeforeUse', 900020, 1, 0);
+        await s.command(session, 'buyGoodsBeforeUse', 900020, 1, 1);
+        await s.query('update sys_user set money = 5, gift = 5 where uid = ?', [uid]);
+        await s.command(session, 'buyGoodsBeforeUse', 900020, 1, 0);
+        await s.command(session, 'loadUserGoods');
+      } finally {
+        await s.query('update sys_user set money = ?, gift = ? where uid = ?', [
+          user?.money,
+          user?.gift,
+          uid,
+        ]);
+      }
+    },
+  },
+  {
+    name: 'shop redeems a 礼券 code',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      await s.query('delete from sys_ticket where id in (900030, 900031, 900032)');
+      await s.query('delete from sys_ticket_content where id = 900030');
+      // Content parsed by parseAndAddReward: one reward, type 0 goods, gid 85, count 3.
+      await s.query(
+        `insert into sys_ticket_content (id, name, content) values (900030, '测试礼券', '1,0,85,3')`,
+      );
+      await s.query(
+        `insert into sys_ticket (id, code, contentid, binduid, uid) values
+          (900030, 'ABCDEFGHIJ', 900030, 0, 0),
+          (900031, 'USEDCODE12', 900030, 0, 999999),
+          (900032, 'BINDCODE34', 900030, 123456, 0)`,
+      );
+      await s.query('delete from sys_goods where uid = ? and gid = 85', [uid]);
+      try {
+        // Empty, malformed, unknown, used, bound, then a valid redemption.
+        await s.command(session, 'exchangeLiquan', '');
+        await s.command(session, 'exchangeLiquan', 'short');
+        await s.command(session, 'exchangeLiquan', 'ZZZZZZZZZZ');
+        await s.command(session, 'exchangeLiquan', 'USEDCODE12');
+        await s.command(session, 'exchangeLiquan', 'BINDCODE34');
+        await s.command(session, 'exchangeLiquan', 'ABCDEFGHIJ');
+        // Redeeming it again now fails as used.
+        await s.command(session, 'exchangeLiquan', 'ABCDEFGHIJ');
+        await s.command(session, 'loadUserGoods');
+      } finally {
+        await s.query('delete from sys_ticket where id in (900030, 900031, 900032)');
+        await s.query('delete from sys_ticket_content where id = 900030');
+      }
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {

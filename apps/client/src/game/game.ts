@@ -260,6 +260,10 @@ export class Game {
       const type = int((data as unknown[] | undefined)?.[0]);
       if (type === 1) gameAlert(i18n('ModifySecondaryPassword_set_succ'));
       else if (type === 2) gameAlert(i18n('ModifySecondaryPassword_update_succ'));
+    } else if (action === 'buyanduse' && command === 'showDlg') {
+      // The shop row behind a `not_enough_goods` error: open the buy-and-use popup.
+      const row = asRow((data as unknown[] | undefined)?.[0]);
+      if (row) this.session.buyAndUse = { goods: row };
     }
     for (const receiver of [...(this.globalReceivers.get(action) ?? [])]) receiver(command, data);
   }
@@ -417,6 +421,8 @@ export class Game {
     this.session.view = view;
     this.session.dialog = null;
     this.session.useGoods = null;
+    this.session.shop = null;
+    this.session.buyAndUse = null;
   }
 
   /** `TopPanel.onLevelClick`. */
@@ -497,6 +503,15 @@ export class Game {
    */
   showUseGoodsDialog(time: number, type: number, param: (number | string)[] = []): void {
     this.session.useGoods = { time, type, param };
+  }
+
+  /** `DialogManager.showShopDialog`: opens the 商城 over the scene, optionally on a given tab. */
+  showShop(tab?: number): void {
+    this.session.shop = { tab };
+  }
+
+  closeShop(): void {
+    this.session.shop = null;
   }
 
   /** The `[cid, inner, x, y, bid]` building commands, acting on `session.currentSlot`. */
@@ -698,7 +713,7 @@ export class Game {
         this.loadUserInfo();
         break;
       case 'notEnoughGoods':
-        // Buy-and-use dialog arrives with the shop (phase 6).
+        // The shop row is fetched by showDlg; its reply opens the buy-and-use popup.
         void this.cmd.sendGlobalCommand('buyanduse', 'showDlg', [f.gid]);
         break;
       case 'ask':
