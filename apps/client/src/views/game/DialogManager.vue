@@ -6,6 +6,7 @@ import {
   BUILDING_COLLEGE,
   BUILDING_GOVERNMENT,
   BUILDING_HOTEL,
+  BUILDING_STORE,
   BUILDING_WALL,
 } from '../../game/cityGrid';
 import type { BuildingState } from '../../stores/city';
@@ -30,6 +31,7 @@ import ModifyPasswordDialog from '../system/ModifyPasswordDialog.vue';
 import OpenLockDialog from '../system/OpenLockDialog.vue';
 import BuyAndUseGoodsDialog from '../shop/BuyAndUseGoodsDialog.vue';
 import ShopDialog from '../shop/ShopDialog.vue';
+import StoreDialog from '../store/StoreDialog.vue';
 import TaskDialog from '../task/TaskDialog.vue';
 import WallDialog from '../wall/WallDialog.vue';
 
@@ -123,6 +125,14 @@ function choose(action: 'all' | 'level') {
     <WallDialog
       v-else-if="dialog?.name === 'building' && ownDialog(dialog.building, BUILDING_WALL)"
       :key="`wall ${buildingKey}`"
+      :x="0"
+      :y="0"
+      :building="dialog.building"
+      @destroy-panel="destroy = $event"
+    />
+    <StoreDialog
+      v-else-if="dialog?.name === 'building' && ownDialog(dialog.building, BUILDING_STORE)"
+      :key="`store ${buildingKey}`"
       :x="0"
       :y="0"
       :building="dialog.building"
