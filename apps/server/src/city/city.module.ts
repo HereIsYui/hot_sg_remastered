@@ -18,6 +18,7 @@ import { HotelRules } from './hotel-rules.service';
 import { SoldierRules } from './soldier-rules.service';
 import { SoldierCommands } from './soldier.commands';
 import { SoldierTick } from './soldier.tick';
+import { StoreBarnCommands } from './store-barn.commands';
 import { TechnicRules } from './technic-rules.service';
 import { TechnicCommands } from './technic.commands';
 import { TechnicTick } from './technic.tick';
@@ -49,6 +50,7 @@ import { TechnicTick } from './technic.tick';
     SoldierCommands,
     SoldierRules,
     SoldierTick,
+    StoreBarnCommands,
     TechnicCommands,
     TechnicRules,
     TechnicTick,
