@@ -4,6 +4,7 @@ import { LangService } from '../common/lang.service';
 import { GoodsRules } from '../core/goods-rules.service';
 import { RandomService } from '../core/random.service';
 import { TaskRules } from '../core/task-rules.service';
+import { UserRules } from '../core/user-rules.service';
 import { HeroExprCommands } from './hero-expr.commands';
 import { FakeDb, type Respond } from './fake-db.testutil';
 
@@ -30,7 +31,11 @@ function build(rules: Respond[]) {
   } as unknown as GoodsRules;
   const tasks = { completeTaskWithTaskid: async () => {} } as unknown as TaskRules;
   const random = new RandomService();
-  const cmd = new HeroExprCommands(db.scope, lang, goods, tasks, random);
+  const users = {
+    logUserAction: async () => {},
+    logActionCountback: async () => {},
+  } as unknown as UserRules;
+  const cmd = new HeroExprCommands(db.scope, lang, goods, tasks, random, users);
   return { cmd, db };
 }
 
@@ -191,7 +196,11 @@ describe('HeroExprCommands.fasterHeroExpr', () => {
       reduceGoods: async () => {},
     } as unknown as GoodsRules;
     const tasks = { completeTaskWithTaskid: async () => {} } as unknown as TaskRules;
-    const cmd = new HeroExprCommands(db.scope, lang, goods, tasks, new RandomService());
+    const users = {
+      logUserAction: async () => {},
+      logActionCountback: async () => {},
+    } as unknown as UserRules;
+    const cmd = new HeroExprCommands(db.scope, lang, goods, tasks, new RandomService(), users);
     await expect(cmd.fasterHeroExpr(ctx, [80213])).rejects.toBeInstanceOf(GameError);
   });
 });
