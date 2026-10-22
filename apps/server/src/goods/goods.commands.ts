@@ -5,7 +5,7 @@ import { LangService } from '../common/lang.service';
 import { Building, CityRules } from '../core/city-rules.service';
 import { GoodsRules } from '../core/goods-rules.service';
 import { OwnershipService } from '../core/ownership.service';
-import { phpEmpty, phpIntval, phpNum } from '../core/php';
+import { phpEmpty, phpIntval, phpLooseEquals, phpNum } from '../core/php';
 import { RandomService } from '../core/random.service';
 import { TaskRules } from '../core/task-rules.service';
 import { UserRules } from '../core/user-rules.service';
@@ -104,6 +104,14 @@ const PACK_TASKS: Record<number, number> = {
   50108: 420528,
   50110: 420529,
 };
+/** 盟主令 (useMenzhulin): raises the union member cap. */
+const MENGZHULING_GID = 15;
+/** 武器架 (addArmorShelf): +5 / +50 equipment slots, capped at 500 (achievement 36). */
+const ARMOR_SHELF_GID = 145;
+const ARMOR_SHELF_ADV_GID = 146;
+const ARMOR_COLUMN_MAX = 500;
+const ARMOR_COLUMN_ACHIEVEMENT = 36;
+
 /** utils.php::isSentGood: items whose drop from a 礼匣 is announced. */
 const ANNOUNCED_GIDS = new Set([
   10, 12, 17, 18, 20, 21, 25, 26, 40, 52, 56, 71, 72, 82, 97, 100, 115, 117, 120, 202, 203, 204,
@@ -282,6 +290,14 @@ export class GoodsCommands {
       throw GameError.raw('这个道具已过期');
     }
     if (isGiftPack(gid)) return [UseReply.Items, await this.openDynamicBox(uid, gid)];
+    if (gid === MENGZHULING_GID) {
+      await this.useMenzhulin(uid);
+      return [UseReply.Message, this.lang.t('useGoods.use_MengZhuLing_succ')];
+    }
+    if (gid === ARMOR_SHELF_GID || gid === ARMOR_SHELF_ADV_GID) {
+      const count = await this.addArmorShelf(uid, gid);
+      return [UseReply.Message, this.lang.t('goods.armor_column_add', count)];
+    }
     if (hasOwnUse(gid)) throw GameError.lang('useGoods.func_not_in_use');
     const opened = await this.defaultBox.open(uid, cid, gid);
     return opened instanceof CommittedMessage ? opened : [UseReply.Items, opened];
@@ -559,6 +575,48 @@ export class GoodsCommands {
     await this.cityRules.addCityResources(cid, add[0]!, add[1]!, add[2]!, add[3]!, 0);
     await this.goods.reduceGoods(uid, gid, useCount);
     return this.lang.t(`resPackage.${RES_GAIN[type]}`, amount);
+  }
+
+  /**
+   * GoodsFunc.php::useMenzhulin (盟主令, gid 15): raises the member cap of the player's union
+   * (chieforder = 1). Needs a union that exists and has not used one yet.
+   */
+  private async useMenzhulin(uid: number): Promise<void> {
+    const db = this.scope.db;
+    if (!(await this.goods.checkGoods(uid, MENGZHULING_GID))) {
+      throw GameError.raw(`not_enough_goods${MENGZHULING_GID}`);
+    }
+    const unionId = phpIntval(
+      await this.cell(sql`select union_id from sys_user where uid = ${uid}`),
+    );
+    if (unionId === 0) throw GameError.lang('useMenzhulin.not_join_union');
+    const union = await this.row(sql`select * from sys_union where id = ${unionId}`);
+    if (!union) throw GameError.lang('useMenzhulin.union_not_exist');
+    if (!phpLooseEquals(union.chieforder, 0)) throw GameError.lang('useMenzhulin.already_used');
+    await sql`update sys_union set chieforder = 1 where id = ${unionId}`.execute(db);
+    await this.goods.reduceGoods(uid, MENGZHULING_GID, 1);
+  }
+
+  /**
+   * GoodsFunc.php::addArmorShelf (武器架, gid 145 = +5, 146 = +50): widens the player's equipment
+   * bag up to 500 slots; reaching 500 completes achievement 36. Answers the new slot count.
+   */
+  async addArmorShelf(uid: number, gid: number): Promise<number> {
+    const db = this.scope.db;
+    const count = phpIntval(
+      await this.cell(sql`select armor_column from sys_user where uid = ${uid}`),
+    );
+    if (count >= ARMOR_COLUMN_MAX) throw GameError.lang('goods.armor_column_full');
+    const goods = await this.row(sql`select * from sys_goods where uid = ${uid} and gid = ${gid}`);
+    if (!goods || phpNum(goods.count) <= 0) throw GameError.raw(`not_enough_goods${gid}`);
+    const add = gid === ARMOR_SHELF_GID ? 5 : gid === ARMOR_SHELF_ADV_GID ? 50 : 0;
+    const target = Math.min(count + add, ARMOR_COLUMN_MAX);
+    if (target === ARMOR_COLUMN_MAX) {
+      await this.rewards.finishAchievement(uid, ARMOR_COLUMN_ACHIEVEMENT);
+    }
+    await sql`update sys_user set armor_column = ${target} where uid = ${uid}`.execute(db);
+    await this.goods.addGoods(uid, gid, -1, 0);
+    return target;
   }
 
   private async rows(query: RawBuilder<unknown>): Promise<Row[]> {

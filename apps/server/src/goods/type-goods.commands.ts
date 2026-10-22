@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { forwardRef, Inject, Injectable } from '@nestjs/common';
 import { sql, type RawBuilder } from 'kysely';
 import { BuildingInfoService } from '../city/building-info.service';
 import { encodeXy } from '../city/building-rules.service';
@@ -13,6 +13,7 @@ import { RandomService } from '../core/random.service';
 import { TaskRules } from '../core/task-rules.service';
 import { DbScope } from '../db/database.module';
 import { GlobalCommand, type CommandContext } from '../gateway/decorators';
+import { BlackSmithCommands } from '../hero/blacksmith.commands';
 import type { Row } from '../task/task-goals.service';
 import { TaskRewards } from '../task/task-rewards.service';
 import { GoodsCommands } from './goods.commands';
@@ -73,8 +74,10 @@ const PLAIN_USE_TYPES = new Set([
   4, 5, 6, 7, 8, 9, 10, 142, 143, 12, 13, 14, 15, 16, 17, 18, 19, 10333, 161501, 165, 20, 21, 22,
   23, 10083, 10084, 10085, 42, 48, 47, 51, 50, 166, -16656,
 ]);
-/** Types with their own use that is not ported yet: 打孔器/武器架 (smithy) and 君主经验书 (145). */
-const UNPORTED_TYPES = new Set([145, 24, 25, 26, 28, 30]);
+/** Types with their own use that is not ported yet: 君主经验书 (145, 成长卷). */
+const UNPORTED_TYPES = new Set([145]);
+/** Types routed to the smithy's openHole: 打孔器 (24/25), 化石粉 (26), 特级金刚钻 (28). */
+const OPEN_HOLE_TYPES = new Set([24, 25, 26, 28]);
 
 /** 体力药 (type 2) gids and the share of 体力上限 each restores. */
 const FORCE_PERCENT: Record<number, number> = { 74: 0.1, 75: 0.3, 76: 0.6, 77: 1, 151: 1 };
@@ -141,6 +144,8 @@ export class TypeGoodsCommands {
     private readonly buildings: CityBuildingsService,
     private readonly buildingInfo: BuildingInfoService,
     private readonly cityInfo: CityInfoService,
+    @Inject(forwardRef(() => BlackSmithCommands))
+    private readonly blacksmith: BlackSmithCommands,
   ) {}
 
   /** `[type, timeleft?]`: the items of a type with the counts owned; 鲁班/墨家 lead with a cost. */
@@ -230,6 +235,14 @@ export class TypeGoodsCommands {
     }
     if (type === 49) {
       return this.scope.transaction(() => this.useBigForceGoods(uid, cid, gid, rest));
+    }
+    if (OPEN_HOLE_TYPES.has(type)) {
+      // 打孔器 / 化石粉 / 特级金刚钻: the smithy's openHole, `[sid, gid, position, useType, count]`.
+      return this.blacksmith.openHole(ctx, [rest[0], gid, rest[1], rest[2], rest[3]]);
+    }
+    if (type === 30) {
+      // 武器架: widen the equipment bag; answers the new slot count.
+      return [await this.goodsCommands.addArmorShelf(uid, gid)];
     }
     if (PLAIN_USE_TYPES.has(type)) return this.goodsCommands.useGoods(ctx, [gid]);
     if (UNPORTED_TYPES.has(type) || (type > 110000 && type < 160000)) {
