@@ -659,16 +659,11 @@ export class BlackSmithCommands {
         await sql`update sys_user_armor set embed_pearls = ${pearls}
           where sid = ${sid} and uid = ${uid}`.execute(db);
         await this.goods.addGoods(uid, gid, -1, LOG_EMBED);
-        const gids = pearls
-          .split(',')
-          .map(phpIntval)
-          .filter((g) => g !== 0);
         ret.push(pearls);
-        ret.push(
-          gids.length === 0
-            ? []
-            : await this.rows(sql`select * from cfg_goods where gid in (${sql.join(gids)})`),
-        );
+        // The original runs `gid in ($pearls)` with the raw hole string, so the 0s of the empty
+        // holes pull in gid 0 (礼金) too; keep the zeros to match that row set and order.
+        const gids = pearls.split(',').map(phpIntval);
+        ret.push(await this.rows(sql`select * from cfg_goods where gid in (${sql.join(gids)})`));
         if (gid === 325) await this.tasks.completeTaskWithTaskid(uid, 103804);
       }
       return ret;
