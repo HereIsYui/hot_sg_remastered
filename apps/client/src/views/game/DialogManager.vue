@@ -46,6 +46,8 @@ import WorldActionDialog from '../world/WorldActionDialog.vue';
 import CampaignDialog from '../ground/CampaignDialog.vue';
 import TroopDialog from '../troop/TroopDialog.vue';
 import TroopDetailDialog from '../troop/TroopDetailDialog.vue';
+import BattleDialog from '../troop/BattleDialog.vue';
+import ReportDialog from '../report/ReportDialog.vue';
 
 /** DialogManager: the dialogs over the scene panels (only one shown at a time). */
 defineProps<{ x: number; y: number }>();
@@ -224,6 +226,13 @@ function choose(action: 'all' | 'level') {
       :troop="session.troopDetail.troop"
       :army-type="session.troopDetail.armyType"
       @close="session.troopDetail = null"
+    />
+    <ReportDialog v-if="session.report" />
+    <BattleDialog
+      v-if="session.battle"
+      :key="`battle ${session.battle.battleid}`"
+      :battleid="session.battle.battleid"
+      :user-is-attack="session.battle.userIsAttack"
     />
   </div>
 </template>

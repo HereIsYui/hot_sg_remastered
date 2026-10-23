@@ -9,6 +9,7 @@ import { phpEmpty, phpIntval, phpNum, phpString } from '../core/php';
 import { TaskRules } from '../core/task-rules.service';
 import { DbScope } from '../db/database.module';
 import { DialogCommand, type CommandContext } from '../gateway/decorators';
+import { WarEventService } from '../push/war-event.service';
 import { ExternService } from './extern.service';
 
 type Row = Record<string, unknown>;
@@ -48,6 +49,7 @@ export class StartTroopCommands {
     private readonly goods: GoodsRules,
     private readonly tasks: TaskRules,
     private readonly extern: ExternService,
+    private readonly warEvent: WarEventService,
   ) {}
 
   private get db() {
@@ -786,10 +788,13 @@ export class StartTroopCommands {
     throw GameError.lang('StartTroop.succ');
   }
 
-  /** utils.php::`insert sys_alarm ... on duplicate key update enemy=1`. */
+  /** utils.php::`insert sys_alarm ... on duplicate key update enemy=1`, plus a live proc-52 nudge. */
   private async raiseEnemyAlarm(uid: number): Promise<void> {
     await sql`insert into sys_alarm (uid, enemy) values (${uid}, 1)
       on duplicate key update enemy = 1`.execute(this.db);
+    // The DB flag above is authoritative; this wakes an online target's 军情 indicator immediately
+    // (best-effort — an offline player reads the flag at the next poll / login).
+    this.warEvent.notifyEnemyAlarm(uid);
   }
 
   /** GroundFunc.php::getEnemyFilter: the set count for one task on a city's 敌军过滤. */
