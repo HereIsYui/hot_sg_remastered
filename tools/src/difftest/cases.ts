@@ -2600,6 +2600,154 @@ export const cases: DiffCase[] = [
       );
     },
   },
+  {
+    // 校场 (GroundFunc.php). The Ground sits at inner (0, 4) in the shipped save; its dialog is
+    // addressed by bid 8 and y * 10 + x = 40. 募兵 / 战术 / 招降 / 治疗 all end by throwing a
+    // message, so the compare is the leading-0 reply plus the DB effects; the 'get*' lists return
+    // data. StartTroop / troop-scheme / 演习 settlement are the next wave and are not exercised.
+    name: 'ground conscripts, sets tactics',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const ground = (func: string, ...args: unknown[]) =>
+        s.dialog(session, cid, 8, 40, func, ...args);
+
+      // 募兵: a normal 州城 (type 3) with a province special soldier, state 1 (ready). The grant
+      // count is random (rand(600,1800)); difftest fixes rand, so both servers draw alike.
+      await s.query('update sys_city set type = 3, conscript = 1, is_special = 0 where cid = ?', [
+        cid,
+      ]);
+      await ground('conscript');
+      // Already drafted today.
+      await s.query('update sys_city set conscript = unix_timestamp() where cid = ?', [cid]);
+      await ground('conscript');
+      // Not a 县/郡/州 the user owns.
+      await ground('conscript');
+      await s.dialog(session, FOREIGN_CITY, 8, 40, 'conscript');
+
+      // 出征战术: read then set (empty lists, patrol action 2). getAttackTactics returns [row]/[].
+      await s.query('delete from sys_user_tactics where uid = ?', [uid]);
+      await ground('getAttackTactics');
+      await ground('setAttackTactics', 0, 0, 0, 2);
+      await ground('getAttackTactics');
+
+      // 防守战术: getResistTactics completes task 540; setResistTactics saves the row.
+      await s.query('delete from sys_city_tactics where cid = ?', [cid]);
+      await s.query('delete from sys_user_goal where uid = ? and gid = 540', [uid]);
+      await ground('getResistTactics');
+      await ground('setResistTactics', 0, 0, 0, 0, 1);
+      await ground('getResistTactics');
+      // Over the 12-type melee cap (13 joining 反掠夺 groups).
+      const tooMany: unknown[] = [13];
+      for (let i = 0; i < 13; i++) tooMany.push(10 + i, 1, 0, 0);
+      tooMany.push(0, 0, 0, 1);
+      await ground('setResistTactics', ...tooMany);
+
+      await s.query('update sys_city set type = 5 where cid = ?', [cid]);
+      await s.query('delete from sys_user_tactics where uid = ?', [uid]);
+      await s.query('delete from sys_city_tactics where cid = ?', [cid]);
+    },
+  },
+  {
+    // 伤兵 / 俘虏 / 逃兵 handling: 治疗 / 招降 / 劝说 (gold) and 遣散 / 释放. All throw a message;
+    // the compare is the leading-0 reply plus the soldier / resource / people effects.
+    name: 'ground cures wounded, accepts captives and persuades lamsters',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const ground = (func: string, ...args: unknown[]) =>
+        s.dialog(session, cid, 8, 40, func, ...args);
+      await s.query('update mem_city_resource set gold = 100000000 where cid = ?', [cid]);
+
+      // Seed curable 伤兵 (sid 1), 俘虏 (sid 5) and 逃兵 (sid 2).
+      await s.query('delete from mem_city_wounded where cid = ?', [cid]);
+      await s.query('delete from mem_city_captive where cid = ?', [cid]);
+      await s.query('delete from mem_city_lamster where cid = ?', [cid]);
+      await s.query(
+        'insert into mem_city_wounded (cid, sid, count) values (?, 1, 200), (?, 2, 50)',
+        [cid, cid],
+      );
+      await s.query('insert into mem_city_captive (cid, sid, count) values (?, 5, 120)', [cid]);
+      await s.query('insert into mem_city_lamster (cid, sid, count) values (?, 2, 80)', [cid]);
+
+      // Lists with their gold need.
+      await ground('getWoundedSoldier');
+      s.unordered(4, 0); // soldier list has no ORDER BY
+      await ground('getCaptiveSoldier');
+      await ground('getLamster');
+
+      // Cure one wounded type, then the rest; accept one captive type, then the rest; persuade.
+      await ground('cureWoundedSoldierDetail', 1, 50);
+      await ground('cureWoundedSoldier');
+      await ground('acceptCaptiveSoldierDetail', 5, 20);
+      await ground('acceptCaptiveSoldier');
+      await ground('sayToLamsterDetail', 2, 30);
+      await ground('sayToLamster');
+
+      // Empty now: each reports nothing to do.
+      await ground('cureWoundedSoldier');
+      await ground('acceptCaptiveSoldier');
+      await ground('sayToLamster');
+
+      // Not enough gold refuses.
+      await s.query('insert into mem_city_wounded (cid, sid, count) values (?, 1, 200)', [cid]);
+      await s.query('update mem_city_resource set gold = 0 where cid = ?', [cid]);
+      await ground('cureWoundedSoldier');
+      await s.query('update mem_city_resource set gold = 100000000 where cid = ?', [cid]);
+
+      await s.query('delete from mem_city_wounded where cid = ?', [cid]);
+      await s.query('delete from mem_city_captive where cid = ?', [cid]);
+      await s.query('delete from mem_city_lamster where cid = ?', [cid]);
+    },
+  },
+  {
+    // 遣散 伤兵 / 逃兵 (back to city people) and 释放 俘虏, all at once and by type.
+    name: 'ground dismisses wounded, lamsters and captives',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const ground = (func: string, ...args: unknown[]) =>
+        s.dialog(session, cid, 8, 40, func, ...args);
+
+      await s.query('delete from mem_city_wounded where cid = ?', [cid]);
+      await s.query('delete from mem_city_lamster where cid = ?', [cid]);
+      await s.query('delete from mem_city_captive where cid = ?', [cid]);
+      await s.query('insert into mem_city_wounded (cid, sid, count) values (?, 1, 100)', [cid]);
+      await s.query('insert into mem_city_lamster (cid, sid, count) values (?, 2, 60)', [cid]);
+      await s.query('insert into mem_city_captive (cid, sid, count) values (?, 5, 40)', [cid]);
+
+      // Dismiss more than present is refused.
+      await ground('dismissWoundedSoldierDetail', 1, 1000);
+      // Dismiss one type, then the rest.
+      await ground('dismissWoundedSoldierDetail', 1, 30);
+      await ground('dismissWoundedSoldier');
+      await ground('dismissLamsterDetail', 2, 20);
+      await ground('dismissLamster');
+      await ground('dismissCaptiveSoldierDetail', 5, 10);
+      await ground('dismissCaptiveSoldier');
+
+      await s.query('delete from mem_city_wounded where cid = ?', [cid]);
+      await s.query('delete from mem_city_lamster where cid = ?', [cid]);
+      await s.query('delete from mem_city_captive where cid = ?', [cid]);
+    },
+  },
+  {
+    // 演习 (startManeuver): its settlement is cfg_js.php::upManeuver (the battle engine, another
+    // agent's module), so startManeuver is refused here; getManeuverResult answers "still running"
+    // for an unknown id. Both sides must reject — the new server throws a not-ported error, the
+    // legacy queues a row no backend settles — so only the leading 0 is compared.
+    name: 'ground maneuver is not settled (battle engine unported)',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const cid = await lastCity(s, session.uid);
+      const ground = (func: string, ...args: unknown[]) =>
+        s.dialog(session, cid, 8, 40, func, ...args);
+      await ground('getManeuverResult', 999999);
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {

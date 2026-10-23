@@ -49,6 +49,27 @@ export class UserRules {
     return result.rows;
   }
 
+  /**
+   * utils.php::updateUserPrestige: recomputes 声望 from city people_building, the people behind
+   * the user's city and field soldiers, and the current warprestige; never below 0.
+   */
+  async updateUserPrestige(uid: number): Promise<void> {
+    const cell = async (query: ReturnType<typeof sql<{ v: unknown }>>) =>
+      phpNum((await query.execute(this.scope.db)).rows[0]?.v);
+    const p1 = await cell(sql<{ v: unknown }>`select sum(r.people_building) as v
+      from sys_user u, sys_city c, mem_city_resource r
+      where c.cid = r.cid and c.uid = u.uid and u.uid = ${uid}`);
+    const p2 = await cell(sql<{ v: unknown }>`select sum(f.people_need * s.count) as v
+      from sys_user u, sys_city c, sys_city_soldier s, cfg_soldier f
+      where s.cid = c.cid and s.sid = f.sid and c.uid = u.uid and u.uid = ${uid}`);
+    const p3 = await cell(sql<{ v: unknown }>`select sum(people) as v from sys_troops
+      where uid = ${uid}`);
+    const war = await cell(sql<{ v: unknown }>`select warprestige as v from sys_user
+      where uid = ${uid}`);
+    const prestige = Math.max(0, p1 + p2 + p3 + war);
+    await sql`update sys_user set prestige = ${prestige} where uid = ${uid}`.execute(this.scope.db);
+  }
+
   /** utils.php::getBufferNobility: nobility raised by an active 推恩令 buff (types 16/18). */
   async bufferNobility(uid: number, realNobility: unknown): Promise<number> {
     const row = await this.scope.db
