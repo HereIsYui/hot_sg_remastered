@@ -50,6 +50,9 @@ export const tableRules: Record<string, TableRule> = {
   sys_city_reinforcequeue: { offsets: ['queuetime', 'state_starttime'] },
   mem_city_reinforce: { offsets: ['state_endtime'] },
   sys_troops: { offsets: ['starttime', 'endtime'] },
+  // bak_troops is sys_troops' pre-battle snapshot; its starttime is the copied troop timestamp,
+  // which differs by the run-time skew between the two servers (same reason as sys_troops).
+  bak_troops: { offsets: ['starttime', 'endtime'] },
   sys_city: { offsets: ['discardtime'] },
   // A filed report (HandleTroop scout, battle settlements) stamps `time` with unix_timestamp();
   // the two sides run a second or two apart, so compare it relative to the case start.

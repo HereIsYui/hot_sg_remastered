@@ -87,8 +87,11 @@ export function legacyTarget(client = new LegacyClient()): Target {
         // new side has no equivalent of; left in place it makes a scout case pass on the FIRST
         // difftest run and silently skip (no report) on the SECOND, since the gate runs twice. The
         // new side never consults it, so clearing it each tick keeps the two sides symmetric.
+        // OLdBattleCron.php is required because HandleTroop's 占领 success branch calls
+        // updateFieldResourceAdds() (field-resource add recompute), which lives there, not in
+        // cfg_js.php; without it the 占领 arrival fatals with an undefined-function error.
         script = `require_once "BattleFunc.php"; require_once "UtilsExtend.php";
-          require_once "HeroExpr.php";
+          require_once "HeroExpr.php"; require_once "OLdBattleCron.php";
           @unlink("cron/uptroop");
           $cfg = file_get_contents("cfg_js.php");
           preg_match('/function del\\b.*/s', $cfg, $b); eval($b[0]);

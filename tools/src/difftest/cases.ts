@@ -63,6 +63,23 @@ const SCOUT_RESOURCE_IGNORE = {
   mem_city_resource: { skip: () => true },
 } satisfies Record<string, TableRule>;
 
+/**
+ * The 掠夺/占领 empty-field early-out sends the FIELD OWNER a "野地空无一人" report and then runs
+ * `refreshFoodArmyUse` + `check_city_resource` on the owner's city — the full economy recompute
+ * (caps, add-rates, food upkeep, and the owner's own daily task-goal seeding) that is NOT battle
+ * logic and belongs to the resource wave, exactly as the scout cases scope out. The ported arrival
+ * sends the owner report but deliberately leaves the owner's economy untouched, so scope the
+ * owner-recompute tables out of the comparison (the battle's real effects live in
+ * sys_troops / sys_report / mem_world / the attacker's own sys_user_goal).
+ */
+const BATTLE_OWNER_RECOMPUTE_IGNORE = {
+  mem_city_resource: { skip: () => true },
+  sys_city_res_add: { skip: () => true },
+  // The field owner (uid 1002) is the marker-troop player; its goal rows are the economy
+  // recompute's daily seeding, not the attacker's battle task completion.
+  sys_user_goal: { skip: (row) => String(row.uid) === '1002' },
+} satisfies Record<string, TableRule>;
+
 export const cases: DiffCase[] = [
   {
     name: 'login announcement',
@@ -3548,6 +3565,7 @@ export const cases: DiffCase[] = [
     // (野地空无一人) with no battle, turns the troop home, completes the field task. Deterministic —
     // no rand() is drawn on the empty-field path — so a tight compare of the troop row + report.
     name: 'battle: 掠夺 an empty wild field turns the troop home',
+    tables: BATTLE_OWNER_RECOMPUTE_IGNORE,
     run: async (s) => {
       const session = await s.login(EXISTING_PLAYER);
       const uid = session.uid;
@@ -3559,6 +3577,20 @@ export const cases: DiffCase[] = [
       );
       const fieldWid = Number(field?.wid ?? 0);
       const targetcid = wid2cid(fieldWid);
+      // No STATE-4 defender stands here, so the arrival early-outs (野地空无一人). But legacy
+      // HandleTroop auto-spawns a random NPC garrison via `checkSodier` when the field's resolved
+      // owner is uid<1000 (an mt_rand/wall-clock generator this architecture moved to the
+      // world-refresh tick) — which would make the "empty" field a battle nondeterministically.
+      // A player (uid 1002) marker troop in state 2 (invisible to HandleTroop's state-in-(0,1) pick
+      // and to the state-4 defender lookup) makes `check_field_owner` resolve uid>=1000, so
+      // checkSodier is skipped on both sides and the field is genuinely empty. uid 1002 > 1000 also
+      // means both sides send the field-owner "空无一人" report, which the arrival ports.
+      await s.query(
+        `insert into sys_troops
+          (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
+         values (1002, ?, 0, ?, 5, 2, unix_timestamp(), 0, 0, '0', '0', 0, 0)`,
+        [targetcid, targetcid],
+      );
       await s.query(
         `insert into sys_troops
           (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
@@ -3567,13 +3599,14 @@ export const cases: DiffCase[] = [
       );
       await s.tick('HandleTroop');
       await s.tick('HandleBattle');
-      await s.query('delete from sys_troops where uid = ?', [uid]);
+      await s.query('delete from sys_troops where uid = ? or cid = ?', [uid, targetcid]);
     },
   },
   {
     // 占领 (task 4) an empty wild field: HandleTroop takes it over (mem_world.ownercid = cid),
     // troop → state 4, field resource adds recomputed, field tasks completed. Deterministic.
     name: 'battle: 占领 an empty wild field claims it',
+    tables: BATTLE_OWNER_RECOMPUTE_IGNORE,
     run: async (s) => {
       const session = await s.login(EXISTING_PLAYER);
       const uid = session.uid;
@@ -3583,6 +3616,15 @@ export const cases: DiffCase[] = [
         'select wid from mem_world where ownercid = 0 and type > 1 and state = 0 order by wid limit 1',
       );
       const targetcid = wid2cid(Number(field?.wid ?? 0));
+      // Player (uid 1002) marker troop in state 2 suppresses legacy's checkSodier NPC auto-spawn
+      // (see the 掠夺-empty case); the field has no state-4 defender, so 占领 claims it. The early-out
+      // deletes any troop at the field cid, so the marker is cleaned up by the branch itself.
+      await s.query(
+        `insert into sys_troops
+          (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
+         values (1002, ?, 0, ?, 5, 2, unix_timestamp(), 0, 0, '0', '0', 0, 0)`,
+        [targetcid, targetcid],
+      );
       await s.query(
         `insert into sys_troops
           (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
@@ -3590,7 +3632,7 @@ export const cases: DiffCase[] = [
         [uid, cid, targetcid],
       );
       await s.tick('HandleTroop');
-      await s.query('delete from sys_troops where uid = ?', [uid]);
+      await s.query('delete from sys_troops where uid = ? or cid = ?', [uid, targetcid]);
       await s.query('update mem_world set ownercid = 0 where wid = ?', [Number(field?.wid ?? 0)]);
     },
   },
@@ -3608,7 +3650,12 @@ export const cases: DiffCase[] = [
         'select wid from mem_world where ownercid = 0 and type > 1 and state = 0 order by wid limit 1',
       );
       const targetcid = wid2cid(Number(field?.wid ?? 0));
-      // Attacker marching in; a small NPC defender already stationed (state 4).
+      // Attacker marching in; a small defender already stationed (state 4). The defender is a
+      // PLAYER troop (uid 1002), not an NPC: legacy HandleTroop runs `checkSodier` to auto-spawn a
+      // random NPC garrison on a wild field whose resolved owner is uid<1000 — an mt_rand/wall-clock
+      // generator this architecture deliberately moved to the world-refresh tick. A player-stationed
+      // defender makes `check_field_owner` resolve uid>=1000, so checkSodier is skipped on both sides
+      // and the case tests the battle itself deterministically (ownercid stays 0, so no inwar gating).
       await s.query(
         `insert into sys_troops
           (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
@@ -3618,13 +3665,9 @@ export const cases: DiffCase[] = [
       await s.query(
         `insert into sys_troops
           (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
-         values (0, ?, 0, ?, 5, 4, unix_timestamp(), 0, 0, '1,3,10', '0', 0, 0)`,
+         values (1002, ?, 0, ?, 5, 4, unix_timestamp(), 0, 0, '1,3,10', '0', 0, 0)`,
         [targetcid, targetcid],
       );
-      await s.query('update mem_world set ownercid = ? where wid = ?', [
-        targetcid,
-        Number(field?.wid ?? 0),
-      ]);
       // Pin the per-round target pick and the getBattleResult wounded/capture rolls.
       s.rng([1, 2, 1, 0, 0, 3, 1]);
       await s.tick('HandleTroop');
@@ -3633,37 +3676,44 @@ export const cases: DiffCase[] = [
       s.stopRng();
       await s.query('delete from sys_troops where uid = ? or cid = ?', [uid, targetcid]);
       await s.query('delete from mem_battle where attackcid = ?', [cid]);
-      await s.query('update mem_world set ownercid = 0, state = 0 where wid = ?', [
-        Number(field?.wid ?? 0),
-      ]);
+      await s.query('update mem_world set state = 0 where wid = ?', [Number(field?.wid ?? 0)]);
     },
   },
   {
     // 掠夺 (task 3) a defended CITY (type 2): the won battle steals resources and turns home.
-    // Seeded with a small defender garrison; the resource-theft branch + report compared.
+    // The target is a REAL player city (uid 1002, a city tile → battleType 2), so legacy's
+    // checkSodier NPC auto-spawn is skipped (owner uid>=1000) and the defender garrison is exactly
+    // what the case seeds — the resource-theft branch + report compare deterministically. task 3
+    // against a non-allied player is allowed regardless of protection state (check_inwar only
+    // gates transport/派遣), so no protection fixup is needed.
     name: 'battle: 掠夺 a defended city',
+    tables: BATTLE_OWNER_RECOMPUTE_IGNORE,
     run: async (s) => {
       const session = await s.login(EXISTING_PLAYER);
       const uid = session.uid;
       const cid = await lastCity(s, uid);
-      await s.query('delete from sys_troops where uid = ?', [uid]);
-      // Target a foreign city the save ships (FOREIGN_CITY). Give it a token garrison.
-      await s.query('delete from sys_city_soldier where cid = ? and sid = 3', [FOREIGN_CITY]);
+      const TARGET_CITY = 188128; // player 1002's city
+      await s.query('delete from sys_troops where uid = ? or cid = ?', [uid, TARGET_CITY]);
+      // A tiny, fixed garrison; clear any stationed defence hero so defcityadd resolves hero 0.
+      await s.query('delete from sys_city_soldier where cid = ?', [TARGET_CITY]);
       await s.query('insert into sys_city_soldier (cid, sid, count) values (?, 3, 5)', [
-        FOREIGN_CITY,
+        TARGET_CITY,
+      ]);
+      await s.query('update sys_city_hero set state = 0 where cid = ? and state in (1,7)', [
+        TARGET_CITY,
       ]);
       await s.query(
         `insert into sys_troops
           (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
          values (?, ?, 0, ?, 3, 0, unix_timestamp() - 600, 600, unix_timestamp() - 1, '1,1,3000', '0', 0, 0)`,
-        [uid, cid, FOREIGN_CITY],
+        [uid, cid, TARGET_CITY],
       );
       s.rng([1, 1, 2, 0, 0]);
       await s.tick('HandleTroop');
       for (let i = 0; i < 45; i++) await s.tick('HandleBattle');
       s.stopRng();
-      await s.query('delete from sys_troops where uid = ?', [uid]);
-      await s.query('delete from sys_city_soldier where cid = ? and sid = 3', [FOREIGN_CITY]);
+      await s.query('delete from sys_troops where uid = ? or cid = ?', [uid, TARGET_CITY]);
+      await s.query('delete from sys_city_soldier where cid = ?', [TARGET_CITY]);
       await s.query('delete from mem_battle where attackcid = ?', [cid]);
     },
   },

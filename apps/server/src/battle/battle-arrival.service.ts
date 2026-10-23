@@ -55,6 +55,7 @@ export class BattleArrivalService {
         getNamePosition: (cid, type) => this.cityRules.getNamePosition(cid, type),
         refreshFoodArmyUsers: (cid) => this.cityRules.refreshFoodArmyUsers(cid),
         addCitySoldiers: (cid, soldiers, add) => this.cityRules.addCitySoldiers(cid, soldiers, add),
+        updateFieldResourceAdds: (cid) => this.updateFieldResourceAdds(cid),
       },
       heroes: { throwHeroToField: (hero) => this.heroes.throwHeroToField(hero as never) },
       tasks: { completeTask: (uid, goalId) => this.tasks.completeTask(uid, goalId) },
@@ -87,6 +88,46 @@ export class BattleArrivalService {
       rand: (min, max) => this.random.randRange(min, max),
       mtRand: (min, max) => this.random.mtRand(min, max),
     };
+  }
+
+  /** OLdBattleCron.php::updateFieldResourceAdds: recompute a city's field-resource adds. */
+  private async updateFieldResourceAdds(cid: number): Promise<void> {
+    const fields = (
+      await sql<Row>`select type, level from mem_world where type > 1 and ownercid = ${cid}`.execute(
+        this.scope.db,
+      )
+    ).rows;
+    let food = 0;
+    let wood = 0;
+    let rock = 0;
+    let iron = 0;
+    for (const f of fields) {
+      const level = phpNum(f.level);
+      if (level <= 0) continue;
+      switch (phpIntval(f.type)) {
+        case 2: // WT_DESERT
+          rock += 3 + 2 * level;
+          break;
+        case 3: // WT_FOREST
+          wood += 3 + 2 * level;
+          break;
+        case 4: // WT_GRASS
+          food += 2 + level;
+          break;
+        case 5: // WT_HILL
+          iron += 3 + 2 * level;
+          break;
+        case 6: // WT_LAKE
+          food += 5 + 3 * level;
+          break;
+        case 7: // WT_SWAMP
+          food += 3 + 2 * level;
+          break;
+      }
+    }
+    await sql`update sys_city_res_add set field_food_add = ${food}, field_wood_add = ${wood},
+      field_rock_add = ${rock}, field_iron_add = ${iron} where cid = ${cid}`.execute(this.scope.db);
+    await this.cityRules.updateCityResourceAdd(cid);
   }
 
   private reportStr(key: string): string {
