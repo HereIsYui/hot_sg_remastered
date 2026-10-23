@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { sql } from 'kysely';
 import { GameError } from '../common/game-error';
 import { LangService } from '../common/lang.service';
-import { phpEmpty, phpIntval, phpString, phpTrim } from '../core/php';
+import { phpEmpty, phpIntval, phpLooseEquals, phpString, phpTrim } from '../core/php';
 import { TaskRules } from '../core/task-rules.service';
 import { DbScope } from '../db/database.module';
 import { GlobalCommand, type CommandContext } from '../gateway/decorators';
@@ -352,11 +352,46 @@ export class MailCommands {
   }
 
   /**
-   * `sendUnionMail`: 联盟群发. The 联盟 module (membership, 盟主 position, 传音符 cost) is not
-   * ported yet, so this reports 暂未开放 rather than sending.
+   * `sendUnionMail`: 联盟群发. The actual broadcast (iterating the 盟 roster, spending 传音符) and
+   * its per-member fan-out belong to the 联盟 module, which is not ported yet. MailFunc.php runs a
+   * chain of guards BEFORE that send, though — the 君主名 / banned-word / mailbox-full / 盟主 seat
+   * checks — and a non-champion is rejected there, never reaching the unported part. Those guards
+   * are ported so the reachable error paths match PHP exactly; only once a caller clears them all
+   * (a champion with enough 传音符) do we surface the not-ported error instead of broadcasting.
    */
   @GlobalCommand()
-  async sendUnionMail(): Promise<unknown[]> {
+  async sendUnionMail(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const uid = ctx.uid;
+    const args = [...param];
+    const userstate = await this.cell(sql`select state from sys_user where uid = ${uid}`);
+    if (!phpEmpty(userstate) && phpIntval(userstate) === STATE_NO_NAME) {
+      throw GameError.lang('sendUnionMail.no_name');
+    }
+    args.shift(); // fromname arg is ignored; PHP re-reads it from sys_user.
+    args.shift(); // unionid arg is ignored; PHP re-reads it from sys_user.
+    const title = phpString(args.shift());
+    args.shift(); // content — unused until the broadcast is ported.
+    // PHP checks the banned-word table against the RAW title (before the 无标题 default and the
+    // ［联盟］ prefix, which only matter for the unported broadcast), so that is all we build here.
+    if (
+      await this.exists(
+        sql`select 1 from cfg_baned_mail_content where instr(${title}, content) > 0`,
+      )
+    ) {
+      throw GameError.lang('banned.word_illegal');
+    }
+    await this.checkMailFull(uid);
+    const union = (
+      await this.rows(sql`select union_id, union_pos from sys_user where uid = ${uid}`)
+    )[0];
+    const unionid = phpIntval(union?.union_id);
+    const unionpos = phpIntval(union?.union_pos);
+    const leader = await this.cell(sql`select leader from sys_union where id = ${unionid}`);
+    if (unionpos !== 4 && unionpos !== 5 && (phpEmpty(leader) || !phpLooseEquals(leader, uid))) {
+      throw GameError.lang('sendUnionMail.not_champion');
+    }
+    // Cleared every reachable guard: the 传音符 cost and the broadcast fan-out are the 联盟 module's
+    // and are not ported yet.
     throw GameError.raw('**联盟群发信暂未开放。');
   }
 

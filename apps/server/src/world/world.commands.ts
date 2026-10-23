@@ -3,7 +3,7 @@ import { sql, type RawBuilder } from 'kysely';
 import { GameError } from '../common/game-error';
 import { LangService } from '../common/lang.service';
 import { cid2wid } from '../core/city-rules.service';
-import { phpEmpty, phpIntval, phpLooseEquals, addslashes } from '../core/php';
+import { phpEmpty, phpIntval, phpLooseEquals, phpString, mbStrlen, addslashes } from '../core/php';
 import { makeTimeLeft } from '../core/user-rules.service';
 import { MailService } from '../core/mail.service';
 import { DbScope } from '../db/database.module';
@@ -29,7 +29,10 @@ const WAR_GRACE = 8 * 3600;
  * (`getGovernInfo`), invasion eligibility (`checkCanInvade`), union marks (`markCity`),
  * and the campaign favourites (`addFavourites` / `getFavouritesList` / `deleteFavourites` /
  * `setFavouritesComments`). Response shapes mirror the PHP exactly so the world-map client
- * reads them unchanged.
+ * reads them unchanged. The two read-only UnionFunc.php search lookups the WorldPanel 搜索 box
+ * uses — `getOtherCityByName` (fuzzy city search) and `getOtherUnionAreaByName` (a named union's
+ * influence view) — live here too, with their getProvinceCityOwner / getUnionMarkCity /
+ * getUnionArea helpers.
  *
  * The action commands `createCityFromLand`, `governOthers`, `startWar`, `unionAssit` and
  * `mergeCity` are left for a later wave; see `world-stub.commands.ts`.
@@ -357,30 +360,31 @@ export class WorldCommands {
         where unionid = ${unionid} and target = ${targetunionid} and type = 2`);
       if (relation.length === 0) throw GameError.lang('MarkCity.not_in_war');
     }
-    return this.scope.transaction(async () => {
-      await this.clearMark(uid);
-      const mark = await this.rows(
-        sql`select * from sys_union_mark where unionid = ${unionid} and cid = ${cid}`,
+    // WorldFunc.php has no transaction here: the mark insert and the notification mails commit,
+    // then the success message is thrown. Wrapping it in scope.transaction would roll the mark
+    // back on that throw, so the pre-insert checks and the insert run on the auto-commit scope.
+    await this.clearMark(uid);
+    const mark = await this.rows(
+      sql`select * from sys_union_mark where unionid = ${unionid} and cid = ${cid}`,
+    );
+    if (mark.length > 0) throw GameError.lang('MarkCity.have_marked');
+    const count = phpIntval(
+      await this.cell(sql`select count(*) from sys_union_mark where unionid = ${unionid}`),
+    );
+    if (count >= MARK_MAX) {
+      const first = phpIntval(
+        await this.cell(sql`select min(endtime) from sys_union_mark where unionid = ${unionid}`),
       );
-      if (mark.length > 0) throw GameError.lang('MarkCity.have_marked');
-      const count = phpIntval(
-        await this.cell(sql`select count(*) from sys_union_mark where unionid = ${unionid}`),
-      );
-      if (count >= MARK_MAX) {
-        const first = phpIntval(
-          await this.cell(sql`select min(endtime) from sys_union_mark where unionid = ${unionid}`),
-        );
-        const now = phpIntval(await this.cell(sql`select unix_timestamp()`));
-        throw GameError.lang('MarkCity.too_many_marks', makeTimeLeft(this.lang, first - now));
-      }
-      const wid = cid2wid(cid);
-      await sql`insert into sys_union_mark (unionid, cid, endtime, type, wid)
-        values (${unionid}, ${cid}, unix_timestamp() + ${MARK_TTL}, 1, ${wid})`.execute(
-        this.scope.db,
-      );
-      await this.notifyMark(uid, unionid, cid, city!);
-      throw GameError.lang('MarkCity.mark_succ');
-    });
+      const now = phpIntval(await this.cell(sql`select unix_timestamp()`));
+      throw GameError.lang('MarkCity.too_many_marks', makeTimeLeft(this.lang, first - now));
+    }
+    const wid = cid2wid(cid);
+    await sql`insert into sys_union_mark (unionid, cid, endtime, type, wid)
+      values (${unionid}, ${cid}, unix_timestamp() + ${MARK_TTL}, 1, ${wid})`.execute(
+      this.scope.db,
+    );
+    await this.notifyMark(uid, unionid, cid, city!);
+    throw GameError.lang('MarkCity.mark_succ');
   }
 
   /** Mails every union member that the mark began; the title/content come from the lang table. */
@@ -458,37 +462,146 @@ export class WorldCommands {
     return [fields];
   }
 
-  /** `[cid]`: adds a city or wild field to the campaign favourites; throws the result message. */
+  /**
+   * UnionFunc.php::getOtherCityByName. `[name]` -> `[cities]`: a fuzzy `name LIKE '%…%'` search over
+   * sys_city (max 6), each row carrying the owner's `username` and `unionname`. The name is capped
+   * at 8 UTF-8 chars; an empty name, an over-long name and a no-match all throw a searchcityname
+   * message. Read-only.
+   */
+  @GlobalCommand()
+  async getOtherCityByName(_ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const rest = [...param];
+    const name = phpString(rest.shift());
+    const len = mbStrlen(name);
+    if (len === 0) throw GameError.lang('searchcityname.enter_target_name');
+    if (len > 8) throw GameError.lang('searchcityname.union_name_tooLong');
+    // PHP addslashes then interpolates into a LIKE; the `%` wildcards wrap the escaped literal.
+    const like = `%${addslashes(name)}%`;
+    const citys = await this.rows(sql`select aa.*, bb.name as username, cc.name as unionname
+      from sys_city aa left join sys_user bb on aa.uid = bb.uid
+        left join sys_union cc on bb.union_id = cc.id
+      where aa.name like ${like} limit 6`);
+    if (citys.length === 0) throw GameError.lang('searchcityname.target_union_not_exist');
+    rest.push(citys);
+    return rest;
+  }
+
+  /**
+   * UnionFunc.php::getOtherUnionAreaByName. `[name]`: resolves a union by exact name, then returns
+   * its influence view via getOtherUnionArea:
+   * `[unionName, getProvinceCityOwner(), getUnionMarkCity(uid), "blue", unionid, getUnionArea()]`.
+   * The name is capped at 8 UTF-8 chars; empty / over-long / unknown all throw an addUnionRelation
+   * message. Read-only (getUnionMarkCity prunes expired marks exactly as WorldFunc.php does).
+   */
+  @GlobalCommand()
+  async getOtherUnionAreaByName(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const rest = [...param];
+    const name = phpString(rest.shift());
+    const len = mbStrlen(name);
+    if (len === 0) throw GameError.lang('addUnionRelation.enter_target_name');
+    if (len > 8) throw GameError.lang('addUnionRelation.union_name_tooLong');
+    const union = await this.row(
+      sql`select * from sys_union where name = ${addslashes(name)} limit 1`,
+    );
+    if (phpEmpty(union)) throw GameError.lang('addUnionRelation.target_union_not_exist');
+    return this.otherUnionArea(ctx.uid, phpIntval(union!.id));
+  }
+
+  /** UnionFunc.php::getOtherUnionArea with the union id already resolved. */
+  private async otherUnionArea(uid: number, unionid: number): Promise<unknown[]> {
+    const union = await this.row(sql`select * from sys_union where id = ${unionid}`);
+    if (phpEmpty(union)) throw GameError.lang('getUnionArea.no_this_union');
+    return [
+      union!.name,
+      await this.provinceCityOwner(),
+      await this.unionMarkCity(uid),
+      'blue',
+      unionid,
+      await this.unionArea(unionid),
+    ];
+  }
+
+  /**
+   * UnionFunc.php::getProvinceCityOwner: every 州城 (type 3-4) with its owner, tagged with a
+   * `unionname` (the owning union's name, or the NPC owner's own name for an unaligned NPC city).
+   */
+  private async provinceCityOwner(): Promise<Row[]> {
+    const cities = await this.rows(sql`select c.province, c.type, c.cid, c.name as cityname,
+        u.uid, u.union_id, u.name as username
+      from sys_city c left join sys_user u on c.uid = u.uid
+      where type >= 3 and type < 5 order by c.province`);
+    for (const city of cities) {
+      const unionid = phpIntval(city.union_id);
+      const unionname = await this.cell(sql`select name from sys_union where id = ${unionid}`);
+      city.unionname = '';
+      if (phpEmpty(unionname) || unionname === '') {
+        if (unionid === 0 && phpIntval(city.uid) <= 1000) city.unionname = city.username;
+      } else {
+        city.unionname = unionname;
+      }
+    }
+    return cities;
+  }
+
+  /** UnionFunc.php::getUnionMarkCity: the viewer union's marks after expiry pruning. */
+  private async unionMarkCity(uid: number): Promise<Row[]> {
+    await this.clearMark(uid);
+    const unionid = phpIntval(
+      await this.cell(sql`select union_id from sys_user where uid = ${uid}`),
+    );
+    return this.rows(sql`select * from sys_union_mark where unionid = ${unionid}`);
+  }
+
+  /**
+   * UnionFunc.php::getUnionArea: each type-2 (郡) area a member of `unionid` holds, as the
+   * `"<province>_<jun>"` string of its world tile (one entry per held 郡 city).
+   */
+  private async unionArea(unionid: number): Promise<unknown[]> {
+    const areas = await this.rows(sql`select c.cid from sys_city c
+      join sys_user u on c.uid = u.uid where c.type = 2 and u.union_id = ${unionid}`);
+    const ret: unknown[] = [];
+    for (const area of areas) {
+      const wid = cid2wid(phpIntval(area.cid));
+      // PHP sql_fetch_one returns the assoc ROW ({provincejun: "p_j"}), or 0 for no match.
+      const row = await this.row(
+        sql`select concat(province, '_', jun) as provincejun from mem_world where wid = ${wid} limit 1`,
+      );
+      ret.push(phpEmpty(row) ? 0 : row);
+    }
+    return ret;
+  }
+
+  /**
+   * `[cid]`: adds a city or wild field to the campaign favourites; throws the result message.
+   * WorldFunc.php reports success by throwing the message AFTER the insert has committed, so the
+   * write must not sit inside a transaction (a thrown GameError would roll it back).
+   */
   @GlobalCommand()
   async addFavourites(ctx: CommandContext, param: unknown[]): Promise<never> {
     const uid = ctx.uid;
     const targetcid = phpIntval(param[0]);
-    return this.scope.transaction(async () => {
-      if (
-        await this.check(
-          sql`select * from sys_favourites where uid = ${uid} and cid = ${targetcid}`,
-        )
-      ) {
-        throw GameError.lang('addFavourites.already_in_fav');
-      }
-      const cnt = phpIntval(
-        await this.cell(sql`select count(*) from sys_favourites where uid = ${uid}`),
+    if (
+      await this.check(sql`select * from sys_favourites where uid = ${uid} and cid = ${targetcid}`)
+    ) {
+      throw GameError.lang('addFavourites.already_in_fav');
+    }
+    const cnt = phpIntval(
+      await this.cell(sql`select count(*) from sys_favourites where uid = ${uid}`),
+    );
+    if (cnt >= FAV_MAX) throw GameError.lang('addFavourites.fav_is_full');
+    const wid = cid2wid(targetcid);
+    const world = await this.row(sql`select * from mem_world where wid = ${wid}`);
+    let name: unknown;
+    if (phpIntval(world?.type) === 0) {
+      name = await this.cell(sql`select name from sys_city where cid = ${targetcid}`);
+    } else {
+      name = await this.cell(
+        sql`select name from cfg_world_type where type = ${phpIntval(world?.type)}`,
       );
-      if (cnt >= FAV_MAX) throw GameError.lang('addFavourites.fav_is_full');
-      const wid = cid2wid(targetcid);
-      const world = await this.row(sql`select * from mem_world where wid = ${wid}`);
-      let name: unknown;
-      if (phpIntval(world?.type) === 0) {
-        name = await this.cell(sql`select name from sys_city where cid = ${targetcid}`);
-      } else {
-        name = await this.cell(
-          sql`select name from cfg_world_type where type = ${phpIntval(world?.type)}`,
-        );
-      }
-      await sql`insert into sys_favourites (uid, cid, name, comments)
-        values (${uid}, ${targetcid}, ${name ?? ''}, '')`.execute(this.scope.db);
-      throw GameError.lang('addFavourites.succ');
-    });
+    }
+    await sql`insert into sys_favourites (uid, cid, name, comments)
+      values (${uid}, ${targetcid}, ${name ?? ''}, '')`.execute(this.scope.db);
+    throw GameError.lang('addFavourites.succ');
   }
 
   /** `[]` -> `[[player cities], [favourites]]`. */
@@ -519,23 +632,24 @@ export class WorldCommands {
     });
   }
 
-  /** `[id, comments]`: sets the note on a favourite; throws the result message. */
+  /**
+   * `[id, comments]`: sets the note on a favourite; throws the result message. Like addFavourites,
+   * the success message is thrown after the update commits, so it must not run in a transaction.
+   */
   @GlobalCommand()
   async setFavouritesComments(ctx: CommandContext, param: unknown[]): Promise<never> {
     const id = phpIntval(param[0]);
     const comments = addslashes(
       param[1] === null || param[1] === undefined ? '' : String(param[1]),
     );
-    return this.scope.transaction(async () => {
-      const fav = await this.row(sql`select * from sys_favourites where id = ${id}`);
-      if (phpEmpty(fav) || !phpLooseEquals(fav!.uid, ctx.uid)) {
-        throw GameError.lang('setFavouritesComments.already_exist');
-      }
-      await sql`update sys_favourites set comments = ${comments} where id = ${id}`.execute(
-        this.scope.db,
-      );
-      throw GameError.lang('setFavouritesComments.succ');
-    });
+    const fav = await this.row(sql`select * from sys_favourites where id = ${id}`);
+    if (phpEmpty(fav) || !phpLooseEquals(fav!.uid, ctx.uid)) {
+      throw GameError.lang('setFavouritesComments.already_exist');
+    }
+    await sql`update sys_favourites set comments = ${comments} where id = ${id}`.execute(
+      this.scope.db,
+    );
+    throw GameError.lang('setFavouritesComments.succ');
   }
 
   /** utils.php::getAssingStartTime: the start of the current weekly 洛阳 assignment window. */

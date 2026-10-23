@@ -2606,6 +2606,9 @@ export const cases: DiffCase[] = [
     run: async (s) => {
       const session = await s.login(EXISTING_PLAYER);
       await s.command(session, 'getMapCity');
+      // WorldFunc.php::getMapCity has no ORDER BY, so the row order is storage-engine dependent
+      // (legacy MyISAM physical order vs the new InnoDB clustered PK); compare as a set.
+      s.unordered(4);
     },
   },
   {
@@ -2697,6 +2700,57 @@ export const cases: DiffCase[] = [
     },
   },
   {
+    // UnionFunc.php::getOtherCityByName — the WorldPanel 搜索 jump list. The error branches are
+    // deterministic; the hit searches for changle's own 城池 name, which matches exactly one row.
+    name: 'getOtherCityByName searches cities by name',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      await s.command(session, 'getOtherCityByName', ''); // enter_target_name
+      await s.command(session, 'getOtherCityByName', '九个字的城池名字啊'); // union_name_tooLong
+      await s.command(session, 'getOtherCityByName', '绝无此城名'); // target_union_not_exist
+      // The home city's name (长乐宫) matches itself; row order has a LIMIT 6 but no ORDER BY, so
+      // compare the hit list as a set.
+      await s.command(session, 'getOtherCityByName', '长乐宫');
+      s.unordered(6);
+    },
+  },
+  {
+    // UnionFunc.php::getOtherUnionAreaByName -> getOtherUnionArea. The shipped save has no 联盟, so
+    // the error branches run as-is; the success path seeds a 联盟 with changle as its only member
+    // holding one 郡 (type 2) city, then rolls it all back. getProvinceCityOwner enumerates the 18
+    // 州城 (identical on both snapshots) and getUnionArea returns the seeded 郡's province_jun.
+    name: 'getOtherUnionAreaByName resolves a union influence view',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      await s.command(session, 'getOtherUnionAreaByName', ''); // enter_target_name
+      await s.command(session, 'getOtherUnionAreaByName', '九个字的联盟名字啊'); // union_name_tooLong
+      await s.command(session, 'getOtherUnionAreaByName', '查无此盟'); // target_union_not_exist
+
+      // Seed a union whose single member (changle) holds one 郡 city, so getUnionArea has a row.
+      await s.query('delete from sys_union where id = 90001');
+      await s.query(
+        "insert into sys_union (id, name, leader, creator, member) values (90001, '差分联盟', ?, ?, 1)",
+        [uid, uid],
+      );
+      await s.query('update sys_user set union_id = 90001 where uid = ?', [uid]);
+      const [jun] = await s.query<{ cid: string; uid: string }>(
+        'select cid, uid from sys_city where type = 2 order by cid limit 1',
+      );
+      const junCid = Number(jun?.cid ?? 0);
+      const junUid = Number(jun?.uid ?? 0);
+      await s.query('update sys_city set uid = ? where cid = ?', [uid, junCid]);
+
+      await s.command(session, 'getOtherUnionAreaByName', '差分联盟');
+      // getProvinceCityOwner has no ORDER BY within a province; compare as a set.
+      s.unordered(6, 1);
+
+      await s.query('update sys_city set uid = ? where cid = ?', [junUid, junCid]);
+      await s.query('update sys_user set union_id = 0 where uid = ?', [uid]);
+      await s.query('delete from sys_union where id = 90001');
+    },
+  },
+  {
     // 校场 (GroundFunc.php). The Ground sits at inner (0, 4) in the shipped save; its dialog is
     // addressed by bid 8 and y * 10 + x = 40. 募兵 / 战术 / 招降 / 治疗 all end by throwing a
     // message, so the compare is the leading-0 reply plus the DB effects; the 'get*' lists return
@@ -2710,11 +2764,16 @@ export const cases: DiffCase[] = [
         s.dialog(session, cid, 8, 40, func, ...args);
 
       // 募兵: a normal 州城 (type 3) with a province special soldier, state 1 (ready). The grant
-      // count is random (rand(600,1800)); difftest fixes rand, so both servers draw alike.
+      // count is rand(600,1800) and the sid can be rand(45,50); PHP rand() and the new server's
+      // RandomService are both unseeded here with no shared source, so the exact count/sid are
+      // nondeterministic and cannot match. We mask the success message and drop the random count
+      // from the sys_city_soldier delta (see tables.ts); the leading-0 success flag, the sid when
+      // fixed, and every later error branch still compare exactly.
       await s.query('update sys_city set type = 3, conscript = 1, is_special = 0 where cid = ?', [
         cid,
       ]);
       await ground('conscript');
+      s.mask(1); // 成功招募到<兵种><rand(600,1800)> — the grant count is random on both sides.
       // Already drafted today.
       await s.query('update sys_city set conscript = unix_timestamp() where cid = ?', [cid]);
       await ground('conscript');

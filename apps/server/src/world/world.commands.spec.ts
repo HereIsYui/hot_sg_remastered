@@ -12,6 +12,17 @@ const lang = new LangService({
   },
   deleteFavourites: { error_in_del_fav: '删除收藏目标出错。' },
   setFavouritesComments: { already_exist: '收藏目标不存在。', succ: '修改目标备注成功。' },
+  searchcityname: {
+    enter_target_name: '请输入城池名称',
+    union_name_tooLong: '城池名称最多8个字符！',
+    target_union_not_exist: '该城池不存在',
+  },
+  addUnionRelation: {
+    enter_target_name: '请输入对方联盟名字',
+    union_name_tooLong: '联盟名称最多8个字符！',
+    target_union_not_exist: '该联盟不存在！',
+  },
+  getUnionArea: { no_this_union: '这个联盟不存在。' },
   MarkCity: {
     No_Union: '你还没有联盟。',
     No_Permission: '你没有权限进行该项操作。',
@@ -315,5 +326,103 @@ describe('WorldCommands.getActionField', () => {
     expect(res[0]).toBe(0);
     // cid2wid(209355) = block-packed wid; a positive number (not -1).
     expect((res[1] as number[])[0]).toBeGreaterThan(0);
+  });
+});
+
+describe('WorldCommands.getOtherCityByName', () => {
+  it('rejects an empty name', async () => {
+    const { cmd } = build([NO(/.*/)]);
+    await expect(cmd.getOtherCityByName(ctx, [''])).rejects.toThrow(
+      'searchcityname.enter_target_name',
+    );
+  });
+
+  it('rejects a name longer than 8 characters', async () => {
+    const { cmd } = build([NO(/.*/)]);
+    await expect(cmd.getOtherCityByName(ctx, ['九个字的城池名字啊'])).rejects.toThrow(
+      'searchcityname.union_name_tooLong',
+    );
+  });
+
+  it('throws target_union_not_exist when nothing matches', async () => {
+    const { cmd } = build([NO(/from sys_city aa/i), NO(/.*/)]);
+    await expect(cmd.getOtherCityByName(ctx, ['无此城'])).rejects.toThrow(
+      'searchcityname.target_union_not_exist',
+    );
+  });
+
+  it('returns the matched cities wrapped in a one-element array', async () => {
+    const hit = { cid: 5, name: '长乐宫', uid: 1001, username: '长乐', unionname: null };
+    const { cmd } = build([{ match: /from sys_city aa/i, rows: [hit] }, NO(/.*/)]);
+    const res = (await cmd.getOtherCityByName(ctx, ['长乐'])) as unknown[];
+    expect(res).toEqual([[hit]]);
+  });
+});
+
+describe('WorldCommands.getOtherUnionAreaByName', () => {
+  it('rejects an empty name', async () => {
+    const { cmd } = build([NO(/.*/)]);
+    await expect(cmd.getOtherUnionAreaByName(ctx, [''])).rejects.toThrow(
+      'addUnionRelation.enter_target_name',
+    );
+  });
+
+  it('rejects a name longer than 8 characters', async () => {
+    const { cmd } = build([NO(/.*/)]);
+    await expect(cmd.getOtherUnionAreaByName(ctx, ['九个字的联盟名字啊'])).rejects.toThrow(
+      'addUnionRelation.union_name_tooLong',
+    );
+  });
+
+  it('throws target_union_not_exist for an unknown union name', async () => {
+    const { cmd } = build([NO(/select \* from sys_union where name/i), NO(/.*/)]);
+    await expect(cmd.getOtherUnionAreaByName(ctx, ['无此盟'])).rejects.toThrow(
+      'addUnionRelation.target_union_not_exist',
+    );
+  });
+
+  it('assembles [name, provinceOwners, marks, "blue", id, areas]', async () => {
+    const { cmd } = build([
+      // getOtherUnionAreaByName: resolve union by name
+      { match: /select \* from sys_union where name/i, rows: [{ id: 7, name: '天下第一' }] },
+      // otherUnionArea: re-read the union by id
+      { match: /select \* from sys_union where id/i, rows: [{ id: 7, name: '天下第一' }] },
+      // provinceCityOwner: the 州城 list, then the per-row union-name lookup
+      {
+        match: /from sys_city c left join sys_user u .* type >= 3/i,
+        rows: [
+          {
+            province: 1,
+            type: 3,
+            cid: 100,
+            cityname: '洛阳',
+            uid: 2002,
+            union_id: 7,
+            username: '张三',
+          },
+        ],
+      },
+      { match: /select name from sys_union where id/i, rows: [{ name: '天下第一' }] },
+      // unionMarkCity -> clearMark: union_id, the marks, the mark owner (<=1000 so no relation
+      // branch), then the expiry delete. The marks read is reused by unionMarkCity itself.
+      { match: /select union_id from sys_user/i, rows: [{ union_id: 7 }] },
+      { match: /from sys_union_mark where unionid/i, rows: [{ id: 1, cid: 50 }] },
+      { match: /select uid from sys_city where cid/i, rows: [{ uid: 500 }] },
+      { match: /delete from sys_union_mark/i, rows: [] },
+      // unionArea: held 郡 cities, then each tile's province_jun row
+      {
+        match: /from sys_city c\s+join sys_user u on c.uid = u.uid where c.type = 2/i,
+        rows: [{ cid: 60 }],
+      },
+      { match: /concat\(province, '_', jun\)/i, rows: [{ provincejun: '1_2' }] },
+      NO(/.*/),
+    ]);
+    const res = (await cmd.getOtherUnionAreaByName(ctx, ['天下第一'])) as unknown[];
+    expect(res[0]).toBe('天下第一');
+    expect(res[3]).toBe('blue');
+    expect(res[4]).toBe(7);
+    expect(res[5]).toEqual([{ provincejun: '1_2' }]);
+    expect(Array.isArray(res[1])).toBe(true);
+    expect(res[2]).toEqual([{ id: 1, cid: 50 }]);
   });
 });

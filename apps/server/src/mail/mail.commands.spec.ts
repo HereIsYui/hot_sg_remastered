@@ -17,6 +17,12 @@ const lang = new LangService({
     content_illegal: '信件内容包含非法字符，不能发送',
   },
   banned: { word_illegal: '标题包含非法字符' },
+  sendUnionMail: {
+    untitled: '无标题',
+    union: '［联盟］',
+    no_name: '你要先填写君主名并建立城市才能发信。',
+    not_champion: '你不是盟主或副盟主，不能发联盟群发信！',
+  },
 });
 
 const ctx = { uid: 1001, cid: 0, ip: 0, sip: '' };
@@ -156,8 +162,39 @@ describe('MailCommands.sendPersonMail', () => {
 });
 
 describe('MailCommands.sendUnionMail', () => {
-  it('reports 暂未开放 while the 联盟 module is unported', async () => {
-    const { cmd } = build([NO(/.*/)]);
-    await expect(cmd.sendUnionMail()).rejects.toThrow(/联盟群发信暂未开放/);
+  const ARGS = ['长乐', 0, '群发', '内容'];
+
+  it('refuses a role with no 君主名 (state 3)', async () => {
+    const { cmd } = build([
+      { match: /select state from sys_user where uid/i, rows: [{ state: 3 }] },
+      NO(/.*/),
+    ]);
+    await expect(cmd.sendUnionMail(ctx, ARGS)).rejects.toThrow('sendUnionMail.no_name');
+  });
+
+  it('rejects a non-champion before reaching the unported broadcast', async () => {
+    const { cmd } = build([
+      { match: /select state from sys_user where uid/i, rows: [{ state: 1 }] },
+      NO(/from cfg_baned_mail_content/i), // title passes the banned check
+      COUNT(/count\(\*\) from sys_mail_box where uid = \? and recvstate = 0/i, 0),
+      COUNT(/count\(\*\) from sys_mail_box where fromuid = \? and sendstate = 0/i, 0),
+      { match: /select union_id, union_pos from sys_user/i, rows: [{ union_id: 0, union_pos: 0 }] },
+      NO(/select leader from sys_union/i),
+      NO(/.*/),
+    ]);
+    await expect(cmd.sendUnionMail(ctx, ARGS)).rejects.toThrow('sendUnionMail.not_champion');
+  });
+
+  it('reports 暂未开放 once a champion clears every guard (broadcast unported)', async () => {
+    const { cmd } = build([
+      { match: /select state from sys_user where uid/i, rows: [{ state: 1 }] },
+      NO(/from cfg_baned_mail_content/i),
+      COUNT(/count\(\*\) from sys_mail_box where uid = \? and recvstate = 0/i, 0),
+      COUNT(/count\(\*\) from sys_mail_box where fromuid = \? and sendstate = 0/i, 0),
+      { match: /select union_id, union_pos from sys_user/i, rows: [{ union_id: 7, union_pos: 4 }] },
+      NO(/select leader from sys_union/i),
+      NO(/.*/),
+    ]);
+    await expect(cmd.sendUnionMail(ctx, ARGS)).rejects.toThrow(/联盟群发信暂未开放/);
   });
 });

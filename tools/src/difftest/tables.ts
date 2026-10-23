@@ -51,4 +51,7 @@ export const tableRules: Record<string, TableRule> = {
   mem_city_reinforce: { offsets: ['state_endtime'] },
   sys_troops: { offsets: ['endtime'] },
   sys_city: { offsets: ['discardtime'] },
+  // 募兵 grants rand(600,1800) soldiers (GroundFunc.php::conscript); the count is random on both
+  // unseeded sides, so only the cid/sid of the granted row are comparable.
+  sys_city_soldier: { ignore: ['count'] },
 };
