@@ -17,6 +17,7 @@ import { ShopModule } from './shop/shop.module';
 import { TaskModule } from './task/task.module';
 import { TickModule } from './tick/tick.module';
 import { UserModule } from './user/user.module';
+import { WorldModule } from './world/world.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { UserModule } from './user/user.module';
     GoodsModule,
     HeroModule,
     ShopModule,
+    WorldModule,
   ],
   controllers: [HealthController],
 })

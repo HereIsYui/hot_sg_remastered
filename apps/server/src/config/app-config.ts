@@ -23,6 +23,13 @@ const schema = z.object({
   CHAT_PORT: z.string().default('5308'),
   CHIBI_CHAT_HOST: z.string().default('127.0.0.1'),
   CHIBI_CHAT_PORT: z.string().default('7308'),
+  /** The 8-hour 野地刷新 job (regenerates abandoned wild fields); shares TICK_ENABLED's switch. */
+  WORLD_REFRESH_ENABLED: bool.default(true),
+  WORLD_REFRESH_INTERVAL_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(8 * 3600 * 1000),
 });
 
 export type AppConfig = z.infer<typeof schema>;

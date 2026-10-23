@@ -2600,6 +2600,102 @@ export const cases: DiffCase[] = [
       );
     },
   },
+  // --- world (stage5/world-server) ---------------------------------------------------------
+  {
+    name: 'getMapCity lists the famous cities',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      await s.command(session, 'getMapCity');
+    },
+  },
+  {
+    name: 'getBlockData for block 0 with the union marks',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      await s.command(session, 'getBlockData', [0, 1]);
+    },
+  },
+  {
+    name: 'getWorldFieldInfo reads one tile',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const cid = await lastCity(s, session.uid);
+      await s.command(session, 'getWorldFieldInfo', cid2wid(cid));
+    },
+  },
+  {
+    name: "getWorldCityInfo flags the player's own city",
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const cid = await lastCity(s, session.uid);
+      await s.command(session, 'getWorldCityInfo', 1, cid);
+    },
+  },
+  {
+    name: 'getGovernInfo for the home city',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const cid = await lastCity(s, session.uid);
+      await s.command(session, 'getGovernInfo', cid);
+    },
+  },
+  {
+    name: 'getUserFields lists held wild fields',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      await s.command(session, 'getUserFields');
+    },
+  },
+  {
+    name: 'getActionField with no activity field live',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      await s.command(session, 'getActionField', 1);
+    },
+  },
+  {
+    name: 'checkCanInvade on the home city (plain -> allowed)',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const cid = await lastCity(s, session.uid);
+      await s.command(session, 'checkCanInvade', cid);
+    },
+  },
+  {
+    name: 'favourites: add, list, comment, delete round trip',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const cid = await lastCity(s, session.uid);
+      // add throws the success message; both sides return the same thrown text.
+      await s.command(session, 'addFavourites', cid);
+      await s.command(session, 'getFavouritesList');
+      const [row] = await s.query<{ id: string }>(
+        'select id from sys_favourites where uid = ? and cid = ? order by id desc limit 1',
+        [session.uid, cid],
+      );
+      const favId = Number(row?.id ?? 0);
+      s.alias(favId, '<favid>');
+      await s.command(session, 'setFavouritesComments', favId, '前线城池');
+      await s.command(session, 'deleteFavourites', favId);
+    },
+  },
+  {
+    name: 'addFavourites rejects a duplicate',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const cid = await lastCity(s, session.uid);
+      await s.command(session, 'addFavourites', cid);
+      await s.command(session, 'addFavourites', cid);
+    },
+  },
+  {
+    name: 'markCity requires a union',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      // changle has no union in the shipped save -> No_Union (after the famous-city check).
+      await s.command(session, 'markCity', 215265);
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {
