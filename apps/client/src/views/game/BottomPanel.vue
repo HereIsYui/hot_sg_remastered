@@ -29,6 +29,12 @@ const FUNCTIONS = [
 /** `sys_alarm.mail`: an unread letter blinks the 邮件 button (BottomPanel.showMailAlarm). */
 const mailUnread = computed(() => parseInt(String(game.city.alarm?.mail ?? 0), 10) === 1);
 
+/** `sys_alarm.report`: an unread 战报 blinks the 战报 button (BottomPanel.showReportAlarm). */
+const reportUnread = computed(() => parseInt(String(game.city.alarm?.report ?? 0), 10) === 1);
+
+/** `sys_alarm.enemy`: incoming enemy troops light the 军情 indicator (BloodWar.onNotifyWarEvent). */
+const enemyAlarm = computed(() => parseInt(String(game.city.alarm?.enemy ?? 0), 10) === 1);
+
 /** Right offset of a function button by name, matching the FUNCTIONS layout. */
 function rightOf(name: (typeof FUNCTIONS)[number]): number {
   return 4 + 31 * (FUNCTIONS.length - 1 - FUNCTIONS.indexOf(name));
@@ -37,6 +43,7 @@ function rightOf(name: (typeof FUNCTIONS)[number]): number {
 /** The bottom-bar buttons wired so far; others stay inert until their modules are ported. */
 function onClick(name: (typeof FUNCTIONS)[number]): void {
   if (name === 'ButtonMail') game.openMail();
+  else if (name === 'ButtonReport') game.openReport();
 }
 
 const chatText = ref('');
@@ -60,6 +67,24 @@ const chatText = ref('');
       :bottom="4"
       :tip="i18n('Bar_BottomPanel_mail_alarm')"
       @click="onClick('ButtonMail')"
+    />
+    <!-- 战报 unread blink: overlays ButtonReport when sys_alarm.report is set. -->
+    <FxButton
+      v-if="reportUnread"
+      style-name="ButtonReportAlarm"
+      :right="rightOf('ButtonReport')"
+      :bottom="4"
+      :tip="i18n('Bar_BottomPanel_report_alarm')"
+      @click="onClick('ButtonReport')"
+    />
+    <!-- 军情: incoming-enemy indicator shown when sys_alarm.enemy is set (opens 战报 军情 tab). -->
+    <FxButton
+      v-if="enemyAlarm"
+      style-name="ButtonReportAlarm"
+      :right="rightOf('ButtonReport')"
+      :bottom="4"
+      :tip="i18n('Bar_BottomPanel_enemy_alarm') || '有敌军向你的城池进军'"
+      @click="onClick('ButtonReport')"
     />
     <FxImage :left="3" :top="4" :w="428" source="images/chatbar.png" />
     <FxButton :x="348" :y="9" :w="28" :h="24" style-name="ButtonSend" />

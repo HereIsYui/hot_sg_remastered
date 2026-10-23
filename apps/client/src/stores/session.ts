@@ -109,5 +109,9 @@ export const useSessionStore = defineStore('session', {
     troopDetail: null as TroopDetailRequest | null,
     /** CampaignDialog (出征) open over the 校场. */
     campaign: null as CampaignRequest | null,
+    /** Report (ReportDialog, 战报) open over the scene. */
+    report: null as { open: boolean } | null,
+    /** BattleDialog (战斗 view): the battle being watched, opened from a report or a troop. */
+    battle: null as { battleid: number; userIsAttack: boolean } | null,
   }),
 });

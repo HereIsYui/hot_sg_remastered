@@ -7,6 +7,7 @@ import { ExternService } from './extern.service';
 import { FakeDb, type Respond } from '../hero/fake-db.testutil';
 import { GameError } from '../common/game-error';
 import { StartTroopCommands } from './start-troop.commands';
+import type { WarEventService } from '../push/war-event.service';
 
 const lang = new LangService({
   waigua: { invalid: '数据异常' },
@@ -26,6 +27,7 @@ function build(rules: Respond[]) {
     new GoodsRules(db.scope) as unknown as GoodsRules,
     { completeTaskWithTaskid: async () => {} } as unknown as TaskRules,
     new ExternService(db.scope),
+    { notifyEnemyAlarm: () => 0 } as unknown as WarEventService,
   );
   return { cmd, db };
 }

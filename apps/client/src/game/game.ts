@@ -442,6 +442,8 @@ export class Game {
     this.session.mail = null;
     this.session.mailDetail = null;
     this.session.mailWrite = null;
+    this.session.report = null;
+    this.session.battle = null;
   }
 
   /** `TopPanel.onLevelClick`. */
@@ -547,6 +549,8 @@ export class Game {
     this.session.mail = null;
     this.session.mailDetail = null;
     this.session.mailWrite = null;
+    this.session.report = null;
+    this.session.battle = null;
   }
 
   /** `MailDialog.showMail`: open the detail dialog for a letter in `page` (one of MAIL_PAGE). */
@@ -825,6 +829,37 @@ export class Game {
 
   closeCampaign(): void {
     this.session.campaign = null;
+  }
+
+  // ---- 战报 / 战斗视图 (Report/ReportDialog, Troop/BattleDialog) ----
+
+  /** `BottomPanel.onReportClick` / `DialogManager.showReportDialog`: open the 战报 dialog. */
+  openReport(): void {
+    this.session.battle = null;
+    this.session.report = { open: true };
+  }
+
+  closeReport(): void {
+    this.session.report = null;
+    this.session.battle = null;
+  }
+
+  /**
+   * `ReportDetailPanel.onViewReport` / `BattleDialog` entry: open the 战斗 view for a battle,
+   * stacked over whatever opened it. `userIsAttack` drives the win/lose line and whose tactics
+   * the player may set (`setSoldierTactics`).
+   */
+  showBattle(battleid: number, userIsAttack = true): void {
+    this.session.battle = { battleid, userIsAttack };
+  }
+
+  closeBattle(): void {
+    this.session.battle = null;
+  }
+
+  /** `TroopFunc.setSoldierTactics`: order a soldier type for a battle (battle dialog only). */
+  sendBattleCommand(command: string, args: CommandArg[] = []): void {
+    void this.cmd.sendGlobalCommand('troop', command, args);
   }
 
   // ---- errors (Command.onReceivedCommand / faultHandler) ----

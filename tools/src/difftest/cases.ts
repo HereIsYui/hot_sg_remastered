@@ -3269,6 +3269,113 @@ export const cases: DiffCase[] = [
       await s.query('delete from mem_maneuver where id = 900100');
     },
   },
+  {
+    // ReportFunc.php readers. Seed two reports (one unread 军情 battle report, one read 内政
+    // report) and exercise the unread list, a typed tab, a soft delete and the battle detail.
+    // The battle engine normally writes these rows; here we insert PHP-shaped fixtures and only
+    // READ them, so the cases are deterministic without the engine running.
+    name: 'report list, unread filter, soft delete and detail',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      await s.query('delete from sys_report where uid = ?', [uid]);
+      await s.query('delete from sys_battle_report where battleid = ?', [990001]);
+      // An unread 军情 (type 0) battle report and a read 内政 (type 1) report.
+      await s.query(
+        `insert into sys_report
+          (uid, origincid, origincity, happencid, happencity, title, type, time, \`read\`, battleid, from_battlenet, content)
+         values (?, 100200, '甲城', 100201, '乙城', 2, 0, unix_timestamp(), 0, 990001, 0, '<b>占领</b>')`,
+        [uid],
+      );
+      await s.query(
+        `insert into sys_report
+          (uid, origincid, origincity, happencid, happencity, title, type, time, \`read\`, battleid, from_battlenet, content)
+         values (?, 0, '', 100200, '甲城', 16, 1, unix_timestamp(), 1, 0, 0, '天灾人祸')`,
+        [uid],
+      );
+      // Two battle rounds for the battle report above.
+      await s.query(
+        `insert into sys_battle_report (battleid, round, report) values (990001, 1, '<p>r1</p>')`,
+      );
+      await s.query(
+        `insert into sys_battle_report (battleid, round, report) values (990001, 2, '<p>r2</p>')`,
+      );
+      // The report list `time` is unix_timestamp() at insert; the two sides run a second or two
+      // apart, so compare it as an offset. Row 0 of each reply carries the report rows.
+      await s.command(session, 'getUnreadReport', -1, 0); // unread list (clears sys_alarm.report)
+      await s.command(session, 'getReport', 0, 0); // 军情 tab
+      await s.command(session, 'getReport', 1, 0); // 内政 tab (the read report)
+      await s.command(session, 'getReportDetail', 990001); // battle rounds
+      await s.command(session, 'getReportDetail', 0); // non-battle report -> []
+      // Soft-delete the first report; delReport re-reads the 军情 tab.
+      const [firstId] = await s.query<{ id: string }>(
+        'select id from sys_report where uid = ? and type = 0 order by id desc limit 1',
+        [uid],
+      );
+      await s.command(session, 'delReport', [Number(firstId?.id ?? 0)], 0, 0);
+      await s.query('delete from sys_report where uid = ?', [uid]);
+      await s.query('delete from sys_battle_report where battleid = ?', [990001]);
+    },
+  },
+  {
+    // TroopFunc.php battle readers (BattleDialog). Seed a running city battle and read the data /
+    // report / set a tactic. mem_battle* / sys_battle* are the engine's tables; we insert a minimal
+    // PHP-shaped fixture and read it the way TroopFunc did. setSoldierTactics writes only the
+    // player's own mem_battle_tactics row.
+    name: 'battle data, report and setting a soldier tactic',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const bid = 990002;
+      await s.query('delete from sys_battle where id = ?', [bid]);
+      await s.query('delete from mem_battle where id = ?', [bid]);
+      await s.query('delete from sys_battle_report where battleid = ?', [bid]);
+      await s.query('delete from mem_battle_tactics where battleid = ?', [bid]);
+      // A running (state 0) city battle: this player attacks, wall already down (wallhp 0).
+      await s.query(
+        `insert into sys_battle (id, type, attackuid, resistuid, state, result)
+         values (?, 0, ?, 1002, 0, 0)`,
+        [bid, uid],
+      );
+      await s.query(
+        `insert into mem_battle (id, type, attackcid, resistcid, attackhid, resisthid, wallhp)
+         values (?, 0, ?, ?, 0, 0, 0)`,
+        [bid, cid, cid + 1],
+      );
+      await s.query(
+        `insert into sys_battle_report (battleid, round, report) values (?, 1, '<p>fight</p>')`,
+        [bid],
+      );
+      await s.command(session, 'getBattleData', bid);
+      await s.command(session, 'getBattleReport', bid, 0);
+      // The player attacks, so may set their own (attack) side's tactic. sid 60 (>=51) maps to a
+      // soldier type; wallhp 0 means the row is replace-inserted with action2/target2 mirrored.
+      await s.command(session, 'setSoldierTactics', bid, true, 1, 2, 60);
+      await s.query('delete from sys_battle where id = ?', [bid]);
+      await s.query('delete from mem_battle where id = ?', [bid]);
+      await s.query('delete from sys_battle_report where battleid = ?', [bid]);
+      await s.query('delete from mem_battle_tactics where battleid = ?', [bid]);
+    },
+  },
+  {
+    // HeroFunc.php::getKingReward (Report/KingRewardPanel): the daily 五铢钱 payout. Reset the
+    // claim time so the reward is grantable, claim it, then claim again (refused same day). The
+    // granted amount depends on the king hero level, which the shipped save fixes.
+    name: 'king reward claims once per day',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      // Make the reward claimable: clear today's getrewardtime.
+      await s.query(
+        `insert into sys_user_level (uid, level, time, getrewardtime) values (?, 0, 0, 0)
+         on duplicate key update getrewardtime = 0`,
+        [uid],
+      );
+      await s.command(session, 'getKingReward'); // grants (or 当前没有您的君主将 on a save without one)
+      await s.command(session, 'getKingReward'); // 您已经领取过奖励 (if the first granted)
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {
