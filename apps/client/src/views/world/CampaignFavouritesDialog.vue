@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue';
 import { useGame } from '../../game/game';
+import { BUILDING_GROUND } from '../../game/cityGrid';
 import { parseFavouritesList, type FavouriteCity, type FavouriteTarget } from '../../game/world';
 import { i18n } from '../../i18n';
+import { useCityStore } from '../../stores/city';
 import { gameAlert, showAlert } from '../../ui/alert';
 import FxButton from '../../ui/FxButton.vue';
 import FxCanvas from '../../ui/FxCanvas.vue';
@@ -13,10 +15,11 @@ import CommentsDialog from './CommentsDialog.vue';
 /**
  * Ground/CampaignFavouritesDialog: the player's own cities (left) and the saved favourite targets
  * (right). A target can be deleted (`deleteFavourites`), commented (CommentsDialog ->
- * `setFavouritesComments`), or dispatched to — but 出征 opens the 暂未开放 placeholder because the
- * CampaignDialog is not ported yet. Loads via `getFavouritesList`.
+ * `setFavouritesComments`), or dispatched to via 出征, which opens the CampaignDialog with that
+ * target. Loads via `getFavouritesList`.
  */
 const game = useGame();
+const city = useCityStore();
 const g = (n: number) => i18n(`Ground_CampaignFavouritesDialog_${n}_1`);
 
 const cities = ref<FavouriteCity[]>([]);
@@ -49,9 +52,20 @@ async function onDelete(): Promise<void> {
   }
 }
 
-/** 出征: the original hands the cid to the CampaignDialog, not ported yet. */
+/** 出征: hand the selected favourite target's cid to the CampaignDialog (hosted by the 校场). */
 function onConfirm(): void {
-  gameAlert(i18n('_CommonSrc_notOpen') || '暂未开放');
+  const target = targets.value.find((t) => t.id === selectedId.value);
+  if (!target) {
+    gameAlert(i18n('Ground_CampaignFavouritesDialog_8_1') || '请选择一个出征目标');
+    return;
+  }
+  const ground = city.buildings.find((b) => b.bid === BUILDING_GROUND && b.level > 0);
+  if (!ground) {
+    gameAlert(i18n('World_WorldActionDialogSrc_noground') || '需要先建造校场');
+    return;
+  }
+  game.closeDialog();
+  game.showCampaign(ground.bid, ground.y * 10 + ground.x, target.cid, 0);
 }
 
 function editComment(target: FavouriteTarget): void {

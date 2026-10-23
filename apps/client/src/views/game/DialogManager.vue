@@ -43,6 +43,9 @@ import TaskDialog from '../task/TaskDialog.vue';
 import WallDialog from '../wall/WallDialog.vue';
 import CampaignFavouritesDialog from '../world/CampaignFavouritesDialog.vue';
 import WorldActionDialog from '../world/WorldActionDialog.vue';
+import CampaignDialog from '../ground/CampaignDialog.vue';
+import TroopDialog from '../troop/TroopDialog.vue';
+import TroopDetailDialog from '../troop/TroopDetailDialog.vue';
 
 /** DialogManager: the dialogs over the scene panels (only one shown at a time). */
 defineProps<{ x: number; y: number }>();
@@ -204,6 +207,23 @@ function choose(action: 'all' | 'level') {
       v-if="session.mailWrite"
       :reply="session.mailWrite.reply"
       :receiver="session.mailWrite.receiver"
+    />
+    <CampaignDialog
+      v-if="session.campaign"
+      :key="`campaign ${session.campaign.targetCid}`"
+      :ground-bid="session.campaign.groundBid"
+      :ground-param="session.campaign.groundParam"
+      :target-cid="session.campaign.targetCid"
+      :task-index="session.campaign.taskIndex"
+      @close="session.campaign = null"
+    />
+    <TroopDialog v-if="session.troopDialog" />
+    <TroopDetailDialog
+      v-if="session.troopDetail"
+      :key="`troopDetail ${session.troopDetail.troop.id}`"
+      :troop="session.troopDetail.troop"
+      :army-type="session.troopDetail.armyType"
+      @close="session.troopDetail = null"
     />
   </div>
 </template>

@@ -7,7 +7,12 @@ import { CommandClient, type CommandFailure, type DialogResult } from '../net/co
 import { LoginService, type LoginResult } from '../net/login';
 import { useCityStore, type BuildingState } from '../stores/city';
 import { useGlobalStore } from '../stores/global';
-import { useSessionStore, type PlainDialog, type View } from '../stores/session';
+import {
+  useSessionStore,
+  type PlainDialog,
+  type TroopDetailRequest,
+  type View,
+} from '../stores/session';
 import { cityPosition, parseCities, useUserStore } from '../stores/user';
 import { gameAlert, setAlertLabels, showAlert } from '../ui/alert';
 import { BUILDING_COLLEGE } from './cityGrid';
@@ -762,6 +767,64 @@ export class Game {
   /** `CampaignFavouritesDialog.loadList`: the 收藏 dialog over the scene. */
   showFavourites(): void {
     this.session.dialog = { name: 'favourites' };
+  }
+
+  // ---- 出征 / 军队 (Ground/CampaignDialog, Troop/TroopDialog) ----
+
+  /**
+   * `CallEvent("ExternService", method, args)`: the amfphp-style service calls the troop UI needs
+   * (`getTroopMaxTime`, `getEnemyTroopSet`, `saveEnemyTroopSet`). Returns the raw JSON result.
+   */
+  callExtern(method: string, args: CommandArg[] = []): Promise<unknown> {
+    return this.cmd.callService('ExternService', method, args);
+  }
+
+  /** `TopPanel.onArmyClick` / `DialogManager.showTroopDialog`: the 军队 dialog over the scene. */
+  showTroopDialog(): void {
+    this.session.troopDialog = true;
+  }
+
+  closeTroopDialog(): void {
+    this.session.troopDialog = false;
+  }
+
+  /**
+   * `DialogManager.showTroopDetailDialog`: the 军队详情 pop-up for a troop row, opened over the
+   * TroopDialog from the army / enemy / union panels.
+   */
+  showTroopDetail(
+    troop: TroopDetailRequest['troop'],
+    armyType: TroopDetailRequest['armyType'],
+  ): void {
+    this.session.troopDetail = { troop, armyType };
+  }
+
+  closeTroopDetail(): void {
+    this.session.troopDetail = null;
+  }
+
+  /**
+   * `GroundDialog` 出征 / `WorldActionDialog` army actions / `CampaignFavouritesDialog` 出征:
+   * open the CampaignDialog preset with a target cid and a task combo index (per the AS3
+   * `setTarget` / `setTask`). The 校场 (Ground) building hosts it, so its bid/param route the
+   * StartTroop / scheme dialog commands.
+   */
+  showCampaign(
+    groundBid: number,
+    groundParam: number,
+    targetCid?: number,
+    taskIndex?: number,
+  ): void {
+    this.session.campaign = {
+      groundBid,
+      groundParam,
+      targetCid: targetCid ?? this.city.cid,
+      taskIndex: taskIndex ?? 0,
+    };
+  }
+
+  closeCampaign(): void {
+    this.session.campaign = null;
   }
 
   // ---- errors (Command.onReceivedCommand / faultHandler) ----

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { CommandArg } from '@hot/shared';
 import { shallowRef } from 'vue';
-import { showAlert } from '../../ui/alert';
+import { useGame } from '../../game/game';
 import type { BuildingState } from '../../stores/city';
 import UpgradeBuildingDialog from '../building/UpgradeBuildingDialog.vue';
 import AttackTacticsDialog from './AttackTacticsDialog.vue';
@@ -36,6 +36,7 @@ const GET: Record<SubName, { cmd: string; ttype: number }> = {
 
 type Popup = { name: SubName; data: unknown } | { name: 'maneuver' };
 
+const game = useGame();
 const popup = shallowRef<Popup | null>(null);
 /** The sub-dialog awaiting its `get*` reply, and the ttype that reply must carry. */
 let pending: { name: SubName; ttype: number } | null = null;
@@ -66,7 +67,7 @@ function onReplyTtype(data: unknown[], ttype: number) {
       <GroundPanel
         :x="10"
         :y="118"
-        @campaign="showAlert('暂未开放')"
+        @campaign="game.showCampaign(building.bid, building.y * 10 + building.x)"
         @conscript="send('conscript', [], 4)"
         @resist="request(send, 'resist')"
         @wounded="request(send, 'wounded')"

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useGame } from '../../game/game';
+import { BUILDING_GROUND } from '../../game/cityGrid';
 import {
   cid2wid,
   makeCid,
@@ -11,6 +12,7 @@ import {
   type WorldFieldInfo,
 } from '../../game/world';
 import { i18n } from '../../i18n';
+import { useCityStore } from '../../stores/city';
 import { useUserStore } from '../../stores/user';
 import { useWorldStore } from '../../stores/world';
 import { gameAlert, showAlert } from '../../ui/alert';
@@ -21,14 +23,16 @@ import FxText from '../../ui/FxText.vue';
 
 /**
  * World/WorldActionDialog (shell): shows the clicked cell's field/city info and wires 收藏
- * (addFavourites) and 标记 (markCity). The army-action buttons (出征 / 侦察 / 掠夺 / 占领 / 运输 /
- * 建城 / 合城 / 管辖) are not ported yet, so they open the shared 暂未开放 placeholder.
+ * (addFavourites), 标记 (markCity) and the army actions. 出征 / 侦察 / 掠夺 / 占领 / 运输 / 派遣 open
+ * the CampaignDialog preset with this cell as the target; 建城 / 合城 / 管辖 are later waves and stay
+ * 暂未开放.
  */
 const props = defineProps<{ cid: number }>();
 
 const game = useGame();
 const user = useUserStore();
 const world = useWorldStore();
+const city = useCityStore();
 
 const t = (n: number) => i18n(`World_WorldActionDialogSrc_${n}`);
 
@@ -70,17 +74,35 @@ const isSelf = computed(
   () => cityInfo.value?.flag === 0 || (isCity.value && cityInfo.value?.uid === user.uid),
 );
 
-/** The army-action buttons, all deferred to the 暂未开放 placeholder for now. */
+/**
+ * The army-action buttons. 出征 / 侦察 / 掠夺 / 占领 / 运输 / 派遣 open the CampaignDialog preset with
+ * this cell as the target and the matching task combo index (per AS3 `setTask`); 建城 / 合城 / 管辖
+ * stay 暂未开放 (building merge / govern are later waves).
+ */
+const CAMPAIGN_ACTIONS: { key: string; label: string; taskIndex: number }[] = [
+  { key: 'dispatch', label: '出征', taskIndex: 0 },
+  { key: 'scout', label: '侦察', taskIndex: 0 },
+  { key: 'plunder', label: '掠夺', taskIndex: 1 },
+  { key: 'invade', label: '占领', taskIndex: 2 },
+  { key: 'transport', label: '运输', taskIndex: 3 },
+  { key: 'depute', label: '派遣', taskIndex: 4 },
+];
 const UNPORTED: { key: string; label: string }[] = [
-  { key: 'dispatch', label: '出征' },
-  { key: 'scout', label: '侦察' },
-  { key: 'plunder', label: '掠夺' },
-  { key: 'invade', label: '占领' },
-  { key: 'transport', label: '运输' },
   { key: 'build', label: '建城' },
   { key: 'merge', label: '合城' },
   { key: 'govern', label: '管辖' },
 ];
+
+/** `WorldActionDialog.showCampaignDialog`: open 出征 from the current city's 校场 at this target. */
+function onCampaign(taskIndex: number): void {
+  const ground = city.buildings.find((b) => b.bid === BUILDING_GROUND && b.level > 0);
+  if (!ground) {
+    gameAlert(i18n('World_WorldActionDialogSrc_noground') || '需要先建造校场');
+    return;
+  }
+  game.closeDialog();
+  game.showCampaign(ground.bid, ground.y * 10 + ground.x, props.cid, taskIndex);
+}
 
 function onAddFavourites(): void {
   // addFavourites throws its result as a `**`/plain message -> handled by the global failure path
@@ -197,16 +219,27 @@ onUnmounted(unregister);
       @click="onSendMessage"
     />
 
-    <!-- army-action buttons (暂未开放) -->
+    <!-- army-action buttons: campaign targets wired, 建城/合城/管辖 暂未开放 -->
     <div v-if="!isSelf" class="actions">
       <FxButton
-        v-for="(a, i) in UNPORTED"
+        v-for="(a, i) in CAMPAIGN_ACTIONS"
         :key="a.key"
         :x="20 + (i % 4) * 90"
         :y="256 + Math.floor(i / 4) * 34"
         :w="80"
         :h="28"
         style-name="ButtonGreen"
+        :label="a.label"
+        @click="onCampaign(a.taskIndex)"
+      />
+      <FxButton
+        v-for="(a, i) in UNPORTED"
+        :key="a.key"
+        :x="20 + ((i + CAMPAIGN_ACTIONS.length) % 4) * 90"
+        :y="256 + Math.floor((i + CAMPAIGN_ACTIONS.length) / 4) * 34"
+        :w="80"
+        :h="28"
+        style-name="ButtonGrey"
         :label="a.label"
         @click="onUnported"
       />
@@ -217,10 +250,7 @@ onUnmounted(unregister);
       :y="330"
       :w="360"
       :fx="{ color: 14329120, fontSize: 11 }"
-      :text="
-        i18n('_CommonSrc_notOpen') ||
-        '出征 / 侦察 / 掠夺 / 占领 / 运输 / 建城 / 合城 / 管辖 暂未开放'
-      "
+      :text="i18n('_CommonSrc_notOpen') || '建城 / 合城 / 管辖 暂未开放'"
     />
   </FxCanvas>
 </template>
