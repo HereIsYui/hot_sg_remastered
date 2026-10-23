@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { sql } from 'kysely';
 import { ScoutService } from '../battle/scout';
+import { BattleArrivalService } from '../battle/battle-arrival.service';
 import { LangService } from '../common/lang.service';
 import { sprintf } from '../common/sprintf';
 import { CityRules, cid2wid } from '../core/city-rules.service';
@@ -27,11 +28,9 @@ type Row = Record<string, unknown>;
  *     turning home, and the target owner's alarm. Kept in the battle module so the parallel wave
  *     owning task 3/4/9 does not collide with it.
  *
- * NOT ported (battle wave): the arrival of a 掠夺/占领/攻击 troop (task 3/4/9) starts a battle
- * (battleAdd / defcityadd / mem_battle). That branch is isolated behind `battleArrivalNotPorted`,
- * which leaves the `sys_troops` row untouched so the next wave can drop the engine in without data
- * loss. 战场 tasks (7/8), and any battlefield-slot arrival (`battlefieldid != 0`), are routed to the
- * same holder.
+ * NOW ported (battle wave): 侦察 (task 2) is delegated to `ScoutService`; 掠夺/占领/攻击
+ * (task 3/4/9) start a battle through `BattleArrivalService` (defcityadd / battleAdd / mem_battle).
+ * 战场 tasks (7/8) and battlefield troops (bid != 0) stay routed to `battleArrivalNotPorted`.
  */
 @Injectable()
 export class TroopTick {
@@ -44,6 +43,7 @@ export class TroopTick {
     private readonly heroes: HeroRules,
     private readonly report: ReportService,
     private readonly scout: ScoutService,
+    private readonly arrival: BattleArrivalService,
   ) {}
 
   @TickHandler(TickOrder.Troop)
@@ -183,10 +183,29 @@ export class TroopTick {
           return;
         }
         case 3:
-        case 4:
-        case 9: {
-          // 掠夺/占领/攻击 到达即开战 —— 战斗引擎尚未移植。
-          this.battleArrivalNotPorted(row);
+        case 9:
+        case 4: {
+          // 掠夺/占领/攻击 到达即开战 —— delegate to the ported battle arrival (defcityadd/battleAdd,
+          // empty-target early-outs, mem_battle creation). It performs its own writes and reports,
+          // leaving the troop in state 3 bound to the new battle (or turned home on an early-out).
+          await this.arrival.handle({
+            row,
+            uid,
+            hid,
+            cid,
+            id,
+            targetcid,
+            task,
+            state,
+            field,
+            type,
+            cityname,
+            targetcityname,
+            happencid,
+            soldierArray,
+            content,
+            sProvince: phpNum(field.province),
+          });
           return;
         }
         default: {

@@ -16,8 +16,8 @@ import { TroopTick } from './troop.tick';
  * are the 战报 + 战斗视图 read side; the battle ENGINE that writes mem_battle* / sys_report is the
  * parallel wave. The 洛阳 (luoyangTroopStart) dispatch is left to a later wave.
  *
- * `BattleModule` is imported so `TroopTick` can delegate the task-2 (侦察) arrival to `ScoutService`
- * (and, later, a patrol fight through `BattleEngineService`).
+ * `BattleModule` is imported so `TroopTick` can delegate 侦察 to `ScoutService` and
+ * 掠夺/占领/攻击 to `BattleArrivalService`.
  */
 @Module({
   imports: [BattleModule],

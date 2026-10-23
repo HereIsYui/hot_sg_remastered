@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { ScoutService } from '../battle/scout';
+import { BattleArrivalService } from '../battle/battle-arrival.service';
 import { CityRules } from '../core/city-rules.service';
 import { HeroRules } from '../core/hero-rules.service';
 import { LangService } from '../common/lang.service';
 import { MailService } from '../core/mail.service';
+import { RandomService } from '../core/random.service';
 import { ReportService } from '../core/report.service';
 import { TaskRules } from '../core/task-rules.service';
 import { UserRules } from '../core/user-rules.service';
@@ -24,8 +26,19 @@ const lang = new LangService({
   battle: { patrol_report_soldier: { '1': '民夫', '3': '斥候' } },
 });
 
+const random = { randRange: () => 0, mtRand: () => 0 } as unknown as RandomService;
+
 function build(rules: Respond[]) {
   const db = new FakeDb(rules);
+  const arrival = new BattleArrivalService(
+    db.scope,
+    lang,
+    new CityRules(db.scope),
+    new HeroRules(db.scope),
+    new TaskRules(db.scope, new UserRules(db.scope)),
+    new ReportService(db.scope, new MailService(db.scope)),
+    random,
+  );
   const tick = new TroopTick(
     db.scope,
     lang,
@@ -38,6 +51,7 @@ function build(rules: Respond[]) {
       new ReportService(db.scope, new MailService(db.scope)),
       new TaskRules(db.scope, new UserRules(db.scope)),
     ),
+    arrival,
   );
   return { tick, db };
 }
@@ -145,47 +159,6 @@ describe('TroopTick.handleTroop', () => {
     await tick.handleTroop();
     expect(db.executed.some((q) => /delete from sys_troops where id = \?/i.test(q.sql))).toBe(true);
     expect(db.executed.some((q) => /insert into sys_city_soldier/i.test(q.sql))).toBe(true);
-  });
-
-  it('leaves a battle arrival (task 4, state 0) untouched — battle engine not ported', async () => {
-    const { tick, db } = build([
-      {
-        match: /from sys_troops\s+where endtime > 0/i,
-        rows: [
-          {
-            id: 3,
-            uid: 1001,
-            hid: 42,
-            cid: 3003,
-            targetcid: 5005,
-            task: 4,
-            state: 0,
-            battlefieldid: 0,
-            soldiers: '1,1,100',
-            resource: '0',
-            people: 0,
-            fooduse: 0,
-          },
-        ],
-      },
-      // field + names + inwar run before the task switch reaches the battle branch
-      {
-        match: /select \* from mem_world where wid = \?/i,
-        rows: [{ wid: 1, type: 1, ownercid: 0 }],
-      },
-      { match: /select uid from sys_troops where cid = \? limit 1/i, rows: [] },
-      { match: /select \* from sys_user where uid = \?/i, rows: [{ union_id: 0 }] },
-      { match: /select c.name from mem_world m/i, rows: [{ name: '野地' }] },
-      { match: /select name from sys_city where cid = \?/i, rows: [] },
-      NO(/.*/),
-    ]);
-    await tick.handleTroop();
-    // No mutation of the troop row occurred.
-    expect(
-      db.executed.every(
-        (q) => !/update sys_troops/i.test(q.sql) && !/delete from sys_troops/i.test(q.sql),
-      ),
-    ).toBe(true);
   });
 
   it('leaves a battlefield troop (bid != 0) untouched', async () => {
