@@ -2997,6 +2997,165 @@ export const cases: DiffCase[] = [
       await s.query('delete from sys_mail_box where fromuid = ?', [session.uid]);
     },
   },
+  {
+    // 军队面板 reads (TroopFunc.php) and 鸿胪寺 driving-permission toggles. All deterministic:
+    // the lists annotate the player's own rows, the toggles write sys_allow_union_troop.
+    name: 'troop panel lists and union-troop permissions',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      // A clean slate, then one marching troop (state 0, task 0 transport) and one stationed
+      // (state 4, task 1 dispatch) on this player.
+      await s.query('delete from sys_troops where uid = ?', [uid]);
+      await s.query('delete from sys_allow_union_troop where uid = ?', [uid]);
+      await s.query(
+        `insert into sys_troops
+          (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
+         values (?, ?, 0, ?, 0, 0, unix_timestamp(), 600, unix_timestamp() + 600, '1,1,100', '0', 0, 0)`,
+        [uid, cid, cid + 1],
+      );
+      await s.query(
+        `insert into sys_troops
+          (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
+         values (?, ?, 0, ?, 1, 4, unix_timestamp(), 600, unix_timestamp(), '1,1,50', '0', 0, 0)`,
+        [uid, cid, cid + 1],
+      );
+      // getArmyTroops clears the troops alarm and lists state<4 rows; targetcity depends on the
+      // tile type, which may be a wild field or a city — unordered guards row order.
+      await s.command(session, 'getArmyTroops');
+      s.unordered(0);
+      await s.command(session, 'getStayTroops');
+      s.unordered(1);
+      await s.command(session, 'getUnionTroops');
+      await s.command(session, 'getEnemyTroops');
+
+      // 鸿胪寺 toggles (dialog on 鸿胪寺 bid 12; the address is not validated by these handlers).
+      await s.dialog(session, cid, 12, 0, 'allowUnionTroop', 1);
+      await s.dialog(session, cid, 12, 0, 'allowAntiPlunder', 1);
+      await s.dialog(session, cid, 12, 0, 'allowAntiInvade', 1);
+      await s.dialog(session, cid, 12, 0, 'allowUnionTroop', 0);
+
+      await s.query('delete from sys_troops where uid = ?', [uid]);
+      await s.query('delete from sys_allow_union_troop where uid = ?', [uid]);
+    },
+  },
+  {
+    // callBackTroop / kickTroop per-state behaviour (TroopFunc.php). All deterministic time deltas
+    // are offset-compared via the sys_troops table rule.
+    name: 'troop recall and kick',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await s.query('delete from sys_troops where uid = ?', [uid]);
+      // An advancing troop (state 0) and a stationed one (state 4) to recall.
+      await s.query(
+        `insert into sys_troops
+          (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, noback)
+         values (?, ?, 0, ?, 2, 0, unix_timestamp() - 100, 600, unix_timestamp() + 500, '1,3,10', '0', 0)`,
+        [uid, cid, cid + 2000],
+      );
+      const advId = Number(
+        (
+          await s.query<{ id: string }>('select max(id) as id from sys_troops where uid = ?', [uid])
+        )[0]?.id,
+      );
+      await s.command(session, 'callBackTroop', advId);
+      // Recall a stationed troop with a hero.
+      await s.query(
+        `insert into sys_troops
+          (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource)
+         values (?, ?, 0, ?, 1, 4, unix_timestamp(), 600, unix_timestamp(), '1,1,20', '0')`,
+        [uid, cid, cid + 1],
+      );
+      const stayId = Number(
+        (
+          await s.query<{ id: string }>('select max(id) as id from sys_troops where uid = ?', [uid])
+        )[0]?.id,
+      );
+      await s.command(session, 'callBackTroop', stayId);
+      // An unknown troop and a battling one (state 3) are refused.
+      await s.command(session, 'callBackTroop', 99999999);
+      await s.query(
+        `insert into sys_troops
+          (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource)
+         values (?, ?, 0, ?, 3, 3, unix_timestamp(), 600, unix_timestamp(), '1,1,20', '0')`,
+        [uid, cid, cid + 1],
+      );
+      const battleId = Number(
+        (
+          await s.query<{ id: string }>('select max(id) as id from sys_troops where uid = ?', [uid])
+        )[0]?.id,
+      );
+      await s.command(session, 'callBackTroop', battleId);
+      await s.query('delete from sys_troops where uid = ?', [uid]);
+    },
+  },
+  {
+    // 出征方案 (getTroopScheme / setTroopScheme) — pure read/write of sys_user_troopScheme.
+    name: 'troop scheme save and load',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const ground = (func: string, ...args: unknown[]) =>
+        s.dialog(session, cid, 8, 40, func, ...args);
+      await s.query('delete from sys_user_troopScheme where uid = ?', [uid]);
+      await ground('getTroopScheme', 1); // empty
+      await ground('setTroopScheme', 1, '2,1,100,3,50'); // insert
+      await ground('getTroopScheme', 1);
+      await ground('setTroopScheme', 1, '3,1,100,3,50,7,20'); // update
+      await ground('getTroopScheme', 1);
+      await ground('setTroopScheme', 9, 'x'); // out of range → 数据异常
+      await ground('getTroopScheme', 0); // out of range → 数据异常
+      await s.query('delete from sys_user_troopScheme where uid = ?', [uid]);
+    },
+  },
+  {
+    // ExternService.getTroopMaxTime — always 0 now (the 2011 promo window is closed on both sides).
+    name: 'getTroopMaxTime is 0 outside the promo window',
+    run: (s) => s.service('ExternService', 'getTroopMaxTime', [120, 340]),
+  },
+  {
+    // HandleTroop tick (cfg_js.php, TickOrder.Troop): the non-battle settlements. A transport
+    // arrival (task 0) deposits resources and turns home; a return (state 1) restores soldiers
+    // and deletes the row. The battle arrivals (task 2/3/4/9) are left in place by both sides
+    // (new: not ported; legacy: no backend settles the queued battle in this harness).
+    name: 'troop tick settles transport arrival and return',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await s.query('delete from sys_troops where uid = ?', [uid]);
+      // Transport to the player's OWN adjacent tile that is a city they own, so the arrival path
+      // is the self-city deposit, not a battle. Use the same city as origin and target+0 is
+      // disallowed, so send to the city itself via a self-field is avoided; instead settle a
+      // transport that is already due and whose target is this very city (self union, type 0).
+      await s.query(
+        `insert into sys_troops
+          (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
+         values (?, ?, 0, ?, 0, 0, unix_timestamp() - 600, 600, unix_timestamp() - 1, '1,1,100', '0,10,0,0,0', 0, 0)`,
+        [uid, cid, cid],
+      );
+      // A return-home troop (state 1) that is due: soldiers go back to the city, row deleted.
+      await s.query(
+        `insert into sys_troops
+          (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
+         values (?, ?, 0, ?, 0, 1, unix_timestamp() - 600, 600, unix_timestamp() - 1, '1,1,40', '0', 0, 0)`,
+        [uid, cid, cid + 1],
+      );
+      // A battle arrival (task 4, state 0) due: both sides leave it in place.
+      await s.query(
+        `insert into sys_troops
+          (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
+         values (?, ?, 0, ?, 4, 0, unix_timestamp() - 600, 600, unix_timestamp() - 1, '1,3,10', '0', 0, 0)`,
+        [uid, cid, cid + 3000],
+      );
+      await s.tick('HandleTroop');
+      await s.query('delete from sys_troops where uid = ?', [uid]);
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {

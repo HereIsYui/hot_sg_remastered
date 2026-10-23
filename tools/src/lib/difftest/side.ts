@@ -7,6 +7,7 @@ import type { SideDb } from './side-db.ts';
 
 /** cfg_js.php's settlement functions and the server's TickOrder slot porting each. */
 export const TICK_SLOTS = {
+  HandleTroop: 10,
   HandleHeroHexprs: 30,
   UpdateUsersCurse: 40,
   UpdateUsersTechnic: 50,
@@ -53,6 +54,7 @@ export function legacyTarget(client = new LegacyClient()): Target {
         $cfg = file_get_contents("cfg_js.php");
         preg_match('/function getNamePosition\\b.*?(?=function SoBitSo)/s', $cfg, $m); eval($m[0]);
         preg_match('/function HandleHeroHexprs\\b.*?(?=function HandleTroop)/s', $cfg, $h); eval($h[0]);
+        preg_match('/function HandleTroop\\b.*?(?=function del\\b)/s', $cfg, $t); eval($t[0]);
         ${reportCron} ${fn}();`;
       const out = capture('docker', [
         'compose',

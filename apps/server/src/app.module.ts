@@ -18,6 +18,7 @@ import { RankModule } from './rank/rank.module';
 import { ShopModule } from './shop/shop.module';
 import { TaskModule } from './task/task.module';
 import { TickModule } from './tick/tick.module';
+import { TroopModule } from './world/troop.module';
 import { UserModule } from './user/user.module';
 import { WorldModule } from './world/world.module';
 
@@ -43,6 +44,7 @@ import { WorldModule } from './world/world.module';
     ShopModule,
     WorldModule,
     MailModule,
+    TroopModule,
   ],
   controllers: [HealthController],
 })
