@@ -29,6 +29,24 @@ export class LegacyClient {
     return parseGatewayResponse<T>(service, text);
   }
 
+  /**
+   * An amfphp service method whose PHP signature takes SPREAD positional arguments (e.g.
+   * `ExternService::getTroopMaxTime($x, $y)`), as opposed to the single-`$param`-array convention
+   * every Command/Login/CityCommand method uses. The json gateway (Gateway.php) builds the
+   * argument list from the URL PATH segments after `Service.method` and appends the raw POST body
+   * as one extra trailing argument, so a method expecting N positional args is reached by putting
+   * each arg in its own path segment — which is exactly what the Flash client's `CallEvent` did.
+   * Each segment is JSON so the gateway's deserializer decodes it back to its real type.
+   */
+  async callSpread<T = unknown>(service: string, args: unknown[]): Promise<T> {
+    const path = args.map((a) => encodeURIComponent(JSON.stringify(a))).join('/');
+    const url = path ? `${this.gateway}/${service}/${path}` : `${this.gateway}/${service}`;
+    const res = await fetch(url, { method: 'POST' });
+    const text = await res.text();
+    if (!res.ok) throw new Error(`${service}: HTTP ${res.status}`);
+    return parseGatewayResponse<T>(service, text);
+  }
+
   async login(passport: string, passtype = 'testpassport'): Promise<LegacySession> {
     const ret = await this.call<unknown[]>('Login.doLogin', [
       this.clientVersion,

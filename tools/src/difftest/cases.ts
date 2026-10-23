@@ -1,8 +1,16 @@
 import type { Side } from '../lib/difftest/side.ts';
+import type { TableRule } from '../lib/difftest/normalize.ts';
 
 export interface DiffCase {
   name: string;
   run(side: Side): Promise<unknown>;
+  /**
+   * Per-case overrides for the table comparison, merged over (and winning against) the global
+   * `tableRules` for THIS case only. Use it to relax a column that is only nondeterministic — or
+   * only recomputed off to one side — in this specific scenario, instead of blunting the global
+   * rule for every case. Each entry replaces the global rule for that table wholesale.
+   */
+  tables?: Record<string, TableRule>;
 }
 
 function cid2wid(cid: number): number {
@@ -2803,6 +2811,11 @@ export const cases: DiffCase[] = [
       await s.query('delete from sys_user_tactics where uid = ?', [uid]);
       await s.query('delete from sys_city_tactics where cid = ?', [cid]);
     },
+    // 募兵 grants rand(600,1800) soldiers (GroundFunc.php::conscript); PHP rand() and the new
+    // server's RandomService are both unseeded with no shared source, so the granted row's count
+    // is nondeterministic. Ignore it for THIS case only — scoped here instead of globally, so
+    // every OTHER case (e.g. StartTroop deducting soldiers) still compares the count exactly.
+    tables: { sys_city_soldier: { ignore: ['count'] } },
   },
   {
     // 伤兵 / 俘虏 / 逃兵 handling: 治疗 / 招降 / 劝说 (gold) and 遣散 / 释放. All throw a message;
@@ -3023,12 +3036,21 @@ export const cases: DiffCase[] = [
       );
       // getArmyTroops clears the troops alarm and lists state<4 rows; targetcity depends on the
       // tile type, which may be a wild field or a city — unordered guards row order.
-      await s.command(session, 'getArmyTroops');
+      // getArmyTroops / getEnemyTroops / getStayTroops each take a 合法标志 as their first arg (the
+      // client sends serverTime()); an empty one marks the caller a 外挂 and writes
+      // log_waigua_online. The real client always sends it, so pass a non-empty sign — otherwise
+      // the sides diverge on an anti-cheat log the normal flow never writes. (getUnionTroops has no
+      // such check.)
+      await s.command(session, 'getArmyTroops', 1);
       s.unordered(0);
-      await s.command(session, 'getStayTroops');
+      // The marching troop's starttime/endtime are unix_timestamp() and unix_timestamp()+600 at
+      // insert time; the two sides run a second or two apart, so compare them as offsets.
+      s.offset(4, '*', 'starttime');
+      s.offset(4, '*', 'endtime');
+      await s.command(session, 'getStayTroops', 1);
       s.unordered(1);
       await s.command(session, 'getUnionTroops');
-      await s.command(session, 'getEnemyTroops');
+      await s.command(session, 'getEnemyTroops', 1);
 
       // 鸿胪寺 toggles (dialog on 鸿胪寺 bid 12; the address is not validated by these handlers).
       await s.dialog(session, cid, 12, 0, 'allowUnionTroop', 1);
@@ -3118,6 +3140,55 @@ export const cases: DiffCase[] = [
     run: (s) => s.service('ExternService', 'getTroopMaxTime', [120, 340]),
   },
   {
+    // ExternService.getEnemyTroopSet / saveEnemyTroopSet — the 敌军过滤 panel reads and writes
+    // sys_enemy_troop_filter and marks goal 539. saveEnemyTroopSet needs 烽火台 >= 5. The home
+    // city (209355) ships with a level-15 烽火台, so the save path is exercised directly; a
+    // temporary drop to level 4 drives the reject branch, then the level is restored.
+    name: 'enemy troop filter reads, saves and gates on 烽火台 level',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await s.query('delete from sys_enemy_troop_filter where cid = ?', [cid]);
+      await s.query('delete from sys_user_goal where uid = ? and gid = 539', [uid]);
+
+      // Empty to start.
+      await s.service('ExternService', 'getEnemyTroopSet', [cid]);
+      // Save two action thresholds; marks goal 539.
+      await s.service('ExternService', 'saveEnemyTroopSet', [
+        cid,
+        [
+          { action: 2, count: 100 },
+          { action: 3, count: 50 },
+        ],
+      ]);
+      // Read them back (PRIMARY KEY (cid, action) orders rows deterministically).
+      await s.service('ExternService', 'getEnemyTroopSet', [cid]);
+      // Update one threshold in place (on duplicate key).
+      await s.service('ExternService', 'saveEnemyTroopSet', [cid, [{ action: 2, count: 250 }]]);
+      await s.service('ExternService', 'getEnemyTroopSet', [cid]);
+
+      // 烽火台 below level 5 rejects with enemyfilter.firelevelhow.
+      const [bale] = await s.query<{ level: string }>(
+        'select level from sys_building where cid = ? and bid = 19 limit 1',
+        [cid],
+      );
+      await s.query('update sys_building set level = 4 where cid = ? and bid = 19', [cid]);
+      await s.service('ExternService', 'saveEnemyTroopSet', [cid, [{ action: 2, count: 10 }]]);
+      // The amfphp fault carries a faultDetail = "<php path> on line N"; the new server has no PHP
+      // source location and sends an empty one. Mask it — only faultCode/faultString are the
+      // contract. (Both sides now emit the field, so masking is symmetric.)
+      s.mask('faultDetail');
+      await s.query('update sys_building set level = ? where cid = ? and bid = 19', [
+        Number(bale?.level ?? 15),
+        cid,
+      ]);
+
+      await s.query('delete from sys_enemy_troop_filter where cid = ?', [cid]);
+      await s.query('delete from sys_user_goal where uid = ? and gid = 539', [uid]);
+    },
+  },
+  {
     // HandleTroop tick (cfg_js.php, TickOrder.Troop): the non-battle settlements. A transport
     // arrival (task 0) deposits resources and turns home; a return (state 1) restores soldiers
     // and deletes the row. The battle arrivals (task 2/3/4/9) are left in place by both sides
@@ -3145,15 +3216,30 @@ export const cases: DiffCase[] = [
          values (?, ?, 0, ?, 0, 1, unix_timestamp() - 600, 600, unix_timestamp() - 1, '1,1,40', '0', 0, 0)`,
         [uid, cid, cid + 1],
       );
-      // A battle arrival (task 4, state 0) due: both sides leave it in place.
+      // A battle arrival (task 4) that is NOT due yet: endtime in the future, so neither side's
+      // HandleTroop (both select `endtime <= now and state in (0,1)`) picks it up — it is left in
+      // place exactly. A *due* battle arrival would send the legacy tick into battleAdd()/the
+      // battle engine (unported here; battleArrivalNotPorted on the new side), which is the battle
+      // wave's job, not this one.
       await s.query(
         `insert into sys_troops
           (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
-         values (?, ?, 0, ?, 4, 0, unix_timestamp() - 600, 600, unix_timestamp() - 1, '1,3,10', '0', 0, 0)`,
+         values (?, ?, 0, ?, 4, 0, unix_timestamp(), 600, unix_timestamp() + 600, '1,3,10', '0', 0, 0)`,
         [uid, cid, cid + 3000],
       );
       await s.tick('HandleTroop');
       await s.query('delete from sys_troops where uid = ?', [uid]);
+    },
+    // The legacy tick harness boots a full request (global.php), whose SetCityBaseProduce
+    // recomputes every resource cap from the bootstrap city's building levels — re-deriving the
+    // caps (6_010_000 etc.) that the shipped save stores slightly stale (6_000_000). The new
+    // server's /api/debug/tick runs only HandleTroop, not that bootstrap, so the caps keep their
+    // stored values. The recompute is request-setup noise unrelated to HandleTroop, so ignore the
+    // *_max columns for this case (the resource amounts, add rates and everything else compare).
+    tables: {
+      mem_city_resource: {
+        ignore: ['gold_max', 'food_max', 'wood_max', 'rock_max', 'iron_max'],
+      },
     },
   },
 ];

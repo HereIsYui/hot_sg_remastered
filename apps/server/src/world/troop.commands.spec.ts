@@ -129,10 +129,25 @@ describe('TroopCommands permission toggles', () => {
     expect(db.executed.some((q) => /on duplicate key update .allow. = \?/i.test(q.sql))).toBe(true);
   });
 
-  it('allowAntiPlunder returns 0 when no row exists yet', async () => {
+  it('allowAntiPlunder defaults to 1 when the row is still missing (UnionFunc default)', async () => {
+    // getAllowAntiPlunder returns 1 when sql_fetch_one_cell finds NO row (`=== false`), unlike
+    // getAllowUnionTroop which defaults to 0. A player with no row is protected by default.
     const { cmd } = build([
       NO(/insert into sys_allow_union_troop \(uid, anti_plunder\)/i),
       NO(/select anti_plunder from sys_allow_union_troop/i),
+      NO(/.*/),
+    ]);
+    const ret = await cmd.allowAntiPlunder(ctx, [0]);
+    expect(ret).toEqual([1]);
+  });
+
+  it('allowAntiPlunder returns a stored 0 as-is (not folded into the default)', async () => {
+    const { cmd } = build([
+      NO(/insert into sys_allow_union_troop \(uid, anti_plunder\)/i),
+      {
+        match: /select `anti_plunder` from sys_allow_union_troop where uid = \?/i,
+        rows: [{ anti_plunder: 0 }],
+      },
       NO(/.*/),
     ]);
     const ret = await cmd.allowAntiPlunder(ctx, [0]);

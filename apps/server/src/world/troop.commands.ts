@@ -68,15 +68,30 @@ export class TroopCommands {
     return [await this.allowFlag(ctx.uid, 'anti_invade')];
   }
 
-  /** CityFunc.php::allowAutoDiscard reader shared with getStayTroops (getAllowAutoDiscard). */
+  /**
+   * CityFunc.php::getAllowAutoDiscard — the 自动遣散 flag lives in its OWN table
+   * (`sys_allow_auto_discard`), not a column of `sys_allow_union_troop`. When a player has no row
+   * yet the legacy reader seeds one with `allow = 1` and returns 1, so a fresh player defaults to
+   * auto-discard ON; mirror both the read and the seeding insert.
+   */
   private async autoDiscardFlag(uid: number): Promise<unknown> {
-    const v = await this.cell(
-      sql<Row>`select auto_discard from sys_allow_union_troop where uid = ${uid}`,
-    );
-    return phpEmpty(v) ? 0 : v;
+    const row = await this.one(sql<Row>`select * from sys_allow_auto_discard where uid = ${uid}`);
+    if (row === false) {
+      await sql`insert into sys_allow_auto_discard (allow, uid) values (1, ${uid})`.execute(
+        this.scope.db,
+      );
+      return 1;
+    }
+    return row.allow;
   }
 
-  /** utils.php::getAllow* readers (the column defaults to 0 when the row is missing). */
+  /**
+   * UnionFunc.php::getAllow* readers. `allow` (允许盟友驻军) defaults to 0 when the row is missing;
+   * `anti_plunder` (防掠夺) and `anti_invade` (防占领) both default to 1 — a player with no row is
+   * protected by default. `sql_fetch_one_cell` returns false only when NO row exists, so an
+   * existing row's stored 0 is kept as-is; `phpEmpty` would wrongly fold a stored 0 into the
+   * default, so the missing-row test is on the row, not the value.
+   */
   private async allowFlag(
     uid: number,
     column: 'allow' | 'anti_plunder' | 'anti_invade',
@@ -84,7 +99,8 @@ export class TroopCommands {
     const v = await this.cell(
       sql<Row>`select ${sql.ref(column)} from sys_allow_union_troop where uid = ${uid}`,
     );
-    return phpEmpty(v) ? 0 : v;
+    if (v !== false && v !== undefined) return v;
+    return column === 'allow' ? 0 : 1;
   }
 
   // ─────────────────────────── kick / recall ───────────────────────────

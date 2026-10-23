@@ -70,7 +70,15 @@ export class GatewayController {
       return result === undefined ? null : result;
     } catch (err) {
       if (!(err instanceof GameError)) throw err;
-      return { faultCode: AMF_RUNTIME_ERROR, faultString: this.lang.messageOf(err) };
+      // amfphp serializes a service exception as a 3-field fault: faultCode, faultString and a
+      // faultDetail carrying the PHP file+line. We have no PHP source location, so faultDetail is
+      // an empty string; the differential test masks it since the legacy value is an environment
+      // path. The client only reads faultString / faultCode.
+      return {
+        faultCode: AMF_RUNTIME_ERROR,
+        faultDetail: '',
+        faultString: this.lang.messageOf(err),
+      };
     }
   }
 }

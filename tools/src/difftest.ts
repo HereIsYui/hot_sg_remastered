@@ -25,6 +25,7 @@ import {
   offsetOf,
   sortAt,
   type SideContext,
+  type TableRule,
 } from './lib/difftest/normalize.ts';
 import { SideDb, type TableDelta } from './lib/difftest/side-db.ts';
 import { legacyTarget, newTarget, Side, type Target } from './lib/difftest/side.ts';
@@ -64,8 +65,8 @@ try {
   await prepareSnapshots();
   const target = newTarget(process.env.HOT_SERVER_URL ?? (await startServer()));
   for (const testCase of selected) {
-    const legacy = await runSide('legacy', legacyTarget(), legacyDb, testCase.run);
-    const fresh = await runSide('new', target, newDb, testCase.run);
+    const legacy = await runSide('legacy', legacyTarget(), legacyDb, testCase.run, testCase.tables);
+    const fresh = await runSide('new', target, newDb, testCase.run, testCase.tables);
     const problems = compareSides(legacy, fresh);
     if (dump) {
       const file = join(paths.cache, `difftest-${testCase.name.replace(/\W+/g, '-')}.json`);
@@ -185,6 +186,7 @@ async function runSide(
   target: Target,
   db: SideDb,
   run: (side: Side) => Promise<unknown>,
+  tableOverrides: Record<string, TableRule> = {},
 ): Promise<SideResult> {
   const side = new Side(label, target, db);
   const start = await dbNow(db);
@@ -202,7 +204,7 @@ async function runSide(
   for (const table of await db.changedSince(start)) {
     const delta: TableDelta = await db.diff(table);
     await db.restore(table, saved.get(table));
-    const rule = tableRules[table] ?? {};
+    const rule = tableOverrides[table] ?? tableRules[table] ?? {};
     const norm = (rows: TableDelta['added']) =>
       rows.map((r) => normalizeRow(r, rule, ctx)).filter((r): r is string => r !== null);
     const added = norm(delta.added);

@@ -43,7 +43,13 @@ const LEGACY_COMPOSE = join(repoRoot, 'docker/legacy/docker-compose.yml');
 
 export function legacyTarget(client = new LegacyClient()): Target {
   return {
-    call: (service, method, args) => client.call(`${service}.${method}`, args),
+    call: (service, method, args) =>
+      // `ExternService` methods take spread positional args (getTroopMaxTime($x,$y),
+      // saveEnemyTroopSet($cid,$actions)); amfphp reaches those through URL-path segments, not the
+      // single body array every Command/Login/CityCommand method expects. Route it accordingly.
+      service === 'ExternService'
+        ? client.callSpread(`${service}.${method}`, args)
+        : client.call(`${service}.${method}`, args),
     async tick(fn, clock) {
       // cfg_js.php's includes and the helper it defines for ReportCron.php, without the other
       // handlers it calls at the top level. HandleHeroHexprs() is defined in cfg_js.php itself

@@ -77,7 +77,7 @@ export class TroopTick {
     }
 
     const field = await this.checkFieldOwner(targetcid);
-    const type = await this.battleType(field, task);
+    const type = this.battleType(field, task);
     const cityname = await this.cityRules.getNamePosition(cid, type);
     const targetcityname = await this.cityRules.getNamePosition(targetcid, type);
     const happencid = targetcid;
@@ -87,6 +87,11 @@ export class TroopTick {
     const resource = this.checkResource(phpString(row.resource));
     const hero = hid > 0 ? await this.contentHero(hid) : '';
     let content = this.reportTitle(cityname, targetcityname, task, state);
+
+    // $result in the original: 1 => "军队进入<target>", 0 => "军队正在返回<origin>" (the troop
+    // turned home). Defaults to 1; a 运输 (task 0) always turns home, and a 派遣 (task 1) turns
+    // home only when the city has no free hero slot.
+    let result = 1;
 
     if (state === 0) {
       if (!inwar.result) {
@@ -104,6 +109,7 @@ export class TroopTick {
       switch (task) {
         case 0: {
           // 运输到达：资源入库，掉头返回。
+          result = 0;
           if (resource) {
             await this.cityRules.addCityResources(
               targetcid,
@@ -139,7 +145,9 @@ export class TroopTick {
             soldierArray,
             hero,
           });
-          content += this.reportRow('4');
+          // title_2row 6 (no free 将领 slot, turned home) vs 4 (arrived); turn-back sets result 0.
+          content += this.reportRow(this.lastDispatchTurnedBack ? '6' : '4');
+          if (this.lastDispatchTurnedBack) result = 0;
           content += sprintf(
             this.reportStr('troopback'),
             '派遣到达',
@@ -165,7 +173,7 @@ export class TroopTick {
       }
 
       content += this.reportStr('br');
-      content += `<br/>军队进入${targetcityname}。`;
+      content += result ? `<br/>军队进入${targetcityname}。` : `<br/>军队正在返回${cityname}。`;
       // 军队吃粮刷新。
       if (uid > 1000) await this.cityRules.refreshFoodArmyUsers(cid);
       if (phpNum(field.uid) > 1000 && task === 0 && uid !== phpIntval(field.uid)) {
@@ -206,6 +214,9 @@ export class TroopTick {
   /** The `okmss` the last dispatch arrival produced (resource line appended to its report). */
   private lastDispatchOkMsg = '';
 
+  /** Whether the last dispatch arrival turned home (no free 将领 slot) — drives `$result` / title. */
+  private lastDispatchTurnedBack = false;
+
   /**
    * cfg_js.php HandleTroop state-0 task-1 body: arrival of a 派遣 troop. Mutates `sys_troops`,
    * `sys_city_hero`, `sys_city_soldier` and resources; the report text is built by the caller.
@@ -228,6 +239,7 @@ export class TroopTick {
     const db = this.scope.db;
     const { uid, hid, cid, id, targetcid, field, inwar, resource } = a;
     this.lastDispatchOkMsg = '';
+    this.lastDispatchTurnedBack = false;
 
     if (
       phpIntval(inwar.relation) === 0 &&
@@ -253,6 +265,7 @@ export class TroopTick {
           await sql`delete from sys_troops where id = ${id}`.execute(db);
         } else {
           // 城里没有将领空位，掉头返回。
+          this.lastDispatchTurnedBack = true;
           await sql`update sys_troops set state = 1, starttime = unix_timestamp(),
             endtime = pathtime + unix_timestamp() where id = ${id}`.execute(db);
         }
@@ -394,14 +407,18 @@ export class TroopTick {
     return field;
   }
 
-  /** UtilsExtend.php::battleType: the battle kind for a field+task (0 for the non-battle paths). */
-  private async battleType(field: Row, task: number): Promise<number> {
-    // For the ported (non-battle) arrivals the only use of `type` is getNamePosition, which treats
-    // a wild field (field.type > 0) as "wild" and a city (type 0) as a city. battleType in the
-    // original returns the field's own type for city/field targets of the non-battlefield tasks,
-    // which getNamePosition reads the same way; mirror that.
-    void task;
-    return phpIntval(field.type);
+  /** UtilsExtend.php::battleType: the battle kind for a field+task. */
+  private battleType(field: Row, task: number): number {
+    // Mirrors UtilsExtend.php::battleType. The subtlety: a WILD FIELD target (field.type > 0)
+    // yields 0, while a CITY target (field.type == 0) yields a NON-zero type (1 for 攻击 task 4,
+    // 4 for the 战场 tasks 7/8/9, else 2). getNamePosition then reads this inverted: type 0 is the
+    // field's terrain name (cfg_world_type), non-zero is the sys_city name. So a transport/派遣 to
+    // a city must pass type 2 to get the city's own name in the report — returning field.type (0)
+    // produced "城池"/"平地" instead of "长乐宫".
+    if (phpIntval(field.type) > 0) return 0;
+    if (task === 4) return 1;
+    if (task === 7 || task === 8 || task === 9) return 4;
+    return 2;
   }
 
   /**
