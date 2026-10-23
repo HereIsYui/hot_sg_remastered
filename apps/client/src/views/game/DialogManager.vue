@@ -6,6 +6,7 @@ import {
   BUILDING_BLACKSMITH,
   BUILDING_COLLEGE,
   BUILDING_GOVERNMENT,
+  BUILDING_GROUND,
   BUILDING_HOTEL,
   BUILDING_STORE,
   BUILDING_WALL,
@@ -28,6 +29,7 @@ import MyGoodsDialog from '../goods/MyGoodsDialog.vue';
 import UseGoodsDialog from '../goods/UseGoodsDialog.vue';
 import GovernmentDialog from '../government/GovernmentDialog.vue';
 import ResourceProductDialog from '../government/ResourceProductDialog.vue';
+import GroundDialog from '../ground/GroundDialog.vue';
 import HotelDialog from '../hotel/HotelDialog.vue';
 import ModifyPasswordDialog from '../system/ModifyPasswordDialog.vue';
 import OpenLockDialog from '../system/OpenLockDialog.vue';
@@ -111,6 +113,14 @@ function choose(action: 'all' | 'level') {
     <ArmyDialog
       v-else-if="dialog?.name === 'building' && ownDialog(dialog.building, BUILDING_ARMY)"
       :key="`army ${buildingKey}`"
+      :x="0"
+      :y="0"
+      :building="dialog.building"
+      @destroy-panel="destroy = $event"
+    />
+    <GroundDialog
+      v-else-if="dialog?.name === 'building' && ownDialog(dialog.building, BUILDING_GROUND)"
+      :key="`ground ${buildingKey}`"
       :x="0"
       :y="0"
       :building="dialog.building"

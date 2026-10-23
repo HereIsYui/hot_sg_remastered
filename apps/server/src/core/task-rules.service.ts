@@ -19,6 +19,30 @@ export class TaskRules {
     );
   }
 
+  /**
+   * ActFunc.php::finishTask: adds `count` to the current progress of the 累计 (sort=50) random
+   * goals whose type matches `taskType`.
+   */
+  async finishTask(uid: number, count: number, taskType: number): Promise<void> {
+    await sql`update sys_user_goal set currentcount = currentcount + ${count}
+      where uid = ${uid} and gid in (
+        select id from cfg_task_goal where sort = 50 and type = ${taskType})`.execute(
+      this.scope.db,
+    );
+  }
+
+  /**
+   * ActFunc.php::finishTaskMaxNum: raises the current progress of the 单次 (sort=80) random goals
+   * whose type matches `taskType` to at least `count`.
+   */
+  async finishTaskMaxNum(uid: number, count: number, taskType: number): Promise<void> {
+    await sql`update sys_user_goal set currentcount = greatest(currentcount, ${count})
+      where uid = ${uid} and gid in (
+        select id from cfg_task_goal where sort = 80 and type = ${taskType})`.execute(
+      this.scope.db,
+    );
+  }
+
   /** utils.php::completeTaskWithTaskid: marks every goal of the task reached. */
   async completeTaskWithTaskid(uid: number, taskId: number): Promise<void> {
     const goals = await this.scope.db

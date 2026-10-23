@@ -8,6 +8,7 @@ import { CoreModule } from './core/core.module';
 import { DatabaseModule } from './db/database.module';
 import { GatewayModule } from './gateway/gateway.module';
 import { GoodsModule } from './goods/goods.module';
+import { GroundModule } from './ground/ground.module';
 import { GuideModule } from './guide/guide.module';
 import { HealthController } from './health/health.controller';
 import { HeroModule } from './hero/hero.module';
@@ -36,6 +37,7 @@ import { WorldModule } from './world/world.module';
     TaskModule,
     GuideModule,
     GoodsModule,
+    GroundModule,
     HeroModule,
     ShopModule,
     WorldModule,

@@ -7,6 +7,7 @@ export interface Point {
 
 export const BUILDING_GOVERNMENT = 6;
 export const BUILDING_COLLEGE = 7;
+export const BUILDING_GROUND = 8;
 export const BUILDING_ARMY = 9;
 export const BUILDING_HOTEL = 10;
 export const BUILDING_BLACKSMITH = 14;
