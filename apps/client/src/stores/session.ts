@@ -14,7 +14,8 @@ export type PlainDialog =
   | 'cityField'
   | 'modifyPassword'
   | 'task'
-  | 'myGoods';
+  | 'myGoods'
+  | 'favourites';
 
 /**
  * `DialogManager.showCreateBuildingDialog(kind)` (0 fields, 1 inner, 2 wall), `showBuildingDialog`,
@@ -25,6 +26,7 @@ export type DialogState =
   | { name: 'building'; building: BuildingState }
   | { name: 'openLock'; type: string }
   | { name: 'heroDetail'; hid: number }
+  | { name: 'worldAction'; cid: number }
   | { name: PlainDialog };
 
 /**

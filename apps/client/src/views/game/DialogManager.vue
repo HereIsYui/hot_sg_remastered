@@ -36,6 +36,8 @@ import ShopDialog from '../shop/ShopDialog.vue';
 import StoreDialog from '../store/StoreDialog.vue';
 import TaskDialog from '../task/TaskDialog.vue';
 import WallDialog from '../wall/WallDialog.vue';
+import CampaignFavouritesDialog from '../world/CampaignFavouritesDialog.vue';
+import WorldActionDialog from '../world/WorldActionDialog.vue';
 
 /** DialogManager: the dialogs over the scene panels (only one shown at a time). */
 defineProps<{ x: number; y: number }>();
@@ -79,6 +81,12 @@ function choose(action: 'all' | 'level') {
     <ModifyPasswordDialog v-else-if="dialog?.name === 'modifyPassword'" />
     <TaskDialog v-else-if="dialog?.name === 'task'" />
     <MyGoodsDialog v-else-if="dialog?.name === 'myGoods'" />
+    <CampaignFavouritesDialog v-else-if="dialog?.name === 'favourites'" />
+    <WorldActionDialog
+      v-else-if="dialog?.name === 'worldAction'"
+      :key="`worldAction ${dialog.cid}`"
+      :cid="dialog.cid"
+    />
     <HeroDetailDialog
       v-else-if="dialog?.name === 'heroDetail'"
       :key="`hero ${dialog.hid}`"

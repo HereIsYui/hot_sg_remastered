@@ -706,6 +706,24 @@ export class Game {
     void this.cmd.sendGlobalCommand('user', 'createCity', [cityName, province]);
   }
 
+  // ---- world map (World/WorldPanel, World/WorldActionDialog, Ground favourites) ----
+
+  /** `WorldPanel.sendGlobalCommand("world", ...)`: a world command whose reply the panel/dialog
+   *  picks up through its own `addGlobalReceiver('world', ...)`. */
+  sendWorldCommand(command: string, args: CommandArg[] = []): void {
+    void this.cmd.sendGlobalCommand('world', command, args);
+  }
+
+  /** `WorldPanel.onMouseUp` -> `showSpecialPanel`: open the action dialog for a clicked cell. */
+  showWorldAction(cid: number): void {
+    this.session.dialog = { name: 'worldAction', cid };
+  }
+
+  /** `CampaignFavouritesDialog.loadList`: the 收藏 dialog over the scene. */
+  showFavourites(): void {
+    this.session.dialog = { name: 'favourites' };
+  }
+
   // ---- errors (Command.onReceivedCommand / faultHandler) ----
 
   private onFailure(f: CommandFailure): void {
