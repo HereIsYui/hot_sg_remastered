@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { BattleModule } from '../battle/battle.module';
 import { BattleReadCommands } from './battle-read.commands';
 import { ExternService } from './extern.service';
 import { ReportCommands } from './report.commands';
@@ -14,8 +15,12 @@ import { TroopTick } from './troop.tick';
  * The battle readers (getBattleReport / getBattleData / setSoldierTactics) and the report readers
  * are the 战报 + 战斗视图 read side; the battle ENGINE that writes mem_battle* / sys_report is the
  * parallel wave. The 洛阳 (luoyangTroopStart) dispatch is left to a later wave.
+ *
+ * `BattleModule` is imported so `TroopTick` can delegate the task-2 (侦察) arrival to `ScoutService`
+ * (and, later, a patrol fight through `BattleEngineService`).
  */
 @Module({
+  imports: [BattleModule],
   providers: [
     ExternService,
     TroopCommands,

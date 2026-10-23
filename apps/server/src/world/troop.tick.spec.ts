@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { ScoutService } from '../battle/scout';
 import { CityRules } from '../core/city-rules.service';
 import { HeroRules } from '../core/hero-rules.service';
 import { LangService } from '../common/lang.service';
 import { MailService } from '../core/mail.service';
 import { ReportService } from '../core/report.service';
+import { TaskRules } from '../core/task-rules.service';
+import { UserRules } from '../core/user-rules.service';
 import { FakeDb, type Respond } from '../hero/fake-db.testutil';
 import { TroopTick } from './troop.tick';
 
@@ -29,6 +32,12 @@ function build(rules: Respond[]) {
     new CityRules(db.scope),
     new HeroRules(db.scope),
     new ReportService(db.scope, new MailService(db.scope)),
+    new ScoutService(
+      db.scope,
+      lang,
+      new ReportService(db.scope, new MailService(db.scope)),
+      new TaskRules(db.scope, new UserRules(db.scope)),
+    ),
   );
   return { tick, db };
 }

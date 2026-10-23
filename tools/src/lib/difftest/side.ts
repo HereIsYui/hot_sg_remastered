@@ -73,10 +73,25 @@ export function legacyTarget(client = new LegacyClient()): Target {
           $pending = sql_fetch_rows("select id from mem_maneuver where state=0");
           if (!empty($pending)) foreach ($pending as $m) { upManeuver($m['id'], 0); }`;
       } else {
+        // HandleTroop's task-2 侦察 arrival (and the 掠夺/占领/攻击 battle arrivals) call into the
+        // whole cfg_js battle region — battleAdd / defcityadd / upManeuver / count_desc /
+        // getNamePosition / SoBitSo all live AFTER `function del` (end-of-file region), not between
+        // getNamePosition and SoBitSo. Evalling only the getNamePosition…SoBitSo slice (what the
+        // non-battle settlements needed) left those undefined, so a scout with a patrol fataled.
+        // Eval the full `del`…EOF region — which defines getNamePosition and SoBitSo too — plus the
+        // two handler bodies that sit BEFORE `del` (HandleHeroHexprs, HandleTroop). This mirrors the
+        // HandleBattle branch's `del`…EOF eval, so both ticks see the same battle helpers.
+        //
+        // `@unlink("cron/uptroop")` drops HandleTroop's per-troop dedup file (it writes `$id.$state`
+        // and skips a row whose id+state it already saw). That cache is a production cron guard the
+        // new side has no equivalent of; left in place it makes a scout case pass on the FIRST
+        // difftest run and silently skip (no report) on the SECOND, since the gate runs twice. The
+        // new side never consults it, so clearing it each tick keeps the two sides symmetric.
         script = `require_once "BattleFunc.php"; require_once "UtilsExtend.php";
           require_once "HeroExpr.php";
+          @unlink("cron/uptroop");
           $cfg = file_get_contents("cfg_js.php");
-          preg_match('/function getNamePosition\\b.*?(?=function SoBitSo)/s', $cfg, $m); eval($m[0]);
+          preg_match('/function del\\b.*/s', $cfg, $b); eval($b[0]);
           preg_match('/function HandleHeroHexprs\\b.*?(?=function HandleTroop)/s', $cfg, $h); eval($h[0]);
           preg_match('/function HandleTroop\\b.*?(?=function del\\b)/s', $cfg, $t); eval($t[0]);
           ${reportCron} ${fn}();`;

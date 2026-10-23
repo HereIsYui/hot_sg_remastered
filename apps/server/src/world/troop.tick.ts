@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { sql } from 'kysely';
+import { ScoutService } from '../battle/scout';
 import { LangService } from '../common/lang.service';
 import { sprintf } from '../common/sprintf';
 import { CityRules, cid2wid } from '../core/city-rules.service';
@@ -21,12 +22,16 @@ type Row = Record<string, unknown>;
  *     city, row deleted) or at a union city / own-or-union field (merge into the stationed troop,
  *     state 4), with the arrival report.
  *   - state 1 返回: hero comes home, soldiers and resources return to the origin, row deleted.
+ *   - state 0, task 2 侦察: delegated to `ScoutService` (apps/src/battle/scout.ts) — the scout
+ *     battle (if a patrol is present), the intelligence report at every unlocked level, the troop
+ *     turning home, and the target owner's alarm. Kept in the battle module so the parallel wave
+ *     owning task 3/4/9 does not collide with it.
  *
- * NOT ported (battle wave): the arrival of a 侦察/掠夺/占领/攻击 troop (task 2/3/4/9) starts a
- * battle (upManeuver / battleAdd / defcityadd / mem_battle). That whole branch is isolated behind
- * `battleArrivalNotPorted`, which leaves the `sys_troops` row untouched so the next wave can drop
- * the engine in without data loss. 战场 tasks (7/8) are single-player out of scope and are routed
- * to the same holder.
+ * NOT ported (battle wave): the arrival of a 掠夺/占领/攻击 troop (task 3/4/9) starts a battle
+ * (battleAdd / defcityadd / mem_battle). That branch is isolated behind `battleArrivalNotPorted`,
+ * which leaves the `sys_troops` row untouched so the next wave can drop the engine in without data
+ * loss. 战场 tasks (7/8), and any battlefield-slot arrival (`battlefieldid != 0`), are routed to the
+ * same holder.
  */
 @Injectable()
 export class TroopTick {
@@ -38,6 +43,7 @@ export class TroopTick {
     private readonly cityRules: CityRules,
     private readonly heroes: HeroRules,
     private readonly report: ReportService,
+    private readonly scout: ScoutService,
   ) {}
 
   @TickHandler(TickOrder.Troop)
@@ -69,8 +75,9 @@ export class TroopTick {
     const state = phpIntval(row.state);
     const bid = phpIntval(row.battlefieldid);
 
-    // Battlefield (task 7/8) and battle-starting arrivals (task 2/3/4/9 in state 0) need the
-    // battle engine; leave the row as it is for the next wave.
+    // A battlefield-slot arrival (battlefieldid != 0) and the 战场 tasks (7/8) need the battle
+    // engine / 战场 flow; leave the row for the next wave. A scout (task 2) on the battlefield slot
+    // also waits here — ScoutService only owns the ordinary (bid 0) scout arrival.
     if (bid !== 0 || task === 7 || task === 8) {
       this.battleArrivalNotPorted(row);
       return;
@@ -157,11 +164,28 @@ export class TroopTick {
           content += this.lastDispatchOkMsg;
           break;
         }
-        case 2:
+        case 2: {
+          // 侦察到达：侦察战斗(若有巡逻) + 情报报告 + 返回 + 警报。ScoutService 自行发报并返回，
+          // 不走下面公共的"进入/返回"收尾（和 case 3/4/9 的 battle 到达一样 return）。
+          await this.scout.settle(row, {
+            uid,
+            hid,
+            cid,
+            id,
+            targetcid,
+            task,
+            state,
+            field,
+            type,
+            cityname,
+            targetcityname,
+          });
+          return;
+        }
         case 3:
         case 4:
         case 9: {
-          // 侦察/掠夺/占领/攻击 到达即开战 —— 战斗引擎尚未移植。
+          // 掠夺/占领/攻击 到达即开战 —— 战斗引擎尚未移植。
           this.battleArrivalNotPorted(row);
           return;
         }
@@ -316,10 +340,11 @@ export class TroopTick {
   }
 
   /**
-   * The battle-starting arrival branch (task 2/3/4/9 in state 0) and battlefield tasks (7/8).
+   * The battle-starting arrival branch (task 3/4/9 in state 0) and battlefield tasks (7/8).
    * The battle engine (OLdBattleCron.php + battleInfo) is not ported yet, so this intentionally
    * does NOTHING to the troop row — the row stays due (`endtime` in the past) and will be settled
-   * by the next wave once the engine exists. Logged at debug so it is visible without spamming.
+   * by the next wave once the engine exists. (Task 2 侦察 is now handled by `ScoutService`.)
+   * Logged at debug so it is visible without spamming.
    */
   private battleArrivalNotPorted(row: Row): void {
     this.logger.debug(

@@ -50,6 +50,19 @@ async function aliasNewCity(side: Side, uid: number): Promise<void> {
 /** Shipped save: changle (uid 1001) is a newbie player with a city. */
 const EXISTING_PLAYER = 'changle';
 
+/**
+ * The HandleTroop scout tail runs `refreshFoodArmyUse` + `check_city_resource` on the scout's and
+ * the target owner's cities. `check_city_resource(uid, cid)` is the full `getUsersCityProduct`
+ * economy recompute (caps, add rates, food upkeep) — NOT ported (it belongs to the resource wave),
+ * and the legacy harness also boots global.php which recomputes these from building levels. None of
+ * it is scout intelligence, and the ported `ScoutService` deliberately leaves the two cities'
+ * economy untouched, so the scout difftest cases scope `mem_city_resource` out of the comparison
+ * entirely (the scout's real effects live in sys_report / sys_troops / sys_user_goal).
+ */
+const SCOUT_RESOURCE_IGNORE = {
+  mem_city_resource: { skip: () => true },
+} satisfies Record<string, TableRule>;
+
 export const cases: DiffCase[] = [
   {
     name: 'login announcement',
@@ -3238,6 +3251,143 @@ export const cases: DiffCase[] = [
         ignore: ['gold_max', 'food_max', 'wood_max', 'rock_max', 'iron_max'],
       },
     },
+  },
+  {
+    // HandleTroop tick, task-2 (侦察 / scout) arrival — the EMPTY FIELD. A scout due at a wild tile
+    // with no garrison and no stationed troop finds nothing: `$patrol=0`, the fight early-outs to a
+    // HandleTroop tick, task-2 (侦察 / scout) arrival — an EMPTY player-owned wild field. A scout
+    // due at a field the scouting player's OWN union/self holds (ownercid a player city, so
+    // field.uid > 1000) skips `checkSodier` (the NPC garrison top-up, which is random); with no
+    // stationed troop there is no patrol, the fight early-outs to a win, and `case 0:` falls through
+    // to the intel block. A wild field has no sys_city / mem_city_resource / buildings etc., so
+    // every intel tier is empty and nothing is appended — the report is the title, "对方未发觉" and
+    // the 返回 line. The scout turns home (state 1). The single sys_report row and the troop state
+    // must byte-match; `time` is offset-compared.
+    name: 'troop tick settles a scout of an empty field',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await s.query('delete from sys_troops where uid = ?', [uid]);
+      await s.query('delete from sys_report where uid = ?', [uid]);
+      // Pre-raise the 战报 alarm so the report's idempotent raiseAlarm is a no-op delta on BOTH
+      // sides (the login leaves one side's flag set, so starting at 1 keeps them symmetric).
+      await s.query(
+        'insert into sys_alarm (uid, report) values (?, 1) on duplicate key update report = 1',
+        [uid],
+      );
+      // A free wild tile (ownercid 0, type > 1), handed to the scouting player's city so the field
+      // owner resolves to a real player (uid > 1000) and checkSodier is skipped. The snapshot
+      // rollback restores it.
+      const [tile] = await s.query<{ wid: string }>(
+        'select wid from mem_world where ownercid = 0 and type > 1 and state = 0 order by wid limit 1',
+      );
+      const fieldWid = Number(tile?.wid ?? 0);
+      const targetCid = wid2cid(fieldWid);
+      await s.query('update mem_world set ownercid = ? where wid = ?', [cid, fieldWid]);
+      await s.query(
+        `insert into sys_city_technic (cid, tid, level) values (?, 7, 5)
+          on duplicate key update level = 5`,
+        [cid],
+      );
+      await s.query(
+        `insert into sys_troops
+          (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
+         values (?, ?, 0, ?, 2, 0, unix_timestamp() - 600, 600, unix_timestamp() - 1, '1,3,100', '0', 0, 0)`,
+        [uid, cid, targetCid],
+      );
+      await s.tick('HandleTroop');
+      await s.query('update mem_world set ownercid = 0 where wid = ?', [fieldWid]);
+      await s.query('delete from sys_troops where uid = ?', [uid]);
+      await s.query('delete from sys_report where uid = ?', [uid]);
+    },
+    tables: SCOUT_RESOURCE_IGNORE,
+  },
+  {
+    // HandleTroop tick, task-2 (侦察) arrival — a PLAYER-OWNED CITY at a LOW scout level. Scouting a
+    // real player's city (uid > 1000) skips `checkSodier` (the NPC garrison top-up, which is random)
+    // and, with no 斥候-type defender, fights no patrol — so the whole settlement is deterministic.
+    // At 侦察技巧 level 1 only the 资源状况 tier unlocks (and gold is withheld until level > 2), so
+    // the report carries a single resource table. The scout files its own report AND an alarm
+    // (title 12) for the city's owner. Both sys_report rows and the troop's turn-home compare.
+    name: 'troop tick settles a scout of a player city (low intel)',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const [victim] = await s.query<{ uid: string; cid: string }>(
+        'select uid, lastcid as cid from sys_user where uid > 1000 and uid <> ? order by uid limit 1',
+        [uid],
+      );
+      const targetCid = Number(victim?.cid ?? 0);
+      const victimUid = Number(victim?.uid ?? 0);
+      await s.query('delete from sys_troops where uid = ?', [uid]);
+      await s.query('delete from sys_report where uid in (?, ?)', [uid, victimUid]);
+      // Pre-raise both 战报 alarms so the reports' idempotent raiseAlarm is a no-op delta on BOTH
+      // sides (the login leaves one side's flag set; starting at 1 keeps them symmetric).
+      await s.query(
+        'insert into sys_alarm (uid, report) values (?, 1), (?, 1) on duplicate key update report = 1',
+        [uid, victimUid],
+      );
+      await s.query(
+        `insert into sys_city_technic (cid, tid, level) values (?, 7, 1)
+          on duplicate key update level = 1`,
+        [cid],
+      );
+      await s.query(
+        `insert into sys_troops
+          (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
+         values (?, ?, 0, ?, 2, 0, unix_timestamp() - 600, 600, unix_timestamp() - 1, '1,3,100', '0', 0, 0)`,
+        [uid, cid, targetCid],
+      );
+      await s.tick('HandleTroop');
+      await s.query('delete from sys_troops where uid = ?', [uid]);
+      await s.query('delete from sys_report where uid in (?, ?)', [uid, victimUid]);
+    },
+    tables: SCOUT_RESOURCE_IGNORE,
+  },
+  {
+    // HandleTroop tick, task-2 (侦察) arrival — a PLAYER-OWNED CITY at the TOP scout level, so every
+    // intel tier that has data unlocks: 资源状况 (with gold now, level > 2), 建筑状况, 城防状况,
+    // 军队状况 (exact counts at level >= 7), 盟军状况 (if allied troops are stationed), 将领状况,
+    // 科技状况, and — because the target is a real player (uid > 1000) — 玩家动态. The 玩家动态 row
+    // reads sys_online.lastupdate and an in/离线 flag off the clock; the online row is absent in the
+    // shipped save, so both sides read 0 and report 离线 with the same from_unixtime(0) — stable.
+    name: 'troop tick settles a scout of a player city (full intel)',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const [victim] = await s.query<{ uid: string; cid: string }>(
+        'select uid, lastcid as cid from sys_user where uid > 1000 and uid <> ? order by uid limit 1',
+        [uid],
+      );
+      const victimUid = Number(victim?.uid ?? 0);
+      const targetCid = Number(victim?.cid ?? 0);
+      await s.query('delete from sys_troops where uid = ?', [uid]);
+      await s.query('delete from sys_report where uid in (?, ?)', [uid, victimUid]);
+      // No sys_online row for the target → both sides read lastupdate 0 → 离线 with from_unixtime(0).
+      await s.query('delete from sys_online where uid = ?', [victimUid]);
+      await s.query(
+        'insert into sys_alarm (uid, report) values (?, 1), (?, 1) on duplicate key update report = 1',
+        [uid, victimUid],
+      );
+      await s.query(
+        `insert into sys_city_technic (cid, tid, level) values (?, 7, 10)
+          on duplicate key update level = 10`,
+        [cid],
+      );
+      await s.query(
+        `insert into sys_troops
+          (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
+         values (?, ?, 0, ?, 2, 0, unix_timestamp() - 600, 600, unix_timestamp() - 1, '1,3,100', '0', 0, 0)`,
+        [uid, cid, targetCid],
+      );
+      await s.tick('HandleTroop');
+      await s.query('delete from sys_troops where uid = ?', [uid]);
+      await s.query('delete from sys_report where uid in (?, ?)', [uid, victimUid]);
+    },
+    tables: SCOUT_RESOURCE_IGNORE,
   },
   {
     // HandleBattle tick (cfg_js.php, TickOrder.Battle): the 演习 (upManeuver) instant simulator.
