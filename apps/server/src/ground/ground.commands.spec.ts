@@ -226,9 +226,13 @@ describe('GroundCommands soldier handling', () => {
 });
 
 describe('GroundCommands.startManeuver', () => {
-  it('refuses because the battle engine (upManeuver) is not ported', () => {
-    const { cmd } = build([]);
-    expect(() => cmd.startManeuver()).toThrow('not ported');
+  it('queues a mem_maneuver row (state 0) and returns its id', async () => {
+    const { cmd, db } = build([{ match: /insert into mem_maneuver/i, insertId: 77 }]);
+    await expect(cmd.startManeuver(ctx, ['1,3,10', '1,3,5'])).resolves.toEqual([77]);
+    const insert = db.executed.find((q) => /insert into mem_maneuver/i.test(q.sql));
+    expect(insert).toBeDefined();
+    expect(insert!.parameters).toContain('1,3,10');
+    expect(insert!.parameters).toContain('1,3,5');
   });
 
   it('getManeuverResult reports still-running when no settled row exists', async () => {

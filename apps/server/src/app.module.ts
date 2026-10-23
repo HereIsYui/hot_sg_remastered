@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from './auth/auth.module';
+import { BattleModule } from './battle/battle.module';
 import { BufferModule } from './buffer/buffer.module';
 import { CityModule } from './city/city.module';
 import { CommonModule } from './common/common.module';
@@ -45,6 +46,7 @@ import { WorldModule } from './world/world.module';
     WorldModule,
     MailModule,
     TroopModule,
+    BattleModule,
   ],
   controllers: [HealthController],
 })

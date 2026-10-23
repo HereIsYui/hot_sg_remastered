@@ -4,7 +4,7 @@ import { GameError } from '../common/game-error';
 import { LangService } from '../common/lang.service';
 import { CityRules } from '../core/city-rules.service';
 import { GoodsRules } from '../core/goods-rules.service';
-import { phpEmpty, phpIntval, phpNum } from '../core/php';
+import { addslashes, phpEmpty, phpIntval, phpNum, phpString } from '../core/php';
 import { TaskRules } from '../core/task-rules.service';
 import { UserRules } from '../core/user-rules.service';
 import { DbScope } from '../db/database.module';
@@ -49,6 +49,7 @@ const TASK_RESIST = 540;
  *
  * 出征 proper (StartTroop / getTroopScheme / setTroopScheme / getTroopMaxTime) is the world-map
  * dispatch flow and is left to the next wave; the client shows 暂未开放 for the 出征 button.
+ * 演习 is now settled by the ported battle engine (BattleTick / cfg_js.php upManeuver).
  */
 @Injectable()
 export class GroundCommands {
@@ -575,16 +576,20 @@ export class GroundCommands {
   // ───────────────────────────── 演习 ─────────────────────────────
 
   /**
-   * startManeuver($attack,$resist): the original queued a 演习 (`mem_maneuver.state=0`) and left
-   * the settlement to its backend `cfg_js.php::upManeuver`. upManeuver is NOT time-based — it runs
-   * the full battle simulation synchronously (battleInfo / getTarget / SoBitSo / troop2array …),
-   * which is the `battle` module another agent owns and is **not ported** here. So 演习 is
-   * unavailable until the battle engine lands; queuing a maneuver nobody can settle would strand
-   * the row and leave the client polling forever, so we refuse up front instead.
+   * GroundFunc.php::startManeuver($attack,$resist): queue a 演习 by inserting a `mem_maneuver` row
+   * in `state=0`. Settlement now happens in `BattleTick.handleBattle` (TickOrder.Battle) via the
+   * ported `cfg_js.php::upManeuver` loop, which fills in `attackadd`/`resistadd` from `cfg_soldier`,
+   * runs the battle and writes `state=1,result,round,attackdie,resistdie`. The client then polls
+   * `getManeuverResult`. Returns `[mid]` exactly as the original did.
    */
   @DialogCommand()
-  startManeuver(): never {
-    throw new Error('startManeuver: 演习 battle simulation (cfg_js.php upManeuver) not ported');
+  async startManeuver(_ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const attack = addslashes(phpString(param[0]));
+    const resist = addslashes(phpString(param[1]));
+    const res = await sql`insert into mem_maneuver (state, attacksoldiers, resistsoldiers)
+      values (0, ${attack}, ${resist})`.execute(this.scope.db);
+    const mid = Number(res.insertId ?? 0);
+    return [mid];
   }
 
   /**
