@@ -28,9 +28,9 @@ export interface TickClock {
 
 /** An amfphp-style endpoint: `Service.method` called with an argument array. */
 export interface Target {
-  call(service: string, method: string, args: unknown[]): Promise<unknown>;
+  call(service: string, method: string, args: unknown[], rng?: string): Promise<unknown>;
   /** Runs one settlement function of cfg_js.php now. */
-  tick(fn: TickFunction, clock?: TickClock): Promise<void>;
+  tick(fn: TickFunction, clock?: TickClock, rng?: string): Promise<void>;
 }
 
 /** ReportCron.php with its clock reads replaced, evaluated in place of the require. */
@@ -43,14 +43,14 @@ const LEGACY_COMPOSE = join(repoRoot, 'docker/legacy/docker-compose.yml');
 
 export function legacyTarget(client = new LegacyClient()): Target {
   return {
-    call: (service, method, args) =>
+    call: (service, method, args, rng) =>
       // `ExternService` methods take spread positional args (getTroopMaxTime($x,$y),
       // saveEnemyTroopSet($cid,$actions)); amfphp reaches those through URL-path segments, not the
       // single body array every Command/Login/CityCommand method expects. Route it accordingly.
       service === 'ExternService'
-        ? client.callSpread(`${service}.${method}`, args)
-        : client.call(`${service}.${method}`, args),
-    async tick(fn, clock) {
+        ? client.callSpread(`${service}.${method}`, args, rng)
+        : client.call(`${service}.${method}`, args, rng),
+    async tick(fn, clock, rng) {
       // cfg_js.php's includes and the helper it defines for ReportCron.php, without the other
       // handlers it calls at the top level. HandleHeroHexprs() is defined in cfg_js.php itself
       // (not ReportCron.php) and wraps HeroExpr::checkHeroExpr(), so source it and its class too.
@@ -62,12 +62,17 @@ export function legacyTarget(client = new LegacyClient()): Target {
         preg_match('/function HandleHeroHexprs\\b.*?(?=function HandleTroop)/s', $cfg, $h); eval($h[0]);
         preg_match('/function HandleTroop\\b.*?(?=function del\\b)/s', $cfg, $t); eval($t[0]);
         ${reportCron} ${fn}();`;
+      // `php -r` bypasses apache, so the scripted RNG spec rides an env var (the auto_prepend
+      // reads HOT_DIFFTEST_RNG as a fallback to the header); `-e HOT_DIFFTEST_RNG` passes it only
+      // when a case armed one, so ordinary ticks are unaffected.
+      const rngEnv = rng ? ['-e', `HOT_DIFFTEST_RNG=${rng}`] : [];
       const out = capture('docker', [
         'compose',
         '-f',
         LEGACY_COMPOSE,
         'exec',
         '-T',
+        ...rngEnv,
         '-w',
         '/var/www/html/server/game',
         'php',
@@ -83,18 +88,22 @@ export function legacyTarget(client = new LegacyClient()): Target {
 /** The NestJS gateway mirrors json.php at /api/service/:service/:method. */
 export function newTarget(baseUrl: string): Target {
   return {
-    async tick(fn, clock) {
+    async tick(fn, clock, rng) {
+      const headers: Record<string, string> = { 'content-type': 'application/json' };
+      if (rng) headers['x-difftest-rng'] = rng;
       const res = await fetch(`${baseUrl}/api/debug/tick/${TICK_SLOTS[fn]}`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers,
         body: JSON.stringify({ clock }),
       });
       if (!res.ok) throw new Error(`tick ${fn}: HTTP ${res.status} ${await res.text()}`);
     },
-    async call(service, method, args) {
+    async call(service, method, args, rng) {
+      const headers: Record<string, string> = { 'content-type': 'application/json' };
+      if (rng) headers['x-difftest-rng'] = rng;
       const res = await fetch(`${baseUrl}/api/service/${service}/${method}`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers,
         body: JSON.stringify(args),
       });
       const text = await res.text();
@@ -131,6 +140,8 @@ export class Side {
   readonly aliases = new Map<string, string>();
   private readonly target: Target;
   private readonly db: SideDb;
+  /** Scripted-RNG spec sent with each request until changed; undefined = real randomness. */
+  private rngSpec: string | undefined;
 
   constructor(label: 'legacy' | 'new', target: Target, db: SideDb, clientVersion = '1121') {
     this.label = label;
@@ -139,13 +150,34 @@ export class Side {
     this.clientVersion = clientVersion;
   }
 
+  /**
+   * Arm a scripted RNG for the following requests: both servers draw `seq` in call order and
+   * scale a bounded `rand($min,$max)` / `mt_rand($min,$max)` to `$min + (draw mod ($max-$min+1))`,
+   * so a random game outcome is identical on both sides. The sequence is cycled if a request
+   * draws more values than it holds. Call with `[]` (or {@link stopRng}) to go back to real
+   * randomness.
+   */
+  rng(seq: number[]): void {
+    this.rngSpec = seq.length ? seq.join(',') : undefined;
+  }
+
+  /** Arm a scripted RNG from a seed (a reproducible stream) instead of an explicit sequence. */
+  seed(n: number): void {
+    this.rngSpec = `seed:${n}`;
+  }
+
+  /** Stop the scripted RNG; following requests use real randomness again. */
+  stopRng(): void {
+    this.rngSpec = undefined;
+  }
+
   async service(
     service: string,
     method: string,
     args: unknown[],
     label?: string,
   ): Promise<unknown> {
-    const value = await this.target.call(service, method, args);
+    const value = await this.target.call(service, method, args, this.rngSpec);
     this.responses.push({
       label: label ?? `${service}.${method}`,
       value,
@@ -233,7 +265,7 @@ export class Side {
 
   /** Runs a cfg_js.php settlement function; its effects show up in the table deltas. */
   tick(fn: TickFunction, clock?: TickClock): Promise<void> {
-    return this.target.tick(fn, clock);
+    return this.target.tick(fn, clock, this.rngSpec);
   }
 
   query<T extends Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {

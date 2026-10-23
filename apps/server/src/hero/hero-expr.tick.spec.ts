@@ -1,14 +1,17 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { LangService } from '../common/lang.service';
 import { GoodsRules } from '../core/goods-rules.service';
-import { RandomService } from '../core/random.service';
+import { RandomService, ScriptedRandom } from '../core/random.service';
 import { ReportService } from '../core/report.service';
 import { HeroExprTick } from './hero-expr.tick';
 import { FakeDb, type Respond } from './fake-db.testutil';
 
 /** A RandomService that yields queued values, so every roll in the tick is deterministic. */
-class ScriptedRandom extends RandomService {
+class QueuedRandom extends RandomService {
   private queue: number[] = [];
+  constructor() {
+    super(new ScriptedRandom());
+  }
   push(...values: number[]): this {
     this.queue.push(...values);
     return this;
@@ -33,7 +36,7 @@ const lang = new LangService({
   report: { moranchtitle: '【%s】', title_body: '%s x%s', title_end: '==' },
 });
 
-function build(rules: Respond[], random: ScriptedRandom) {
+function build(rules: Respond[], random: QueuedRandom) {
   const db = new FakeDb(rules);
   const goods = { addGoods: async () => {} } as unknown as GoodsRules;
   const reports: { title: number; content: string }[] = [];
@@ -50,9 +53,9 @@ const NOW = /unix_timestamp/i;
 const no = (match: RegExp): Respond => ({ match, rows: [] });
 
 describe('HeroExprTick.checkHeroExpr', () => {
-  let random: ScriptedRandom;
+  let random: QueuedRandom;
   beforeEach(() => {
-    random = new ScriptedRandom();
+    random = new QueuedRandom();
   });
 
   it('finishes a normal 修身养性 expr with base experience and no 奇遇', async () => {
@@ -123,7 +126,7 @@ describe('HeroExprTick.checkHeroExpr', () => {
   });
 
   it('getHeroBaseExp follows the per-type formula', () => {
-    const r = new ScriptedRandom().push(0, 0);
+    const r = new QueuedRandom().push(0, 0);
     const { tick } = build([no(/.*/)], r);
     const base = (
       tick as unknown as { getHeroBaseExp(t: number, l: number, h: number): number }
@@ -134,7 +137,7 @@ describe('HeroExprTick.checkHeroExpr', () => {
   });
 
   it('getRandWin clamps the rate by expr type before rolling', () => {
-    const r = new ScriptedRandom();
+    const r = new QueuedRandom();
     const { tick } = build([no(/.*/)], r);
     const win = (
       tick as unknown as { getRandWin(rate: number, type: number): number }
@@ -150,7 +153,7 @@ describe('HeroExprTick.checkHeroExpr', () => {
   });
 
   it('pickReward draws by cumulative rate weight', async () => {
-    const r = new ScriptedRandom().push(7); // mt_rand(1, sumRate)
+    const r = new QueuedRandom().push(7); // mt_rand(1, sumRate)
     const { tick } = build(
       [
         {

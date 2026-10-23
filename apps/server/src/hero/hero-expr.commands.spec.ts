@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { GameError } from '../common/game-error';
 import { LangService } from '../common/lang.service';
 import { GoodsRules } from '../core/goods-rules.service';
-import { RandomService } from '../core/random.service';
+import { RandomService, ScriptedRandom } from '../core/random.service';
 import { TaskRules } from '../core/task-rules.service';
 import { UserRules } from '../core/user-rules.service';
 import { HeroExprCommands } from './hero-expr.commands';
@@ -30,7 +30,7 @@ function build(rules: Respond[]) {
     reduceGoods: async () => {},
   } as unknown as GoodsRules;
   const tasks = { completeTaskWithTaskid: async () => {} } as unknown as TaskRules;
-  const random = new RandomService();
+  const random = new RandomService(new ScriptedRandom());
   const users = {
     logUserAction: async () => {},
     logActionCountback: async () => {},
@@ -200,7 +200,14 @@ describe('HeroExprCommands.fasterHeroExpr', () => {
       logUserAction: async () => {},
       logActionCountback: async () => {},
     } as unknown as UserRules;
-    const cmd = new HeroExprCommands(db.scope, lang, goods, tasks, new RandomService(), users);
+    const cmd = new HeroExprCommands(
+      db.scope,
+      lang,
+      goods,
+      tasks,
+      new RandomService(new ScriptedRandom()),
+      users,
+    );
     await expect(cmd.fasterHeroExpr(ctx, [80213])).rejects.toBeInstanceOf(GameError);
   });
 });

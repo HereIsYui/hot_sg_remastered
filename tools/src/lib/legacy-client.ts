@@ -19,9 +19,12 @@ export class LegacyClient {
     return `${this.baseUrl}/server/amfphp/json.php`;
   }
 
-  async call<T = unknown>(service: string, args: unknown[]): Promise<T> {
+  async call<T = unknown>(service: string, args: unknown[], rng?: string): Promise<T> {
+    const headers: Record<string, string> = {};
+    if (rng) headers['X-Difftest-Rng'] = rng;
     const res = await fetch(`${this.gateway}/${service}`, {
       method: 'POST',
+      headers,
       body: JSON.stringify(args),
     });
     const text = await res.text();
@@ -38,10 +41,12 @@ export class LegacyClient {
    * each arg in its own path segment — which is exactly what the Flash client's `CallEvent` did.
    * Each segment is JSON so the gateway's deserializer decodes it back to its real type.
    */
-  async callSpread<T = unknown>(service: string, args: unknown[]): Promise<T> {
+  async callSpread<T = unknown>(service: string, args: unknown[], rng?: string): Promise<T> {
     const path = args.map((a) => encodeURIComponent(JSON.stringify(a))).join('/');
     const url = path ? `${this.gateway}/${service}/${path}` : `${this.gateway}/${service}`;
-    const res = await fetch(url, { method: 'POST' });
+    const headers: Record<string, string> = {};
+    if (rng) headers['X-Difftest-Rng'] = rng;
+    const res = await fetch(url, { method: 'POST', headers });
     const text = await res.text();
     if (!res.ok) throw new Error(`${service}: HTTP ${res.status}`);
     return parseGatewayResponse<T>(service, text);

@@ -2772,22 +2772,24 @@ export const cases: DiffCase[] = [
         s.dialog(session, cid, 8, 40, func, ...args);
 
       // 募兵: a normal 州城 (type 3) with a province special soldier, state 1 (ready). The grant
-      // count is rand(600,1800) and the sid can be rand(45,50); PHP rand() and the new server's
-      // RandomService are both unseeded here with no shared source, so the exact count/sid are
-      // nondeterministic and cannot match. We mask the success message and drop the random count
-      // from the sys_city_soldier delta (see tables.ts); the leading-0 success flag, the sid when
-      // fixed, and every later error branch still compare exactly.
+      // count is rand(600,1800); the sid would be rand(45,50) only when the province's
+      // cfg_soldier_special_city.rsid is 1 (it is 0 here, so the sid is fixed and no sid draw
+      // happens). With a scripted RNG armed, both servers draw the same value and scale it the
+      // same way (600 + draw mod 1201), so the grant count — and the success message that embeds
+      // it — compare EXACTLY. Draw 1000 -> count 1600.
+      s.rng([1000]);
       await s.query('update sys_city set type = 3, conscript = 1, is_special = 0 where cid = ?', [
         cid,
       ]);
       await ground('conscript');
-      s.mask(1); // 成功招募到<兵种><rand(600,1800)> — the grant count is random on both sides.
+      // 成功招募到<兵种>1600 — the scripted RNG pins the count, so compare it exactly.
       // Already drafted today.
       await s.query('update sys_city set conscript = unix_timestamp() where cid = ?', [cid]);
       await ground('conscript');
       // Not a 县/郡/州 the user owns.
       await ground('conscript');
       await s.dialog(session, FOREIGN_CITY, 8, 40, 'conscript');
+      s.stopRng();
 
       // 出征战术: read then set (empty lists, patrol action 2). getAttackTactics returns [row]/[].
       await s.query('delete from sys_user_tactics where uid = ?', [uid]);
@@ -2811,11 +2813,6 @@ export const cases: DiffCase[] = [
       await s.query('delete from sys_user_tactics where uid = ?', [uid]);
       await s.query('delete from sys_city_tactics where cid = ?', [cid]);
     },
-    // 募兵 grants rand(600,1800) soldiers (GroundFunc.php::conscript); PHP rand() and the new
-    // server's RandomService are both unseeded with no shared source, so the granted row's count
-    // is nondeterministic. Ignore it for THIS case only — scoped here instead of globally, so
-    // every OTHER case (e.g. StartTroop deducting soldiers) still compares the count exactly.
-    tables: { sys_city_soldier: { ignore: ['count'] } },
   },
   {
     // 伤兵 / 俘虏 / 逃兵 handling: 治疗 / 招降 / 劝说 (gold) and 遣散 / 释放. All throw a message;
