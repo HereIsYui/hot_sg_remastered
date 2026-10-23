@@ -3242,6 +3242,36 @@ export const cases: DiffCase[] = [
       },
     },
   },
+  {
+    // HandleBattle tick (cfg_js.php, TickOrder.Battle): the 演习 (upManeuver) instant simulator.
+    // A 演习 row is queued by GroundFunc.php::startManeuver as `mem_maneuver(state=0, attacksoldiers,
+    // resistsoldiers)`; the backend fills attackadd/resistadd from cfg_soldier, runs the battle and
+    // writes state=1,result,round,attackdie,resistdie. This case uses an EMPTY defender so the loop
+    // early-outs to an attacker win (end 0) WITHOUT consuming any mt_rand — getTarget never runs —
+    // so the two sides match without RNG scripting. The RNG-consuming maneuvers (both sides fight)
+    // belong to the stage5/difftest-rng harness, which scripts mt_rand on both sides.
+    //
+    // NOTE: the legacy `tick('HandleBattle')` path needs the harness's PHP eval to load
+    // OLdBattleCron.php + upManeuver (owned by stage5/difftest-rng). Until that lands this case is
+    // written but left unrun, as the wave brief directs.
+    name: '演习 (HandleBattle) settles an unopposed maneuver without RNG',
+    run: async (s) => {
+      await s.query('delete from mem_maneuver');
+      // Attacker: 100 scouts (sid 3). Defender: none. upManeuver returns end 0 at round 1.
+      await s.query(
+        `insert into mem_maneuver (id, state, attacksoldiers, resistsoldiers) values
+          (900100, 0, '1,3,100', '0')`,
+      );
+      await s.tick('HandleBattle');
+      const [row] = await s.query<{ state: string; result: string; round: string }>(
+        'select state, result, round from mem_maneuver where id = 900100',
+      );
+      if (Number(row?.state) !== 1 || Number(row?.result) !== 0) {
+        throw new Error('演习 did not settle to an attacker win');
+      }
+      await s.query('delete from mem_maneuver where id = 900100');
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {
