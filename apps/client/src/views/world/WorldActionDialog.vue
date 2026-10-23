@@ -98,6 +98,14 @@ async function onMark(): Promise<void> {
   }
 }
 
+/** `onSendMessage`: compose a mail to this cell's lord. */
+const lordName = computed(() =>
+  isCity.value ? (cityInfo.value?.username ?? '') : (field.value?.username ?? ''),
+);
+function onSendMessage(): void {
+  game.showMailWrite(null, lordName.value);
+}
+
 function onUnported(): void {
   gameAlert(i18n('_CommonSrc_notOpen') || '暂未开放');
 }
@@ -176,6 +184,17 @@ onUnmounted(unregister);
       style-name="ButtonRed"
       :label="i18n('World_WorldActionDialog_Mark_btn') || '标记'"
       @click="onMark"
+    />
+
+    <FxButton
+      v-if="!isSelf && lordName"
+      :x="200"
+      :y="214"
+      :w="80"
+      :h="26"
+      style-name="ButtonGreen"
+      label="写信"
+      @click="onSendMessage"
     />
 
     <!-- army-action buttons (暂未开放) -->
