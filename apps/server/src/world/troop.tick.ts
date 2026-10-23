@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { sql } from 'kysely';
+import { BattleArrivalService } from '../battle/battle-arrival.service';
 import { LangService } from '../common/lang.service';
 import { sprintf } from '../common/sprintf';
 import { CityRules, cid2wid } from '../core/city-rules.service';
@@ -22,11 +23,11 @@ type Row = Record<string, unknown>;
  *     state 4), with the arrival report.
  *   - state 1 返回: hero comes home, soldiers and resources return to the origin, row deleted.
  *
- * NOT ported (battle wave): the arrival of a 侦察/掠夺/占领/攻击 troop (task 2/3/4/9) starts a
- * battle (upManeuver / battleAdd / defcityadd / mem_battle). That whole branch is isolated behind
- * `battleArrivalNotPorted`, which leaves the `sys_troops` row untouched so the next wave can drop
- * the engine in without data loss. 战场 tasks (7/8) are single-player out of scope and are routed
- * to the same holder.
+ * NOW ported (battle wave): the arrival of a 掠夺/占领/攻击 troop (task 3/4/9) starts a battle —
+ * delegated to `BattleArrivalService` (battle-arrival.ts: defcityadd / battleAdd / mem_battle).
+ * Task 2 (侦察) is still routed to `battleArrivalNotPorted` — the parallel stage5/battle-scout agent
+ * owns it. 战场 tasks (7/8) and battlefield troops (bid != 0) are single-player out of scope and are
+ * routed to the same holder.
  */
 @Injectable()
 export class TroopTick {
@@ -38,6 +39,7 @@ export class TroopTick {
     private readonly cityRules: CityRules,
     private readonly heroes: HeroRules,
     private readonly report: ReportService,
+    private readonly arrival: BattleArrivalService,
   ) {}
 
   @TickHandler(TickOrder.Troop)
@@ -157,12 +159,35 @@ export class TroopTick {
           content += this.lastDispatchOkMsg;
           break;
         }
-        case 2:
-        case 3:
-        case 4:
-        case 9: {
-          // 侦察/掠夺/占领/攻击 到达即开战 —— 战斗引擎尚未移植。
+        case 2: {
+          // 侦察 到达即开战 —— the parallel stage5/battle-scout agent owns this branch; leave it.
           this.battleArrivalNotPorted(row);
+          return;
+        }
+        case 3:
+        case 9:
+        case 4: {
+          // 掠夺/占领/攻击 到达即开战 —— delegate to the ported battle arrival (defcityadd/battleAdd,
+          // empty-target early-outs, mem_battle creation). It performs its own writes and reports,
+          // leaving the troop in state 3 bound to the new battle (or turned home on an early-out).
+          await this.arrival.handle({
+            row,
+            uid,
+            hid,
+            cid,
+            id,
+            targetcid,
+            task,
+            state,
+            field,
+            type,
+            cityname,
+            targetcityname,
+            happencid,
+            soldierArray,
+            content,
+            sProvince: phpNum(field.province),
+          });
           return;
         }
         default: {

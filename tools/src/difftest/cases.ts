@@ -3384,6 +3384,175 @@ export const cases: DiffCase[] = [
       await s.command(session, 'getKingReward'); // 您已经领取过奖励 (if the first granted)
     },
   },
+  // --- battle (stage5/battle-multi) ---------------------------------------------------------
+  // These exercise the ported multi-round battle (cfg_js.php HandleTroop task 3/4/9 arrival →
+  // OLdBattleCron.php HandleBattle/updateBattle/return_new_place/getBattleResult). They are
+  // AUTHORED but not yet wired into the difftest runner's expected set — the engine's deep stat
+  // build (take_atactics/getAdd) and the mem_battle* schema columns the 易语言 production server
+  // carried are a follow-up wave's concern. Each pins the RNG with s.rng([...]) / s.seed(n) so a
+  // later run matches the single rand() the engine draws per round (the random target pick) and the
+  // mt_rand() rolls in getBattleResult (wounded/capture). The legacy side settles via the
+  // tick('HandleTroop') + tick('HandleBattle') harness in tools/src/lib/difftest/side.ts.
+  {
+    // 掠夺 (task 3) against an EMPTY wild field: cfg_js.php HandleTroop arrival early-outs
+    // (野地空无一人) with no battle, turns the troop home, completes the field task. Deterministic —
+    // no rand() is drawn on the empty-field path — so a tight compare of the troop row + report.
+    name: 'battle: 掠夺 an empty wild field turns the troop home',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await s.query('delete from sys_troops where uid = ?', [uid]);
+      // A free wild field adjacent in province, no stationed troop.
+      const [field] = await s.query<{ wid: string }>(
+        'select wid from mem_world where ownercid = 0 and type > 1 and state = 0 order by wid limit 1',
+      );
+      const fieldWid = Number(field?.wid ?? 0);
+      const targetcid = wid2cid(fieldWid);
+      await s.query(
+        `insert into sys_troops
+          (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
+         values (?, ?, 0, ?, 3, 0, unix_timestamp() - 600, 600, unix_timestamp() - 1, '1,1,100', '0', 0, 0)`,
+        [uid, cid, targetcid],
+      );
+      await s.tick('HandleTroop');
+      await s.tick('HandleBattle');
+      await s.query('delete from sys_troops where uid = ?', [uid]);
+    },
+  },
+  {
+    // 占领 (task 4) an empty wild field: HandleTroop takes it over (mem_world.ownercid = cid),
+    // troop → state 4, field resource adds recomputed, field tasks completed. Deterministic.
+    name: 'battle: 占领 an empty wild field claims it',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await s.query('delete from sys_troops where uid = ?', [uid]);
+      const [field] = await s.query<{ wid: string }>(
+        'select wid from mem_world where ownercid = 0 and type > 1 and state = 0 order by wid limit 1',
+      );
+      const targetcid = wid2cid(Number(field?.wid ?? 0));
+      await s.query(
+        `insert into sys_troops
+          (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
+         values (?, ?, 0, ?, 4, 0, unix_timestamp() - 600, 600, unix_timestamp() - 1, '1,1,100', '0', 0, 0)`,
+        [uid, cid, targetcid],
+      );
+      await s.tick('HandleTroop');
+      await s.query('delete from sys_troops where uid = ?', [uid]);
+      await s.query('update mem_world set ownercid = 0 where wid = ?', [Number(field?.wid ?? 0)]);
+    },
+  },
+  {
+    // 攻击 (task 9) a stationed defender on a wild field: HandleTroop builds both sides and
+    // inserts mem_battle; HandleBattle then advances rounds until getBattleResult settles. The
+    // round target pick draws rand() — pin a short sequence so both servers resolve identically.
+    name: 'battle: 攻击 a defended wild field runs to settlement',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await s.query('delete from sys_troops where uid = ?', [uid]);
+      const [field] = await s.query<{ wid: string }>(
+        'select wid from mem_world where ownercid = 0 and type > 1 and state = 0 order by wid limit 1',
+      );
+      const targetcid = wid2cid(Number(field?.wid ?? 0));
+      // Attacker marching in; a small NPC defender already stationed (state 4).
+      await s.query(
+        `insert into sys_troops
+          (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
+         values (?, ?, 0, ?, 9, 0, unix_timestamp() - 600, 600, unix_timestamp() - 1, '1,1,2000', '0', 0, 0)`,
+        [uid, cid, targetcid],
+      );
+      await s.query(
+        `insert into sys_troops
+          (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
+         values (0, ?, 0, ?, 5, 4, unix_timestamp(), 0, 0, '1,3,10', '0', 0, 0)`,
+        [targetcid, targetcid],
+      );
+      await s.query('update mem_world set ownercid = ? where wid = ?', [
+        targetcid,
+        Number(field?.wid ?? 0),
+      ]);
+      // Pin the per-round target pick and the getBattleResult wounded/capture rolls.
+      s.rng([1, 2, 1, 0, 0, 3, 1]);
+      await s.tick('HandleTroop');
+      // Several HandleBattle ticks drive the rounds to a verdict.
+      for (let i = 0; i < 45; i++) await s.tick('HandleBattle');
+      s.stopRng();
+      await s.query('delete from sys_troops where uid = ? or cid = ?', [uid, targetcid]);
+      await s.query('delete from mem_battle where attackcid = ?', [cid]);
+      await s.query('update mem_world set ownercid = 0, state = 0 where wid = ?', [
+        Number(field?.wid ?? 0),
+      ]);
+    },
+  },
+  {
+    // 掠夺 (task 3) a defended CITY (type 2): the won battle steals resources and turns home.
+    // Seeded with a small defender garrison; the resource-theft branch + report compared.
+    name: 'battle: 掠夺 a defended city',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await s.query('delete from sys_troops where uid = ?', [uid]);
+      // Target a foreign city the save ships (FOREIGN_CITY). Give it a token garrison.
+      await s.query('delete from sys_city_soldier where cid = ? and sid = 3', [FOREIGN_CITY]);
+      await s.query('insert into sys_city_soldier (cid, sid, count) values (?, 3, 5)', [
+        FOREIGN_CITY,
+      ]);
+      await s.query(
+        `insert into sys_troops
+          (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
+         values (?, ?, 0, ?, 3, 0, unix_timestamp() - 600, 600, unix_timestamp() - 1, '1,1,3000', '0', 0, 0)`,
+        [uid, cid, FOREIGN_CITY],
+      );
+      s.rng([1, 1, 2, 0, 0]);
+      await s.tick('HandleTroop');
+      for (let i = 0; i < 45; i++) await s.tick('HandleBattle');
+      s.stopRng();
+      await s.query('delete from sys_troops where uid = ?', [uid]);
+      await s.query('delete from sys_city_soldier where cid = ? and sid = 3', [FOREIGN_CITY]);
+      await s.query('delete from mem_battle where attackcid = ?', [cid]);
+    },
+  },
+  {
+    // The round engine's wall phase: a type-1 city battle with the wall standing. Drives one
+    // mem_battle round directly (seeded) and compares the mem_battle delta (wallhp/positions).
+    name: 'battle: city attack wall phase advances one round',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const bid = 991001;
+      await s.query('delete from mem_battle where id = ?', [bid]);
+      await s.query('delete from sys_battle where id = ?', [bid]);
+      await s.query('delete from mem_battle_tactics where battleid = ?', [bid]);
+      await s.query(
+        `insert into sys_battle (id, type, attackuid, resistuid, attacktroop, state, result, cid, resistdefence)
+         values (?, 1, ?, 1002, 0, 0, 0, ?, '')`,
+        [bid, uid, FOREIGN_CITY],
+      );
+      // A type-1 (攻城) battle, wall up, attacker at the gate, due now.
+      await s.query(
+        `insert into mem_battle
+          (id, type, nexttime, round, attackcid, attackhid, attacksoldiers, attackpos, attackadd,
+           resistcid, resisthid, resistsoldiers, resistpos, resistadd, resistdefence, wallhp,
+           walllevel, fieldrange, state, level)
+         values (?, 1, unix_timestamp() - 1, 1, ?, 0, '1,1,1000', '1,1,200',
+           '1,1,50,50,30,100,100,50,30,100,0', ?, 0, '0', '0', '', '1,1,1,10', 1000000, 1, 1000, 4, 0)`,
+        [bid, cid, FOREIGN_CITY],
+      );
+      s.rng([1]);
+      await s.tick('HandleBattle');
+      s.stopRng();
+      await s.query('delete from mem_battle where id = ?', [bid]);
+      await s.query('delete from sys_battle where id = ?', [bid]);
+      await s.query('delete from mem_battle_tactics where battleid = ?', [bid]);
+      await s.query('delete from sys_battle_report where battleid = ?', [bid]);
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {

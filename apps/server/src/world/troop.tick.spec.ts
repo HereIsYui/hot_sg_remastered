@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import { BattleArrivalService } from '../battle/battle-arrival.service';
 import { CityRules } from '../core/city-rules.service';
 import { HeroRules } from '../core/hero-rules.service';
 import { LangService } from '../common/lang.service';
 import { MailService } from '../core/mail.service';
+import { RandomService } from '../core/random.service';
 import { ReportService } from '../core/report.service';
+import { TaskRules } from '../core/task-rules.service';
+import { UserRules } from '../core/user-rules.service';
 import { FakeDb, type Respond } from '../hero/fake-db.testutil';
 import { TroopTick } from './troop.tick';
 
@@ -21,14 +25,26 @@ const lang = new LangService({
   battle: { patrol_report_soldier: { '1': '民夫', '3': '斥候' } },
 });
 
+const random = { randRange: () => 0, mtRand: () => 0 } as unknown as RandomService;
+
 function build(rules: Respond[]) {
   const db = new FakeDb(rules);
+  const arrival = new BattleArrivalService(
+    db.scope,
+    lang,
+    new CityRules(db.scope),
+    new HeroRules(db.scope),
+    new TaskRules(db.scope, new UserRules(db.scope)),
+    new ReportService(db.scope, new MailService(db.scope)),
+    random,
+  );
   const tick = new TroopTick(
     db.scope,
     lang,
     new CityRules(db.scope),
     new HeroRules(db.scope),
     new ReportService(db.scope, new MailService(db.scope)),
+    arrival,
   );
   return { tick, db };
 }
@@ -138,7 +154,7 @@ describe('TroopTick.handleTroop', () => {
     expect(db.executed.some((q) => /insert into sys_city_soldier/i.test(q.sql))).toBe(true);
   });
 
-  it('leaves a battle arrival (task 4, state 0) untouched — battle engine not ported', async () => {
+  it('leaves a 侦察 arrival (task 2, state 0) untouched — scout agent owns it', async () => {
     const { tick, db } = build([
       {
         match: /from sys_troops\s+where endtime > 0/i,
@@ -149,7 +165,7 @@ describe('TroopTick.handleTroop', () => {
             hid: 42,
             cid: 3003,
             targetcid: 5005,
-            task: 4,
+            task: 2,
             state: 0,
             battlefieldid: 0,
             soldiers: '1,1,100',

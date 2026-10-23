@@ -1,16 +1,36 @@
 import { describe, expect, it } from 'vitest';
+import { LangService } from '../common/lang.service';
+import { CityRules } from '../core/city-rules.service';
+import { HeroRules } from '../core/hero-rules.service';
 import { RandomService } from '../core/random.service';
+import { ReportService } from '../core/report.service';
+import { MailService } from '../core/mail.service';
+import { TaskRules } from '../core/task-rules.service';
+import { UserRules } from '../core/user-rules.service';
 import { FakeDb, type Respond } from '../hero/fake-db.testutil';
 import { BattleEngineService } from './battle-engine.service';
 import { BattleTick } from './battle.tick';
+import { OldBattleService } from './old-battle.service';
 
 /** Deterministic RNG: the unopposed maneuver below never calls it, so any stub is fine. */
-const random = { mtRand: () => 0 } as unknown as RandomService;
+const random = { mtRand: () => 0, randRange: () => 0 } as unknown as RandomService;
 
 function build(rules: Respond[]) {
   const db = new FakeDb(rules);
   const engine = new BattleEngineService(db.scope, random);
-  const tick = new BattleTick(db.scope, engine);
+  const lang = new LangService({});
+  const mail = new MailService(db.scope);
+  const users = new UserRules(db.scope);
+  const old = new OldBattleService(
+    db.scope,
+    lang,
+    new CityRules(db.scope),
+    new HeroRules(db.scope),
+    new TaskRules(db.scope, users),
+    new ReportService(db.scope, mail),
+    random,
+  );
+  const tick = new BattleTick(db.scope, engine, old);
   return { tick, db };
 }
 
@@ -41,16 +61,25 @@ describe('BattleTick.handleBattle', () => {
     expect(update).toBeUndefined();
   });
 
-  it('leaves due mem_battle rows untouched (time-stepped engine not ported)', async () => {
+  it('deletes a due mem_battle whose sys_battle is already finished (state 1)', async () => {
     const { tick, db } = build([
       NO(/select \* from mem_maneuver where state = 0/i),
-      { match: /select id from mem_battle/i, rows: [{ id: 5 }] },
+      {
+        match: /select \* from mem_battle where nexttime <= unix_timestamp\(\)/i,
+        rows: [{ id: 5 }],
+      },
+      // HandleBattle's `select state from sys_battle` → 1 (finished) → delete the mem_battle row.
+      { match: /select state as v from sys_battle where id = /i, rows: [{ v: 1 }] },
+      NO(/delete from mem_battle where id = /i),
     ]);
 
     await tick.handleBattle();
 
-    // No write against mem_battle — the scaffold only reads.
-    const wrote = db.executed.some((q) => /(update|delete|insert).*mem_battle/i.test(q.sql));
-    expect(wrote).toBe(false);
+    // A finished battle's mem_battle row is removed (not advanced).
+    expect(db.executed.some((q) => /delete from mem_battle where id = /i.test(q.sql))).toBe(true);
+    // updateBattle was NOT entered (no round read).
+    expect(db.executed.some((q) => /select \* from mem_battle where id = /i.test(q.sql))).toBe(
+      false,
+    );
   });
 });
