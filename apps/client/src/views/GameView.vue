@@ -8,6 +8,7 @@ import DialogManager from './game/DialogManager.vue';
 import InfoPanel from './game/InfoPanel.vue';
 import ServerTime from './game/ServerTime.vue';
 import TopPanel from './game/TopPanel.vue';
+import WorldPanel from './world/WorldPanel.vue';
 
 /** Main game screen (BloodWar.mxml layout): the scene panels, with the bars on top. */
 const session = useSessionStore();
@@ -19,6 +20,7 @@ const session = useSessionStore();
     <InfoPanel />
     <CityInnerPanel v-if="session.view === 'cityInner'" :x="263" :y="0" />
     <CityPanel v-if="session.view === 'city'" :x="264" :y="0" />
+    <WorldPanel v-if="session.view === 'world'" />
     <ServerTime :x="538" :y="65" />
     <TopPanel :x="264" :y="0" />
     <DialogManager :x="289" :y="54" />
