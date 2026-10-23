@@ -2600,6 +2600,100 @@ export const cases: DiffCase[] = [
       );
     },
   },
+  {
+    name: 'mail: getMail falls back to the inbox and clears the alarm',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      // No unread mail of any kind: getMail returns the (empty) inbox with flag 0 and the alarm
+      // row is forced to 0.
+      await s.query('delete from sys_mail_box where uid = ? or fromuid = ?', [
+        session.uid,
+        session.uid,
+      ]);
+      await s.query('delete from sys_mail_sys_box where uid = ?', [session.uid]);
+      await s.query(
+        'insert into sys_alarm (uid, mail) values (?, 1) on duplicate key update mail = 1',
+        [session.uid],
+      );
+      await s.command(session, 'getMail');
+      await s.command(session, 'getInboxMail', 0);
+      await s.command(session, 'getOutboxMail', 0);
+      await s.command(session, 'getSysMail', 0);
+    },
+  },
+  {
+    name: 'mail: inbox, 系统信 and reading a letter',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      await s.query('delete from sys_mail_box where uid = ? or fromuid = ?', [
+        session.uid,
+        session.uid,
+      ]);
+      await s.query('delete from sys_mail_sys_box where uid = ?', [session.uid]);
+      // A personal letter in the inbox with a known content row, and a 系统信.
+      await s.query(
+        'insert into sys_mail_content (mid, content, posttime) values (900001, ?, 1500000000)',
+        ['difftest inbox body'],
+      );
+      await s.query(
+        `insert into sys_mail_box
+          (mid, uid, name, fromuid, fromname, contentid, title, \`read\`, recvstate, sendstate, posttime, type)
+         values (900001, ?, ?, 999, '差分发件人', 900001, '差分标题', 0, 0, 0, 1500000000, 1)`,
+        [session.uid, EXISTING_PLAYER],
+      );
+      await s.query(
+        'insert into sys_mail_sys_content (mid, content, posttime) values (900002, ?, 1500000100)',
+        ['<b>difftest sys body</b>'],
+      );
+      await s.query(
+        `insert into sys_mail_sys_box (mid, uid, contentid, title, \`read\`, posttime)
+         values (900002, ?, 900002, '差分系统信', 0, 1500000100)`,
+        [session.uid],
+      );
+      // getMail now opens on the inbox (flag 0) because it has an unread letter.
+      await s.command(session, 'getMail');
+      await s.command(session, 'getSysMail', 0);
+      await s.command(session, 'readInboxMail', 900001);
+      await s.command(session, 'readSysMail', 900002);
+      // A missing letter reports mail_lost.
+      await s.command(session, 'readInboxMail', 123456789);
+      // Clean up the seeded rows and content.
+      await s.query('delete from sys_mail_box where mid = 900001');
+      await s.query('delete from sys_mail_content where mid = 900001');
+      await s.query('delete from sys_mail_sys_box where mid = 900002');
+      await s.query('delete from sys_mail_sys_content where mid = 900002');
+    },
+  },
+  {
+    name: 'mail: send a personal letter and the error paths',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      await s.query('delete from sys_mail_box where uid = ? or fromuid = ?', [
+        session.uid,
+        session.uid,
+      ]);
+      // Missing addressee, then a real one. posttime of a new letter follows the clock.
+      await s.command(session, 'sendPersonMail', EXISTING_PLAYER, '查无此人name', '标题', '正文');
+      const [other] = await s.query<{ name: string }>(
+        'select name from sys_user where uid > 1000 and uid <> ? limit 1',
+        [session.uid],
+      );
+      await s.command(
+        session,
+        'sendPersonMail',
+        EXISTING_PLAYER,
+        other?.name ?? EXISTING_PLAYER,
+        '差分标题',
+        '差分正文',
+      );
+      // The sent letter shows in the outbox; its posttime is now.
+      await s.command(session, 'getOutboxMail', 0);
+      s.offset(4, 0, 'posttime');
+      // 联盟群发 is not ported yet.
+      await s.command(session, 'sendUnionMail', EXISTING_PLAYER, 0, '群发', '内容');
+      await s.query('delete from sys_mail_box where fromuid = ?', [session.uid]);
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {

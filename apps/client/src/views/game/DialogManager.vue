@@ -29,6 +29,9 @@ import UseGoodsDialog from '../goods/UseGoodsDialog.vue';
 import GovernmentDialog from '../government/GovernmentDialog.vue';
 import ResourceProductDialog from '../government/ResourceProductDialog.vue';
 import HotelDialog from '../hotel/HotelDialog.vue';
+import MailDialog from '../mail/MailDialog.vue';
+import MailDetailDialog from '../mail/MailDetailDialog.vue';
+import MailWriteDialog from '../mail/MailWriteDialog.vue';
 import ModifyPasswordDialog from '../system/ModifyPasswordDialog.vue';
 import OpenLockDialog from '../system/OpenLockDialog.vue';
 import BuyAndUseGoodsDialog from '../shop/BuyAndUseGoodsDialog.vue';
@@ -172,6 +175,18 @@ function choose(action: 'all' | 'level') {
     <UseGoodsDialog v-if="session.useGoods" :request="session.useGoods" />
     <ShopDialog v-if="session.shop" :target-tab="session.shop.tab" />
     <BuyAndUseGoodsDialog v-if="session.buyAndUse" :request="session.buyAndUse" />
+    <MailDialog v-if="session.mail" />
+    <MailDetailDialog
+      v-if="session.mailDetail"
+      :key="`maildetail ${session.mailDetail.mid}`"
+      :mid="session.mailDetail.mid"
+      :page="session.mailDetail.page"
+    />
+    <MailWriteDialog
+      v-if="session.mailWrite"
+      :reply="session.mailWrite.reply"
+      :receiver="session.mailWrite.receiver"
+    />
   </div>
 </template>
 
