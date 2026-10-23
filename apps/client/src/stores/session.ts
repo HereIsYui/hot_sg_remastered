@@ -76,6 +76,12 @@ export const useSessionStore = defineStore('session', {
     shop: null as { tab?: number } | null,
     /** BuyAndUseGoodsDialog: the `not_enough_goods` buy-and-use popup. */
     buyAndUse: null as BuyAndUseRequest | null,
+    /** Mail (MailDialog) open over the scene; detail / write layer stacked on top. */
+    mail: null as { open: boolean } | null,
+    /** MailDetailDialog: the letter being read (mid + its mailbox page). */
+    mailDetail: null as { mid: number; page: number } | null,
+    /** MailWriteDialog: a new letter, optionally a reply pre-filled from a read letter. */
+    mailWrite: null as { reply: Record<string, unknown> | null; receiver: string } | null,
     /** JackarooDialog: the welcome shown once a role is created. */
     welcome: false,
   }),

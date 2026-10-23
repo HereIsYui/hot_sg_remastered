@@ -12,6 +12,7 @@ import { GroundModule } from './ground/ground.module';
 import { GuideModule } from './guide/guide.module';
 import { HealthController } from './health/health.controller';
 import { HeroModule } from './hero/hero.module';
+import { MailModule } from './mail/mail.module';
 import { PushModule } from './push/push.module';
 import { RankModule } from './rank/rank.module';
 import { ShopModule } from './shop/shop.module';
@@ -41,6 +42,7 @@ import { WorldModule } from './world/world.module';
     HeroModule,
     ShopModule,
     WorldModule,
+    MailModule,
   ],
   controllers: [HealthController],
 })

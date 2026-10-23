@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
+import { useGame } from '../../game/game';
 import { i18n } from '../../i18n';
 import FxButton from '../../ui/FxButton.vue';
 import FxCanvas from '../../ui/FxCanvas.vue';
@@ -8,6 +9,8 @@ import FxTextInput from '../../ui/FxTextInput.vue';
 
 /** Bar.BottomPanel: chat input bar and the right-aligned function buttons. */
 defineProps<{ x?: number; y?: number }>();
+
+const game = useGame();
 
 /** Right-anchored function buttons, 31px apart (friend ... shop). */
 const FUNCTIONS = [
@@ -23,6 +26,19 @@ const FUNCTIONS = [
   'ButtonShop',
 ] as const;
 
+/** `sys_alarm.mail`: an unread letter blinks the 邮件 button (BottomPanel.showMailAlarm). */
+const mailUnread = computed(() => parseInt(String(game.city.alarm?.mail ?? 0), 10) === 1);
+
+/** Right offset of a function button by name, matching the FUNCTIONS layout. */
+function rightOf(name: (typeof FUNCTIONS)[number]): number {
+  return 4 + 31 * (FUNCTIONS.length - 1 - FUNCTIONS.indexOf(name));
+}
+
+/** The bottom-bar buttons wired so far; others stay inert until their modules are ported. */
+function onClick(name: (typeof FUNCTIONS)[number]): void {
+  if (name === 'ButtonMail') game.openMail();
+}
+
 const chatText = ref('');
 </script>
 
@@ -34,6 +50,16 @@ const chatText = ref('');
       :style-name="name"
       :right="4 + 31 * (FUNCTIONS.length - 1 - i)"
       :bottom="4"
+      @click="onClick(name)"
+    />
+    <!-- 邮件 unread blink: the alarm button overlays ButtonMail when sys_alarm.mail is set. -->
+    <FxButton
+      v-if="mailUnread"
+      style-name="ButtonMailAlarm"
+      :right="rightOf('ButtonMail')"
+      :bottom="4"
+      :tip="i18n('Bar_BottomPanel_mail_alarm')"
+      @click="onClick('ButtonMail')"
     />
     <FxImage :left="3" :top="4" :w="428" source="images/chatbar.png" />
     <FxButton :x="348" :y="9" :w="28" :h="24" style-name="ButtonSend" />

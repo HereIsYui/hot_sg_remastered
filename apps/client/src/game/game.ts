@@ -434,6 +434,9 @@ export class Game {
     this.session.useGoods = null;
     this.session.shop = null;
     this.session.buyAndUse = null;
+    this.session.mail = null;
+    this.session.mailDetail = null;
+    this.session.mailWrite = null;
   }
 
   /** `TopPanel.onLevelClick`. */
@@ -523,6 +526,43 @@ export class Game {
 
   closeShop(): void {
     this.session.shop = null;
+  }
+
+  /**
+   * `BottomPanel.onMailClick` / `DialogManager.showMailDialog`: open the 邮件 dialog. It fetches
+   * its own list (`getMail`) on mount and clears the bottom-bar unread blink.
+   */
+  openMail(): void {
+    this.session.mailDetail = null;
+    this.session.mailWrite = null;
+    this.session.mail = { open: true };
+  }
+
+  closeMail(): void {
+    this.session.mail = null;
+    this.session.mailDetail = null;
+    this.session.mailWrite = null;
+  }
+
+  /** `MailDialog.showMail`: open the detail dialog for a letter in `page` (one of MAIL_PAGE). */
+  showMailDetail(mid: number, page: number): void {
+    this.session.mailDetail = { mid, page };
+  }
+
+  closeMailDetail(): void {
+    this.session.mailDetail = null;
+  }
+
+  /**
+   * `DialogManager.showMailWriteDialog`: open the compose dialog, optionally pre-filled as a reply
+   * (`MailDetailDialog.reply` / `setReceiver`).
+   */
+  showMailWrite(reply: Record<string, unknown> | null = null, receiver = ''): void {
+    this.session.mailWrite = { reply, receiver };
+  }
+
+  closeMailWrite(): void {
+    this.session.mailWrite = null;
   }
 
   /** The `[cid, inner, x, y, bid]` building commands, acting on `session.currentSlot`. */
