@@ -142,6 +142,22 @@ export class CommandClient {
     );
   }
 
+  /**
+   * amfphp-style service call (`CallEvent` in the AS3): `POST {SERVICE_ENDPOINT}/{service}/{method}`
+   * with the plain args array, returning the raw JSON result. Used for `ExternService`
+   * (getTroopMaxTime / getEnemyTroopSet / saveEnemyTroopSet) which bypass the command gateway.
+   */
+  async callService(service: string, method: string, args: CommandArg[] = []): Promise<unknown> {
+    if (!this.open) return null;
+    try {
+      return await this.transport(`${SERVICE_ENDPOINT}/${service}/${method}`, args);
+    } catch (err) {
+      if (!(err instanceof NetworkError)) throw err;
+      this.handlers.fault(err, true);
+      return null;
+    }
+  }
+
   private async send(
     url: string,
     body: unknown[],

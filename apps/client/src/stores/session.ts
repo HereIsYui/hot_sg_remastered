@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia';
+import type { TroopRow } from '../game/troop';
 import type { BuildingState } from './city';
 
 export type Screen = 'loading' | 'login' | 'createRole' | 'game';
@@ -44,6 +45,24 @@ export interface BuyAndUseRequest {
   goods: Record<string, unknown>;
 }
 
+/** `DialogManager.showTroopDetailDialog`: the troop a 军队详情 pop-up is opened for. */
+export interface TroopDetailRequest {
+  troop: TroopRow;
+  armyType: 'self' | 'enemy' | 'union';
+}
+
+/**
+ * `DialogManager.showCampaignDialog`: the 出征 dialog opened over the 校场. `groundBid` / `groundParam`
+ * route its StartTroop / scheme dialog commands; `targetCid` / `taskIndex` preset the target and
+ * the task combo (per the AS3 `setTarget` / `setTask`).
+ */
+export interface CampaignRequest {
+  groundBid: number;
+  groundParam: number;
+  targetCid: number;
+  taskIndex: number;
+}
+
 /** Client-side flow state of BloodWar.as (which top-level view is shown, busy cursor). */
 export const useSessionStore = defineStore('session', {
   state: () => ({
@@ -84,5 +103,11 @@ export const useSessionStore = defineStore('session', {
     mailWrite: null as { reply: Record<string, unknown> | null; receiver: string } | null,
     /** JackarooDialog: the welcome shown once a role is created. */
     welcome: false,
+    /** Troop (TroopDialog, 军队) open over the scene. */
+    troopDialog: false,
+    /** TroopDetailDialog: the 军队详情 pop-up stacked over the TroopDialog. */
+    troopDetail: null as TroopDetailRequest | null,
+    /** CampaignDialog (出征) open over the 校场. */
+    campaign: null as CampaignRequest | null,
   }),
 });
