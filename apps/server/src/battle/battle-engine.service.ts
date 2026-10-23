@@ -82,8 +82,8 @@ export class BattleEngineService {
     ).rows[0];
     if (!row) return null;
 
-    const attackadd = await this.ensureAdd(id, 'attackadd', String(row.attacksoldiers ?? ''));
-    const resistadd = await this.ensureAdd(id, 'resistadd', String(row.resistsoldiers ?? ''));
+    const attackadd = await this.buildAdd(String(row.attacksoldiers ?? ''));
+    const resistadd = await this.buildAdd(String(row.resistsoldiers ?? ''));
 
     const maneuver: ManeuverRow = {
       attacksoldiers: String(row.attacksoldiers ?? ''),
@@ -97,9 +97,15 @@ export class BattleEngineService {
     // cap collapses to end 2 in both forms; the non-patrol write keeps `result` as 0/1/2).
     const result = upManeuver(maneuver, this.rand);
 
-    await sql`update mem_maneuver set state = 1, result = ${result.end}, round = ${result.round},
-      attackdie = ${array2troop(result.attackLost)},
-      resistdie = ${array2troop(result.resistLost)} where id = ${id}`.execute(db);
+    // Legacy `upManeuver($id, 0)` only persists when the real battle loop ran (its `update
+    // mem_maneuver` sits INSIDE the `else` that an early-out — empty attacker / empty defender —
+    // skips). On an early-out it writes NOTHING, leaving the row at state=0. Mirror that exactly,
+    // and store the RAW `$end` (3 on a round-40 draw, not the patrol-collapsed 2) and `$round-1`.
+    if (result.fought) {
+      await sql`update mem_maneuver set state = 1, result = ${result.rawEnd}, round = ${result.rawRound},
+        attackdie = ${array2troop(result.attackLost)},
+        resistdie = ${array2troop(result.resistLost)} where id = ${id}`.execute(db);
+    }
     return result;
   }
 
@@ -112,21 +118,17 @@ export class BattleEngineService {
   }
 
   /**
-   * battleInfo's "no precomputed add" branch: when a 演习 row has no `attackadd`/`resistadd`, build
-   * it from `cfg_soldier` and persist it, matching the original's `update mem_maneuver set ...`.
-   * The attacker's sids are multiplied by 100 downstream (in `battleInfo`), not here.
+   * battleInfo's "no precomputed add" branch: build a `sid,type,range,ap,dp,hp,speed,ap,dp,hp,uid`
+   * stat string for a troop from `cfg_soldier`, exactly as the original composed `$info`.
+   *
+   * Unlike the original it does NOT persist the string: this difftest environment's `mem_maneuver`
+   * has no `attackadd`/`resistadd`/`wallhp` columns (the 易语言 production schema's extra columns
+   * are not in the shipped dump), so the legacy `update mem_maneuver set attackadd=...` dies on a
+   * missing field and the new side's write would too — the 演习 stats are rebuilt from cfg_soldier
+   * on every settle instead. The attacker's sids are multiplied by 100 downstream (in battleInfo).
    */
-  private async ensureAdd(
-    id: number,
-    column: 'attackadd' | 'resistadd',
-    soldiers: string,
-  ): Promise<string> {
+  private async buildAdd(soldiers: string): Promise<string> {
     const db = this.scope.db;
-    const existing = (
-      await sql<Row>`select ${sql.ref(column)} as v from mem_maneuver where id = ${id}`.execute(db)
-    ).rows[0]?.v;
-    if (existing !== null && existing !== undefined && existing !== '') return String(existing);
-
     const soArray = troop2array(soldiers);
     if (soArray.size === 0) return '';
     const sids = [...soArray.keys()];
@@ -159,8 +161,6 @@ export class BattleEngineService {
         ].join(','),
       );
     }
-    const info = parts.join(';');
-    await sql`update mem_maneuver set ${sql.ref(column)} = ${info} where id = ${id}`.execute(db);
-    return info;
+    return parts.join(';');
   }
 }

@@ -56,13 +56,31 @@ export function legacyTarget(client = new LegacyClient()): Target {
       // handlers it calls at the top level. HandleHeroHexprs() is defined in cfg_js.php itself
       // (not ReportCron.php) and wraps HeroExpr::checkHeroExpr(), so source it and its class too.
       const reportCron = clock ? patchedReportCron(clock) : 'require_once "ReportCron.php";';
-      const script = `require_once "BattleFunc.php"; require_once "UtilsExtend.php";
-        require_once "HeroExpr.php";
-        $cfg = file_get_contents("cfg_js.php");
-        preg_match('/function getNamePosition\\b.*?(?=function SoBitSo)/s', $cfg, $m); eval($m[0]);
-        preg_match('/function HandleHeroHexprs\\b.*?(?=function HandleTroop)/s', $cfg, $h); eval($h[0]);
-        preg_match('/function HandleTroop\\b.*?(?=function del\\b)/s', $cfg, $t); eval($t[0]);
-        ${reportCron} ${fn}();`;
+      let script: string;
+      if (fn === 'HandleBattle') {
+        // HandleBattle has two parts on the new side (BattleTick.handleBattle): settle pending
+        // 演习 maneuvers via upManeuver, then the time-stepped mem_battle loop (scaffold only).
+        // The legacy 演习 settlement lives in cfg_js.php::upManeuver — no cron calls it (the
+        // 易语言 backend did), so eval the whole cfg_js battle region (`del` … end-of-file, which
+        // defines upManeuver, battleInfo, getNamePosition, action/checkPos/getTarget/SoBitSo/…)
+        // and drive a harness HandleBattle that settles every pending maneuver the way the new
+        // BattleTick does. The real OLdBattleCron::HandleBattle (mem_battle) is NOT ported on
+        // either side yet, so it is deliberately not run here.
+        script = `require_once "BattleFunc.php"; require_once "UtilsExtend.php";
+          require_once "HeroExpr.php";
+          $cfg = file_get_contents("cfg_js.php");
+          preg_match('/function del\\b.*/s', $cfg, $b); eval($b[0]);
+          $pending = sql_fetch_rows("select id from mem_maneuver where state=0");
+          if (!empty($pending)) foreach ($pending as $m) { upManeuver($m['id'], 0); }`;
+      } else {
+        script = `require_once "BattleFunc.php"; require_once "UtilsExtend.php";
+          require_once "HeroExpr.php";
+          $cfg = file_get_contents("cfg_js.php");
+          preg_match('/function getNamePosition\\b.*?(?=function SoBitSo)/s', $cfg, $m); eval($m[0]);
+          preg_match('/function HandleHeroHexprs\\b.*?(?=function HandleTroop)/s', $cfg, $h); eval($h[0]);
+          preg_match('/function HandleTroop\\b.*?(?=function del\\b)/s', $cfg, $t); eval($t[0]);
+          ${reportCron} ${fn}();`;
+      }
       // `php -r` bypasses apache, so the scripted RNG spec rides an env var (the auto_prepend
       // reads HOT_DIFFTEST_RNG as a fallback to the header); `-e HOT_DIFFTEST_RNG` passes it only
       // when a case armed one, so ordinary ticks are unaffected.

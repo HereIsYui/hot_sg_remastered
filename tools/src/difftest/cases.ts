@@ -3241,20 +3241,27 @@ export const cases: DiffCase[] = [
   },
   {
     // HandleBattle tick (cfg_js.php, TickOrder.Battle): the 演习 (upManeuver) instant simulator.
-    // A 演习 row is queued by GroundFunc.php::startManeuver as `mem_maneuver(state=0, attacksoldiers,
-    // resistsoldiers)`; the backend fills attackadd/resistadd from cfg_soldier, runs the battle and
-    // writes state=1,result,round,attackdie,resistdie. This case uses an EMPTY defender so the loop
-    // early-outs to an attacker win (end 0) WITHOUT consuming any mt_rand — getTarget never runs —
-    // so the two sides match without RNG scripting. The RNG-consuming maneuvers (both sides fight)
-    // belong to the stage5/difftest-rng harness, which scripts mt_rand on both sides.
+    // A 演习 row is queued by GroundFunc.php::startManeuver as `mem_maneuver(state=0, …)`; the
+    // 易语言 backend ran `upManeuver($id, 0)` to settle it — no PHP cron does, so the difftest
+    // harness's legacy `tick('HandleBattle')` calls upManeuver over every pending maneuver (see
+    // tools/src/lib/difftest/side.ts), mirroring the new BattleTick.handleBattle.
     //
-    // NOTE: the legacy `tick('HandleBattle')` path needs the harness's PHP eval to load
-    // OLdBattleCron.php + upManeuver (owned by stage5/difftest-rng). Until that lands this case is
-    // written but left unrun, as the wave brief directs.
-    name: '演习 (HandleBattle) settles an unopposed maneuver without RNG',
+    // IMPORTANT — only the EARLY-OUT is comparable in this environment. The shipped `mem_maneuver`
+    // dump has NO `attackadd` / `resistadd` / `wallhp` columns (the production 易语言 schema's
+    // extra columns were trimmed), so the moment a REAL battle runs, legacy upManeuver's
+    // `update mem_maneuver set attackadd=…` hits "no such field" and the PearDB handler EXITs the
+    // script — the result is never persisted on the legacy side at all. An opposed maneuver is
+    // therefore impossible to match here; it belongs to the wave that restores those columns.
+    //
+    // The unopposed case (empty defender) early-outs to end 0 BEFORE any attackadd write: legacy
+    // returns without persisting, so the row stays state=0, and the new side's upManeuver likewise
+    // early-outs with `fought=false` and settleManeuver writes nothing (buildAdd never persists).
+    // Both sides leave the row untouched — the comparable, truthful outcome.
+    name: '演习 (HandleBattle) leaves an unopposed maneuver unsettled on both sides',
     run: async (s) => {
       await s.query('delete from mem_maneuver');
-      // Attacker: 100 scouts (sid 3). Defender: none. upManeuver returns end 0 at round 1.
+      // Attacker: 100 scouts (sid 3). Defender: none. upManeuver early-outs (end 0) and, because
+      // the real-battle block (with its attackadd write) is skipped, persists NOTHING.
       await s.query(
         `insert into mem_maneuver (id, state, attacksoldiers, resistsoldiers) values
           (900100, 0, '1,3,100', '0')`,
@@ -3263,8 +3270,9 @@ export const cases: DiffCase[] = [
       const [row] = await s.query<{ state: string; result: string; round: string }>(
         'select state, result, round from mem_maneuver where id = 900100',
       );
-      if (Number(row?.state) !== 1 || Number(row?.result) !== 0) {
-        throw new Error('演习 did not settle to an attacker win');
+      // Both sides leave it at state 0 (unsettled) — no table delta on either side.
+      if (Number(row?.state) !== 0) {
+        throw new Error('演习 early-out should leave the row unsettled (state 0)');
       }
       await s.query('delete from mem_maneuver where id = 900100');
     },

@@ -17,7 +17,7 @@ function build(rules: Respond[]) {
 const NO = (match: RegExp): Respond => ({ match, rows: [] });
 
 describe('BattleTick.handleBattle', () => {
-  it('settles a pending 演习 to an attacker win and writes state=1,result=0', async () => {
+  it('leaves an unopposed 演习 unsettled, as legacy upManeuver wrote nothing on an early-out', async () => {
     const { tick, db } = build([
       // one pending maneuver (state 0): 100 attacker scouts, empty field.
       {
@@ -35,11 +35,10 @@ describe('BattleTick.handleBattle', () => {
 
     await tick.handleBattle();
 
+    // Legacy `upManeuver($id, 0)`'s `update mem_maneuver` sits inside the real-battle `else`,
+    // which an empty-defender early-out skips — it writes NOTHING, leaving the row at state=0.
     const update = db.executed.find((q) => /update mem_maneuver set state = /i.test(q.sql));
-    expect(update).toBeDefined();
-    // result (0 = attacker win) and round (1) are bound parameters.
-    expect(update!.parameters).toContain(0);
-    expect(update!.parameters).toContain(1);
+    expect(update).toBeUndefined();
   });
 
   it('leaves due mem_battle rows untouched (time-stepped engine not ported)', async () => {

@@ -228,7 +228,7 @@ export class BattleReadCommands {
    * The original wrapped nothing in a transaction and returned nothing; neither do we (lesson).
    */
   @GlobalCommand()
-  async setSoldierTactics(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+  async setSoldierTactics(ctx: CommandContext, param: unknown[]): Promise<void> {
     const p = [...param];
     const battleid = phpIntval(p.shift());
     const userIsAttack = p.shift();
@@ -265,7 +265,6 @@ export class BattleReadCommands {
       await sql`update mem_battle_tactics set action = ${action}, target = ${target}
         where battleid = ${battleid} and attack = ${attack} and stype = ${stype}`.execute(this.db);
     }
-    return [];
   }
 
   /**

@@ -58,6 +58,17 @@ export interface ManeuverResult {
    */
   attackLost: Map<number, number>;
   resistLost: Map<number, number>;
+  /**
+   * The RAW `$end` / `$round` the non-patrol `upManeuver` persist line stored, before the patrol
+   * branch's `$end > 2 → 2` collapse and `round` cap. Legacy wrote `result=$end` (3 on a round-40
+   * draw) and `round=$round-1`. `settleManeuver` uses these so the stored `mem_maneuver` row
+   * byte-matches; `end` / `round` above keep the patrol (侦察) shape. Undefined on an early-out,
+   * where legacy wrote nothing at all (see `settleManeuver`).
+   */
+  rawEnd?: number;
+  rawRound?: number;
+  /** True when the real-battle branch ran (the loop executed); false on an early-out. */
+  fought: boolean;
 }
 
 /**
@@ -280,6 +291,7 @@ export function upManeuver(
     round: round > 40 ? 40 : round,
     attackLost: new Map(),
     resistLost: new Map(),
+    fought: false,
   };
 }
 
@@ -314,5 +326,9 @@ function finish(
     round: round > 40 ? 40 : round,
     attackLost: aArray,
     resistLost: dArray,
+    // The non-patrol persist stored the RAW `$end` (3 on a round-40 draw) and `$round - 1`.
+    rawEnd: end,
+    rawRound: round - 1,
+    fought: true,
   };
 }
