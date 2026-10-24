@@ -26,7 +26,7 @@ const lang = new LangService({
   battle: { patrol_report_soldier: { '1': '民夫', '3': '斥候' } },
 });
 
-const random = { randRange: () => 0, mtRand: () => 0 } as unknown as RandomService;
+const random = { rand: () => 0, randRange: () => 0, mtRand: () => 0 } as unknown as RandomService;
 
 function build(rules: Respond[]) {
   const db = new FakeDb(rules);
@@ -50,6 +50,8 @@ function build(rules: Respond[]) {
       lang,
       new ReportService(db.scope, new MailService(db.scope)),
       new TaskRules(db.scope, new UserRules(db.scope)),
+      new CityRules(db.scope),
+      random,
     ),
     arrival,
   );

@@ -42,6 +42,19 @@ function patchedReportCron(clock: TickClock): string {
 
 const LEGACY_COMPOSE = join(repoRoot, 'docker/legacy/docker-compose.yml');
 
+/**
+ * A `php -r` tick runs the scripted-RNG prepend via `auto_prepend_file`, but on this image's uopz
+ * (2.0.7, PHP 5.6) the `uopz_rename`/`uopz_function` overrides applied during the auto-prepend
+ * phase are REVERTED before the main `-r` script runs — so `rand()`/`mt_rand()` fall back to real
+ * randomness and no scripted sequence pins them. Re-`require`ing the prepend as the FIRST statement
+ * of the main script re-applies the override inside the main compilation unit, where it sticks (the
+ * prepend self-guards against the double load). The file early-returns when no spec is armed, so it
+ * is a no-op for ordinary (unseeded) ticks. Without this, a tick that draws RNG (e.g. checkSodier's
+ * NPC respawn) is nondeterministic and cannot difftest. The HTTP `call()` path (apache/mod_php) is
+ * unaffected — its auto-prepend overrides are not reverted.
+ */
+const RNG_REQUIRE = 'require "/opt/difftest/rng-prepend.php";';
+
 export function legacyTarget(client = new LegacyClient()): Target {
   return {
     call: (service, method, args, rng) =>
@@ -59,19 +72,23 @@ export function legacyTarget(client = new LegacyClient()): Target {
       let script: string;
       if (fn === 'HandleBattle') {
         // HandleBattle has two parts on the new side (BattleTick.handleBattle): settle pending
-        // 演习 maneuvers via upManeuver, then the time-stepped mem_battle loop (scaffold only).
-        // The legacy 演习 settlement lives in cfg_js.php::upManeuver — no cron calls it (the
-        // 易语言 backend did), so eval the whole cfg_js battle region (`del` … end-of-file, which
-        // defines upManeuver, battleInfo, getNamePosition, action/checkPos/getTarget/SoBitSo/…)
-        // and drive a harness HandleBattle that settles every pending maneuver the way the new
-        // BattleTick does. The real OLdBattleCron::HandleBattle (mem_battle) is NOT ported on
-        // either side yet, so it is deliberately not run here.
-        script = `require_once "BattleFunc.php"; require_once "UtilsExtend.php";
-          require_once "HeroExpr.php";
+        // 演习 maneuvers via upManeuver, THEN advance due time-stepped mem_battle rounds via
+        // OLdBattleCron::HandleBattle (OldBattleService on the new side). Mirror both here so a
+        // settled mem_battle (占城 / 抓将 / getBattleResult) compares symmetrically. The 演习
+        // settlement lives in cfg_js.php::upManeuver — no cron calls it (the 易语言 backend did) —
+        // so eval the whole cfg_js battle region (`del` … end-of-file: upManeuver, battleInfo,
+        // getNamePosition, action/checkPos/getTarget/SoBitSo/…) and settle every pending maneuver,
+        // then require OLdBattleCron.php and call its HandleBattle() for the mem_battle loop
+        // (updateBattle / return_new_place / getBattleResult). OLdBattleCron's battle engine uses
+        // $_SESSION as a per-battle scratch cache; in CLI it auto-vivifies, so one HandleBattle()
+        // call settles a due battle the same way the request-scoped original did.
+        script = `${RNG_REQUIRE} require_once "BattleFunc.php"; require_once "UtilsExtend.php";
+          require_once "HeroExpr.php"; require_once "OLdBattleCron.php";
           $cfg = file_get_contents("cfg_js.php");
           preg_match('/function del\\b.*/s', $cfg, $b); eval($b[0]);
           $pending = sql_fetch_rows("select id from mem_maneuver where state=0");
-          if (!empty($pending)) foreach ($pending as $m) { upManeuver($m['id'], 0); }`;
+          if (!empty($pending)) foreach ($pending as $m) { upManeuver($m['id'], 0); }
+          HandleBattle();`;
       } else {
         // HandleTroop's task-2 侦察 arrival (and the 掠夺/占领/攻击 battle arrivals) call into the
         // whole cfg_js battle region — battleAdd / defcityadd / upManeuver / count_desc /
@@ -90,7 +107,7 @@ export function legacyTarget(client = new LegacyClient()): Target {
         // OLdBattleCron.php is required because HandleTroop's 占领 success branch calls
         // updateFieldResourceAdds() (field-resource add recompute), which lives there, not in
         // cfg_js.php; without it the 占领 arrival fatals with an undefined-function error.
-        script = `require_once "BattleFunc.php"; require_once "UtilsExtend.php";
+        script = `${RNG_REQUIRE} require_once "BattleFunc.php"; require_once "UtilsExtend.php";
           require_once "HeroExpr.php"; require_once "OLdBattleCron.php";
           @unlink("cron/uptroop");
           $cfg = file_get_contents("cfg_js.php");

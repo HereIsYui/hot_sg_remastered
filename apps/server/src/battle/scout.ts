@@ -2,11 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { sql } from 'kysely';
 import { LangService } from '../common/lang.service';
 import { sprintf } from '../common/sprintf';
+import { CityRules } from '../core/city-rules.service';
 import { phpEmpty, phpIntval, phpNum, phpString } from '../core/php';
+import { RandomService } from '../core/random.service';
 import { ReportService } from '../core/report.service';
 import { TaskRules } from '../core/task-rules.service';
 import { DbScope } from '../db/database.module';
 import { countDescIndex } from './battle-math';
+import { checkSodier, type CheckSodierDeps } from './check-sodier';
 
 type Row = Record<string, unknown>;
 
@@ -56,6 +59,8 @@ export class ScoutService {
     private readonly lang: LangService,
     private readonly report: ReportService,
     private readonly tasks: TaskRules,
+    private readonly cityRules: CityRules,
+    private readonly random: RandomService,
   ) {}
 
   /**
@@ -345,18 +350,36 @@ export class ScoutService {
 
   /**
    * cfg_js.php::checkSodier boundary. On an NPC field/city (`$field['uid']<1000`) the original tops
-   * the garrison up with `createmapSoldier` driven by `mt_rand` — NONDETERMINISTIC, and it reaches
-   * `take_*` / `createmapSoldier` / `v2r`, none of which are ported. The deterministic difftest
-   * cases scout a PLAYER city (uid>1000) so this never runs; porting the NPC top-up is the
-   * NPC-economy wave's job, not the scout's. Kept as an explicit, documented no-op boundary so the
-   * control flow reads the same as the legacy, and a future wave has one place to fill in.
+   * the garrison up with `createmapSoldier` driven by `mt_rand` — now ported in `check-sodier.ts`,
+   * so a scout of an NPC field/city respawns the same garrison as the legacy on the deterministic
+   * (scripted-RNG) difftest path. The RNG draws (createmapSoldier `rand()`/`mt_rand`, the NPC pick)
+   * ride the request's scripted source via `RandomService`, so both servers stay in lockstep.
    */
   private async topUpNpcGarrison(field: Row): Promise<void> {
-    // intentionally not ported — see the doc comment. Logged at debug so a future wave can see
-    // which NPC field/city a scout would have topped up, and the `field` is not silently dropped.
-    this.logger.debug(
-      `checkSodier boundary: NPC garrison top-up skipped for field ${phpString(field.wid)}`,
-    );
+    await checkSodier(this.checkSodierDeps(), field);
+  }
+
+  /** Assemble the `CheckSodierDeps` from this service's collaborators. */
+  private checkSodierDeps(): CheckSodierDeps {
+    const db = this.scope.db;
+    const query = async (q: ReturnType<typeof sql<Row>>) => (await q.execute(db)).rows;
+    return {
+      db,
+      query,
+      one: async (q) => (await query(q))[0] ?? false,
+      cell: async (q) => {
+        const row = (await query(q))[0];
+        return row ? Object.values(row)[0] : undefined;
+      },
+      soldierValue: () => {
+        const sv = (this.lang.value<Record<string, unknown>>('soldier')?.soldiervalue ??
+          []) as unknown[];
+        return sv.map((v) => phpNum(v));
+      },
+      addCitySoldiers: (cid, soldiers, add) => this.cityRules.addCitySoldiers(cid, soldiers, add),
+      rand: () => this.random.rand(),
+      mtRand: (min, max) => this.random.mtRand(min, max),
+    };
   }
 
   /**

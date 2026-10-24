@@ -16,7 +16,7 @@ const lang = new LangService({
   battle: { none: '野地空无一人', youend: '--youend--' },
 });
 
-const random = { randRange: () => 0, mtRand: () => 0 } as unknown as RandomService;
+const random = { rand: () => 0, randRange: () => 0, mtRand: () => 0 } as unknown as RandomService;
 
 function service(rules: Respond[]) {
   const db = new FakeDb(rules);

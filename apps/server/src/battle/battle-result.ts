@@ -660,7 +660,17 @@ async function applyCityCapture(deps: BattleResultDeps, a: OutcomeArgs): Promise
   const check2 = phpIntval(cityInfo.type) < 2 ? { can: 1 } : await checkCityType();
   o.check = check;
 
-  if (a.resisthid > 0) stub('占领 captures defender heroes (chose_hero/catchHero on city)');
+  // 占领 captures the defending heroes: when the winner's city still has a free hero slot, the
+  // legacy picks the defeated city's heroes via chose_hero (every hero at loyalty <= 40, plus one
+  // loyalty-weighted mt_rand pick) and runs catchHero on each. This runs REGARDLESS of whether the
+  // takeover gate below passes (the original does it before the check). Ported from
+  // OLdBattleCron.php case 1.
+  if (await cityHasHeroPosition(deps, a.uid, a.cid)) {
+    const heros = await choseHeroes(deps, a.resistcid, a.resisthid);
+    for (const hero of heros) {
+      o.catch += await catchHero(deps, a.uid, a.cid, hero, a.type);
+    }
+  }
   await sql`update sys_city_hero set loyalty = loyalty - 5 where loyalty > 4 and cid = ${a.resistcid}`.execute(
     db,
   );
@@ -926,9 +936,85 @@ async function catchHero(
     await deps.heroes.updateCityHeroChange(hero.uid, hero.cid);
     return sprintf(deps.lang.battle('catchhero'), phpString(hero.name), phpNum(hero.level));
   }
-  // Not caught: loyalty drop / flee — the full throwHeroToField branch is a later wave.
-  stub('catchHero miss (flee / throwHeroToField branch)');
+  // Not caught: the hero may flee to a wild field (throwHeroToField). cfg_js.php::catchHero else
+  // branch — `$run = mt_rand(1,20)`, then by battle type and tile type:
+  //   type 0 (占领): loyalty-3; a CITY tile releases the hero only when its morale is 0, a WILD
+  //     field releases it when run>3 AND the hero is an NPC (uid<1000) — a player's field hero never
+  //     flees; type !=0 (掠夺): only a WILD field with an NPC hero, released when run<11.
+  const wInfo =
+    (await deps.query(sql<Row>`select type from mem_world where wid = ${cid2wid(cid)}`))[0] ?? {};
+  const run = deps.mtRand(1, 20);
+  if (type === 0) {
+    await sql`update sys_city_hero set loyalty = loyalty - 3 where loyalty > 0 and hid = ${phpIntval(hero.hid)}`.execute(
+      deps.db,
+    );
+    if (phpIntval(wInfo.type) === 0) {
+      const morale = phpNum(
+        await deps.cell(sql<Row>`select morale as v from mem_city_resource where cid = ${cid}`),
+      );
+      if (morale === 0) await deps.heroes.throwHeroToField(hero);
+    } else if (run > 3 && phpNum(hero.uid) < 1000) {
+      await deps.heroes.throwHeroToField(hero);
+    }
+  } else if (phpIntval(wInfo.type) > 0 && phpNum(hero.uid) < 1000) {
+    if (run < 11) await deps.heroes.throwHeroToField(hero);
+  }
   return '';
+}
+
+/** utils.php::cityHasHeroPosition: the winner's city has a free 城守/主将/军师 slot. */
+async function cityHasHeroPosition(
+  deps: BattleResultDeps,
+  uid: number,
+  cid: number,
+): Promise<boolean> {
+  const city = (
+    await deps.query(
+      sql<Row>`select chiefhid, generalid, counsellorid from sys_city where uid = ${uid} and cid = ${cid}`,
+    )
+  )[0];
+  if (!city) return false;
+  return (
+    phpNum(city.chiefhid) === 0 || phpNum(city.generalid) === 0 || phpNum(city.counsellorid) === 0
+  );
+}
+
+/**
+ * cfg_js.php::chose_hero($cid,$hid): the defeated city's heroes eligible for capture — every hero
+ * in the city (state <2 or >6, <9, herotype 0) OR the given $hid. Returns all heroes at loyalty
+ * <= 40, PLUS one loyalty-weighted mt_rand pick (skipped if it is already in the <=40 list). The
+ * mt_rand(1,ratesum) draw is pinned by the scripted RNG so both sides pick the same hero.
+ */
+async function choseHeroes(deps: BattleResultDeps, cid: number, hid: number): Promise<Row[]> {
+  const heros = await deps.query(
+    sql<Row>`select * from sys_city_hero where (cid = ${cid} and (state < 2 or state > 6)
+      and state < 9 and herotype = 0) or hid = ${hid}`,
+  );
+  if (!heros.length) return [];
+  const loyaltyArray: number[] = [];
+  let ratesum = 0;
+  const ret: Row[] = [];
+  const hids: number[] = [];
+  for (const h of heros) {
+    loyaltyArray.push(100 - phpNum(h.loyalty));
+    ratesum += 100 - phpNum(h.loyalty);
+    if (phpNum(h.loyalty) <= 40) {
+      ret.push(h);
+      hids.push(phpIntval(h.hid));
+    }
+  }
+  const rate = deps.mtRand(1, ratesum);
+  let sumRate = 0;
+  for (let i = 0; i < heros.length; i++) {
+    if (sumRate + loyaltyArray[i]! >= rate) {
+      if ((hids.length && !hids.includes(phpIntval(heros[i]!.hid))) || !hids.length) {
+        ret.push(heros[i]!);
+      }
+      break;
+    }
+    sumRate += loyaltyArray[i]!;
+  }
+  return ret;
 }
 
 /** UtilsExtend.php::check_resource. */
