@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useGame } from '../../game/game';
+import { useChatStore } from '../../stores/chat';
+import { PushProc } from '@hot/shared';
 import { i18n } from '../../i18n';
 import FxButton from '../../ui/FxButton.vue';
 import FxCanvas from '../../ui/FxCanvas.vue';
@@ -48,6 +50,18 @@ function onClick(name: (typeof FUNCTIONS)[number]): void {
 }
 
 const chatText = ref('');
+const chat = useChatStore();
+
+/** `ChatPanel.onSend` (the chatbar send): a 世界 line through the push channel. */
+function sendChat(): void {
+  const msg = chatText.value.trim();
+  if (!msg) return;
+  game.push?.request(PushProc.CHAT_PUBLIC_CHAT, { msg });
+  chatText.value = '';
+}
+
+/** The visible tail of the 世界 channel (ChatPanel keeps the last lines on screen). */
+const chatLines = computed(() => chat.world.slice(-4));
 </script>
 
 <template>
@@ -88,7 +102,7 @@ const chatText = ref('');
       @click="onClick('ButtonReport')"
     />
     <FxImage :left="3" :top="4" :w="428" source="images/chatbar.png" />
-    <FxButton :x="348" :y="9" :w="28" :h="24" style-name="ButtonSend" />
+    <FxButton :x="348" :y="9" :w="28" :h="24" style-name="ButtonSend" @click="sendChat" />
     <FxButton :x="378" :y="9" :w="28" :h="24" style-name="ButtonChatControl1" />
     <FxTextInput
       v-model="chatText"
@@ -109,4 +123,32 @@ const chatText = ref('');
       :label="i18n('Bar_BottomPanel_1_1')"
     />
   </FxCanvas>
+  <div class="chat-lines">
+    <div v-for="(line, i) in chatLines" :key="i" class="chat-line">
+      {{ line.fromuser }}: {{ line.msg }}
+    </div>
+  </div>
 </template>
+
+<style scoped>
+.chat-lines {
+  position: absolute;
+  z-index: 20;
+  left: 8px;
+  bottom: 96px;
+  width: 428px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  pointer-events: none;
+}
+
+.chat-line {
+  color: #fff;
+  font-size: 12px;
+  text-shadow: 1px 1px 0 #000;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+</style>

@@ -78,20 +78,26 @@ describe('FriendCommands.addFriendsTaskFinish', () => {
 describe('FriendCommands.addUserRelation', () => {
   it('rejects a type beyond 仇人 with an empty message', async () => {
     const { cmd } = build([NO(/.*/)]);
-    const err = await cmd.addUserRelation(ctx, ['张三', 2]).catch((e: unknown) => e as Error);
+    const err = (await cmd
+      .addUserRelation(ctx, ['张三', 2])
+      .catch((e: unknown) => e as Error)) as Error;
     expect(err.message).toBe('');
   });
 
   it('rejects an unknown target user and the 20-relation cap', async () => {
     const { cmd } = build([{ match: /select uid as v from sys_user/i, rows: [] }, NO(/.*/)]);
-    const err = await cmd.addUserRelation(ctx, ['张三', 0]).catch((e: unknown) => e as Error);
+    const err = (await cmd
+      .addUserRelation(ctx, ['张三', 0])
+      .catch((e: unknown) => e as Error)) as Error;
     expect(err.message).toBe('');
     const { cmd: cmd2 } = build([
       { match: /select uid as v from sys_user/i, rows: [{ v: 1002 }] },
       { match: /select count\(\*\) as v from sys_user_relation/i, rows: [{ v: 20 }] },
       NO(/.*/),
     ]);
-    const err2 = await cmd2.addUserRelation(ctx, ['张三', 0]).catch((e: unknown) => e as Error);
+    const err2 = (await cmd2
+      .addUserRelation(ctx, ['张三', 0])
+      .catch((e: unknown) => e as Error)) as Error;
     expect(err2.message).toBe('');
   });
 

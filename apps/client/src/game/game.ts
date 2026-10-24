@@ -13,6 +13,9 @@ import {
   type TroopDetailRequest,
   type View,
 } from '../stores/session';
+import { PushClient } from '../net/push';
+import { PushProc } from '@hot/shared';
+import { useChatStore } from '../stores/chat';
 import { cityPosition, parseCities, useUserStore } from '../stores/user';
 import { gameAlert, setAlertLabels, showAlert } from '../ui/alert';
 import { BUILDING_COLLEGE } from './cityGrid';
@@ -20,6 +23,7 @@ import { UseGoodsType } from './goods';
 import { GuideManager } from './guide';
 import { loadLoginPrefs, saveLoginPrefs, type LoginPrefs } from './loginPrefs';
 import { HERO_TYPE_KING } from './units';
+import { PUSH_ENDPOINT } from '@hot/shared';
 
 type Row = Record<string, unknown>;
 
@@ -73,8 +77,12 @@ export class Game {
   private readonly globalReceivers = new Map<string, Set<GlobalReceiver>>();
   /** The action guarded by the open 2级密码 dialog (`BloodWar.unLockType` dispatch). */
   private pendingUnlock: { type: string; action: () => void } | null = null;
+  /** The push connection (chat channels; the legacy TCP 5308 chat server's replacement). */
+  push: PushClient | null = null;
 
+  private readonly pinia: Pinia;
   constructor(pinia: Pinia, loginService = new LoginService(), cmd?: CommandClient) {
+    this.pinia = pinia;
     this.user = useUserStore(pinia);
     this.global = useGlobalStore(pinia);
     this.city = useCityStore(pinia);
@@ -202,6 +210,30 @@ export class Game {
     this.loadUserInfo();
     void this.cmd.sendGlobalCommand('battle', 'getBattleNetUrl');
     void this.cmd.sendGlobalCommand('battle', 'getUserBattleInfo');
+    this.openPush();
+  }
+
+  /** Opens the push connection for the chat channels (reconnects on each login). */
+  private openPush(): void {
+    this.push?.close();
+    const wsProto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    this.push = new PushClient(
+      `${wsProto}://${window.location.host}${PUSH_ENDPOINT}`,
+      this.user.uid,
+      String(this.user.sid),
+    );
+    this.push.connect();
+    const chat = useChatStore(this.pinia);
+    this.push.onReply(PushProc.CHAT_PUBLIC_CHAT, (data) => {
+      const row = (data ?? {}) as Record<string, unknown>;
+      if (row.ok)
+        chat.push({ fromuser: String(row.fromuser ?? ''), msg: String(row.msg ?? ''), self: true });
+    });
+    this.push.on(PushProc.NOTIFY_PUBLIC_CHAT, (data) => {
+      const row = (data ?? {}) as Record<string, unknown>;
+      chat.push({ fromuser: String(row.fromuser ?? ''), msg: String(row.msg ?? '') });
+    });
+    this.push.request(PushProc.CHAT_LOGIN, {});
   }
 
   loadUserInfo(): void {
