@@ -4326,6 +4326,9 @@ export const cases: DiffCase[] = [
       const other = await s.login('judingwan');
       await s.command(other, 'applyJoin', unionid);
       await s.command(other, 'getUnionApplyInvite');
+      // wave 3b: the leader's detail header and the member list
+      await s.command(session, 'loadUnionInfo');
+      await s.command(session, 'loadUnionMemberList');
     },
   },
 ];

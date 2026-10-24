@@ -183,6 +183,84 @@ export class UnionCommands {
     throw GameError.lang('applyJoin.send_application_succ');
   }
 
+  /** `[unionid]`: the union detail header for a member (getUnionDetail($id, 1) + own pos). */
+  @GlobalCommand()
+  async loadUnionInfo(ctx: CommandContext): Promise<unknown[]> {
+    const uid = ctx.uid;
+    const union = await this.row(
+      sql<Row>`select union_id, union_pos from sys_user where uid = ${uid}`,
+    );
+    const unionid = phpIntval(union?.union_id);
+    if (unionid === 0 || phpIntval(union?.union_pos) <= 0 || phpIntval(union?.union_pos) >= 3) {
+      // `union` is a MySQL 8 reserved word (backticked; see the wave-3a note)
+      await sql`update sys_alarm set \`union\` = 0 where uid = ${uid}`.execute(this.scope.db);
+    }
+    if (unionid <= 0) throw GameError.lang('loadUnionInfo.not_belongTo_union');
+    if (!(await this.check(sql<Row>`select 1 as v from sys_union where id = ${unionid}`))) {
+      throw GameError.lang('loadUnionInfo.your_union_is_out');
+    }
+    const detail = await this.getUnionDetail(unionid, 1);
+    detail.push(phpIntval(union?.union_pos));
+    return detail;
+  }
+
+  /** The member rows of the caller's union; officers see the online stamp (loadUnionMemberList). */
+  @GlobalCommand()
+  async loadUnionMemberList(ctx: CommandContext): Promise<unknown[]> {
+    const uid = ctx.uid;
+    const union = await this.row(
+      sql<Row>`select union_id, union_pos from sys_user where uid = ${uid}`,
+    );
+    const unionid = phpIntval(union?.union_id);
+    if (unionid <= 0) throw GameError.lang('loadUnionMemberList.you_belongTo_none_union');
+    const online =
+      phpIntval(union?.union_pos) > 0
+        ? sql<Row>`select u.*, r.rank as srank, count(c.cid) as cityCount, s.lastupdate,
+          d.donate from sys_user u
+        left join sys_city c on c.uid = u.uid
+        left join sys_online s on s.uid = u.uid
+        left join rank_user r on r.uid = u.uid
+        left join sys_user_donate d on d.uid = u.uid and d.unionid = u.union_id
+        where u.union_id = ${unionid} group by u.uid`
+        : sql<Row>`select u.*, r.rank as srank, count(c.cid) as cityCount, 0 as lastupdate,
+          d.donate from sys_user u
+        left join sys_city c on c.uid = u.uid
+        left join sys_online s on s.uid = u.uid
+        left join rank_user r on r.uid = u.uid
+        left join sys_user_donate d on d.uid = u.uid and d.unionid = u.union_id
+        where u.union_id = ${unionid} group by u.uid`;
+    return (await online.execute(this.scope.db)).rows as Row[];
+  }
+
+  /** UnionFunc.php:2486: the member cap follows the union 官府 building's level. */
+  private async memberMaxCount(unionid: number): Promise<number> {
+    const level = phpNum(
+      await this.cell(sql<Row>`select level as v from sys_union_building
+        where unionid = ${unionid} and bid = 2 limit 1`),
+    );
+    const gov = phpEmpty(level) ? 1 : level;
+    return gov >= 50 ? 60 : gov + 10;
+  }
+
+  /** UnionFunc.php:424 getUnionDetail: the header row plus the member cap. */
+  private async getUnionDetail(unionid: number, inner: number): Promise<unknown[]> {
+    const ret: unknown[] = [1];
+    const union =
+      inner === 1
+        ? await this.row(sql<Row>`select n.*, u.name as leadername, u2.name as creator
+          from sys_union n
+          left join sys_user u on n.leader = u.uid
+          left join sys_user u2 on n.creator = u2.uid where n.id = ${unionid}`)
+        : await this.row(sql<Row>`select n.id, n.chieforder, r.leader, r.name, r.member,
+          r.famouscity, r.rank, r.prestige, u.name as creator, n.intro
+        from sys_user u, sys_union n left join rank_union r on r.uid = n.id
+        where n.id = ${unionid} and u.uid = n.creator`);
+    if (union && (union.famouscity === '' || union.famouscity == null)) union.famouscity = 0;
+    ret.push(union ?? {});
+    ret.push(await this.memberMaxCount(unionid));
+    return ret;
+  }
+
   /** utils.php::notifyUnionChange: the polled union-change cache row. */
   private async notifyUnionChange(uid: number, unionid: number, state: number): Promise<void> {
     const name = phpString(

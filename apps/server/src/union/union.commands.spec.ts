@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { FakeDb, type Respond } from '../hero/fake-db.testutil';
 import { LangService } from '../common/lang.service';
 import { TaskRules } from '../core/task-rules.service';
+import { CityRules } from '../core/city-rules.service';
+import { GoodsRules } from '../core/goods-rules.service';
+import { HeroRules } from '../core/hero-rules.service';
+import { RandomService } from '../core/random.service';
 import { UserRules } from '../core/user-rules.service';
 import { TaskRewards } from '../task/task-rewards.service';
 import { UnionCommands } from './union.commands';
@@ -27,9 +31,6 @@ const lang = new LangService({
   },
   getUnionApplyInvite: { succ: '】的申请已发出。' },
   actionlog: { createunion: '创建联盟' },
-  // the event text of createUnion (createUnion.add_union_event)
-  createUnion2: {},
-  getUnionApplyInvite: { succ: '】的申请已发出。' },
 });
 
 const ctx = { uid: 1001, cid: 0, ip: 0, sip: '' };
@@ -43,8 +44,15 @@ function build(rules: Respond[]) {
     users,
     new TaskRules(db.scope, users),
     lang,
-    new TaskRewards(db.scope, lang, users),
-    lang,
+    new TaskRewards(
+      db.scope,
+      lang,
+      new CityRules(db.scope),
+      new GoodsRules(db.scope),
+      new HeroRules(db.scope),
+      users,
+      { randRange: () => 0, mtRand: () => 0 } as unknown as RandomService,
+    ),
   );
   return { cmd, db };
 }
@@ -191,5 +199,53 @@ describe('UnionCommands.getUnionApplyInvite', () => {
       NO(/.*/),
     ]);
     expect(await cmd.getUnionApplyInvite(ctx)).toEqual([0, 0, '旧盟', [{ id: 9 }]]);
+  });
+});
+
+describe('UnionCommands.loadUnionInfo', () => {
+  it('returns the detail plus the own union_pos for a member', async () => {
+    const { cmd } = build([
+      {
+        match: /select union_id, union_pos from sys_user/i,
+        rows: [{ union_id: 42, union_pos: 5 }],
+      },
+      { match: /select 1 as v from sys_union where id = \?/i, rows: [{ 1: 1 }] },
+      {
+        match: /select n\.\*, u\.name as leadername/i,
+        rows: [{ id: 42, name: '天下会', famouscity: '' }],
+      },
+      { match: /select level as v from sys_union_building/i, rows: [{ v: 3 }] },
+      NO(/.*/),
+    ]);
+    const res = (await cmd.loadUnionInfo(ctx)) as unknown[];
+    expect(res[0]).toBe(1);
+    expect((res[1] as Record<string, unknown>).famouscity).toBe(0);
+    expect(res[2]).toBe(13); // level 3 + 10
+    expect(res[3]).toBe(5);
+  });
+
+  it('rejects without a union', async () => {
+    const { cmd } = build([
+      { match: /select union_id, union_pos from sys_user/i, rows: [{ union_id: 0, union_pos: 0 }] },
+      NO(/.*/),
+    ]);
+    await expect(cmd.loadUnionInfo(ctx)).rejects.toThrow('loadUnionInfo.not_belongTo_union');
+  });
+});
+
+describe('UnionCommands.loadUnionMemberList', () => {
+  it('returns the member rows (officers see the online stamp)', async () => {
+    const { cmd, db } = build([
+      {
+        match: /select union_id, union_pos from sys_user/i,
+        rows: [{ union_id: 42, union_pos: 5 }],
+      },
+      { match: /group by u\.uid/i, rows: [{ uid: 1001, srank: 1, cityCount: 2, donate: 10000 }] },
+      NO(/.*/),
+    ]);
+    const rows = (await cmd.loadUnionMemberList(ctx)) as unknown[];
+    expect(rows).toHaveLength(1);
+    const query = db.executed.find((q) => /group by u\.uid/i.test(q.sql));
+    expect(query!.sql).toMatch(/s\.lastupdate/);
   });
 });
