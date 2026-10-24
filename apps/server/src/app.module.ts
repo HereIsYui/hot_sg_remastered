@@ -7,6 +7,8 @@ import { CommonModule } from './common/common.module';
 import { ConfigModule } from './config/config.module';
 import { CoreModule } from './core/core.module';
 import { FriendModule } from './friend/friend.module';
+import { UnionModule } from './union/union.module';
+import { TaskModule } from './task/task.module';
 import { DatabaseModule } from './db/database.module';
 import { GatewayModule } from './gateway/gateway.module';
 import { GoodsModule } from './goods/goods.module';
@@ -18,7 +20,6 @@ import { MailModule } from './mail/mail.module';
 import { PushModule } from './push/push.module';
 import { RankModule } from './rank/rank.module';
 import { ShopModule } from './shop/shop.module';
-import { TaskModule } from './task/task.module';
 import { TickModule } from './tick/tick.module';
 import { TroopModule } from './world/troop.module';
 import { UserModule } from './user/user.module';
@@ -49,6 +50,7 @@ import { WorldModule } from './world/world.module';
     TroopModule,
     BattleModule,
     FriendModule,
+    UnionModule,
   ],
   controllers: [HealthController],
 })

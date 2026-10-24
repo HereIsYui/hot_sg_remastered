@@ -4304,8 +4304,31 @@ export const cases: DiffCase[] = [
       await s.command(session, 'addFriendsTaskFinish', '张三');
     },
   },
+  {
+    // 联盟 (UnionFunc.php wave 3a): createUnion founds 联盟[新盟] for 10000 gold (鸿胪寺 15
+    // ships on 209355), registering the leader, the donate row, the level-1 union buildings,
+    // the mem_union_buf change row and the 创建联盟 event; applyJoin then rejects (already in a
+    // union) and getUnionApplyInvite reports the membership header. The union id is aliased.
+    name: 'union: createUnion founds a union, applyJoin and the honglu view',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const ret = (await s.command(session, 'createUnion', '新盟')) as unknown[];
+      const unionid = Number(ret?.[0] ?? 0);
+      s.alias(unionid, '<unionid>');
+      // re-founding hits the cooldown log row (same-day) and the name is taken
+      await s.command(session, 'createUnion', '新盟');
+      await s.command(session, 'createUnion', '另一个');
+      // applyJoin while already in a union
+      await s.command(session, 'applyJoin', unionid);
+      // the honglu view
+      await s.command(session, 'getUnionApplyInvite');
+      // a second player applies to the new union
+      const other = await s.login('judingwan');
+      await s.command(other, 'applyJoin', unionid);
+      await s.command(other, 'getUnionApplyInvite');
+    },
+  },
 ];
-
 function wid2cid(wid: number): number {
   const y = Math.floor(wid / 10000) * 10 + Math.floor((wid % 100) / 10);
   const x = Math.floor((wid % 10000) / 100) * 10 + (wid % 10);
