@@ -15,7 +15,8 @@ export type PlainDialog =
   | 'modifyPassword'
   | 'task'
   | 'myGoods'
-  | 'favourites';
+  | 'favourites'
+  | 'friend';
 
 /**
  * `DialogManager.showCreateBuildingDialog(kind)` (0 fields, 1 inner, 2 wall), `showBuildingDialog`,

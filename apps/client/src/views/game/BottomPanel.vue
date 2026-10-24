@@ -44,6 +44,7 @@ function rightOf(name: (typeof FUNCTIONS)[number]): number {
 function onClick(name: (typeof FUNCTIONS)[number]): void {
   if (name === 'ButtonMail') game.openMail();
   else if (name === 'ButtonReport') game.openReport();
+  else if (name === 'ButtonFriend') game.openFriend();
 }
 
 const chatText = ref('');

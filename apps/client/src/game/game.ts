@@ -557,6 +557,11 @@ export class Game {
     this.session.mail = { open: true };
   }
 
+  /** `DialogManager.showFriendDialog` (BottomPanel.onFriendClick): the 好友/仇人 lists. */
+  openFriend(): void {
+    this.session.dialog = { name: 'friend' };
+  }
+
   closeMail(): void {
     this.session.mail = null;
     this.session.mailDetail = null;
