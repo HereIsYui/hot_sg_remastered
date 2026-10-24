@@ -27,5 +27,6 @@ mysqldata/
 .DS_Store
 Thumbs.db
 .idea/
+.kiro/
 .vscode/*
 !.vscode/settings.json
