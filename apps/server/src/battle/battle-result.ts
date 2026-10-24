@@ -232,13 +232,13 @@ export async function getBattleResult(
   const alostBlood = adiecount > 0 ? Math.floor((adiecount * 100) / acount) : 0;
   const dlostBlood = dlostCount > 0 ? Math.floor((dlostCount * 100) / dcount) : 0;
   if (alostBlood > 0 && uid > 1000 && hid > 0) {
-    await sql`update mem_hero_blood set force = GREATEST(0, force - ${alostBlood})
+    await sql`update mem_hero_blood set \`force\` = GREATEST(0, \`force\` - ${alostBlood})
       where hid = ${hid}`.execute(deps.db);
     await sql`update sys_user_armor set hp = GREATEST(0, hp - ${alostBlood})
       where uid = ${uid} and hid = ${hid}`.execute(deps.db);
   }
   if (dlostBlood > 0 && resistuid > 1000 && resisthid > 0) {
-    await sql`update mem_hero_blood set force = GREATEST(0, force - ${dlostBlood})
+    await sql`update mem_hero_blood set \`force\` = GREATEST(0, \`force\` - ${dlostBlood})
       where hid = ${resistuid}`.execute(deps.db);
     await sql`update sys_user_armor set hp = GREATEST(0, hp - ${dlostBlood})
       where uid = ${resistuid} and hid = ${resisthid}`.execute(deps.db);
