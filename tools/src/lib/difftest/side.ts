@@ -42,6 +42,19 @@ function patchedReportCron(clock: TickClock): string {
 
 const LEGACY_COMPOSE = join(repoRoot, 'docker/legacy/docker-compose.yml');
 
+/**
+ * A `php -r` tick runs the scripted-RNG prepend via `auto_prepend_file`, but on this image's uopz
+ * (2.0.7, PHP 5.6) the `uopz_rename`/`uopz_function` overrides applied during the auto-prepend
+ * phase are REVERTED before the main `-r` script runs — so `rand()`/`mt_rand()` fall back to real
+ * randomness and no scripted sequence pins them. Re-`require`ing the prepend as the FIRST statement
+ * of the main script re-applies the override inside the main compilation unit, where it sticks (the
+ * prepend self-guards against the double load). The file early-returns when no spec is armed, so it
+ * is a no-op for ordinary (unseeded) ticks. Without this, a tick that draws RNG (e.g. checkSodier's
+ * NPC respawn) is nondeterministic and cannot difftest. The HTTP `call()` path (apache/mod_php) is
+ * unaffected — its auto-prepend overrides are not reverted.
+ */
+const RNG_REQUIRE = 'require "/opt/difftest/rng-prepend.php";';
+
 export function legacyTarget(client = new LegacyClient()): Target {
   return {
     call: (service, method, args, rng) =>
@@ -66,7 +79,7 @@ export function legacyTarget(client = new LegacyClient()): Target {
         // and drive a harness HandleBattle that settles every pending maneuver the way the new
         // BattleTick does. The real OLdBattleCron::HandleBattle (mem_battle) is NOT ported on
         // either side yet, so it is deliberately not run here.
-        script = `require_once "BattleFunc.php"; require_once "UtilsExtend.php";
+        script = `${RNG_REQUIRE} require_once "BattleFunc.php"; require_once "UtilsExtend.php";
           require_once "HeroExpr.php";
           $cfg = file_get_contents("cfg_js.php");
           preg_match('/function del\\b.*/s', $cfg, $b); eval($b[0]);
@@ -90,7 +103,7 @@ export function legacyTarget(client = new LegacyClient()): Target {
         // OLdBattleCron.php is required because HandleTroop's 占领 success branch calls
         // updateFieldResourceAdds() (field-resource add recompute), which lives there, not in
         // cfg_js.php; without it the 占领 arrival fatals with an undefined-function error.
-        script = `require_once "BattleFunc.php"; require_once "UtilsExtend.php";
+        script = `${RNG_REQUIRE} require_once "BattleFunc.php"; require_once "UtilsExtend.php";
           require_once "HeroExpr.php"; require_once "OLdBattleCron.php";
           @unlink("cron/uptroop");
           $cfg = file_get_contents("cfg_js.php");

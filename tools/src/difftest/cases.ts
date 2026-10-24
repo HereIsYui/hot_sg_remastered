@@ -3753,6 +3753,89 @@ export const cases: DiffCase[] = [
       await s.query('delete from sys_battle_report where battleid = ?', [bid]);
     },
   },
+  {
+    // checkSodier (UtilsExtend.php) — the on-demand NPC garrison respawn. A 攻击 (task 9) against an
+    // UNOWNED wild field whose resolved owner is uid<1000 (no stationed troop → field.uid 0): legacy
+    // HandleTroop runs `checkSodier($field)` on arrival, which draws `mt_rand(0,5)` (NPC pick) and
+    // createmapSoldier's per-type `rand()` to spawn a fresh NPC troop, then the battle meets it. The
+    // scripted RNG pins every draw so both servers spawn the IDENTICAL garrison and fight the same
+    // battle (report text included). The field is level 3 (cfg_field_npcvalue 5000) to keep the
+    // spawned force — and the battle — small.
+    name: 'battle: 攻击 an unowned NPC field respawns a garrison and fights',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await s.query('delete from sys_troops where uid = ?', [uid]);
+      // A free, low-level wild field (level 3), no stationed troop → check_field_owner resolves
+      // uid 0 (<1000) and checkSodier spawns the NPC garrison.
+      const FIELD_WID = 14;
+      const targetcid = wid2cid(FIELD_WID);
+      await s.query('delete from sys_troops where cid = ?', [targetcid]);
+      await s.query('delete from mem_world_schedule where wid = ?', [FIELD_WID]);
+      await s.query(
+        `insert into sys_troops
+          (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
+         values (?, ?, 0, ?, 9, 0, unix_timestamp() - 600, 600, unix_timestamp() - 1, '1,1,2000', '0', 0, 0)`,
+        [uid, cid, targetcid],
+      );
+      // RNG: [0] → mt_rand(0,5)=0 (NPC-type default '13,14,15,16,17'); the next five raw rand()
+      // feed createmapSoldier's `rand() % (100-totalRnd)`; the remainder drive the battle rounds'
+      // target pick and getBattleResult wounded/capture rolls. Same sequence on both sides.
+      s.rng([0, 40, 30, 20, 10, 50, 1, 2, 1, 0, 0, 3, 1]);
+      await s.tick('HandleTroop');
+      for (let i = 0; i < 45; i++) await s.tick('HandleBattle');
+      s.stopRng();
+      await s.query('delete from sys_troops where uid = ? or cid = ?', [uid, targetcid]);
+      await s.query('delete from mem_battle where attackcid = ?', [cid]);
+      await s.query('delete from mem_world_schedule where wid = ?', [FIELD_WID]);
+      await s.query('update mem_world set state = 0 where wid = ?', [FIELD_WID]);
+    },
+  },
+  {
+    // checkSodier via the SCOUT path (cfg_js.php line 129: `if($field['uid']<1000) checkSodier`).
+    // A 侦察 (task 2) of an UNOWNED NPC wild field (uid<1000): HandleTroop respawns the NPC garrison
+    // on arrival, then the scout's 军队状况 intel tier reports the respawned troop. The scripted RNG
+    // pins the NPC pick + createmapSoldier draws so both servers spawn the same garrison and the
+    // report (fuzzy count_desc for a wild field, te_level bumped to 6) is byte-identical. No patrol
+    // (the spawned default-type garrison carries no 斥候/sid-3), so the scout is deterministic.
+    name: 'troop tick settles a scout of an NPC field (garrison respawn)',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await s.query('delete from sys_troops where uid = ?', [uid]);
+      await s.query('delete from sys_report where uid = ?', [uid]);
+      await s.query(
+        'insert into sys_alarm (uid, report) values (?, 1) on duplicate key update report = 1',
+        [uid],
+      );
+      const FIELD_WID = 14; // free, low-level (3) wild field; no owner → checkSodier respawns.
+      const targetCid = wid2cid(FIELD_WID);
+      await s.query('delete from sys_troops where cid = ?', [targetCid]);
+      await s.query('delete from mem_world_schedule where wid = ?', [FIELD_WID]);
+      await s.query(
+        `insert into sys_city_technic (cid, tid, level) values (?, 7, 5)
+          on duplicate key update level = 5`,
+        [cid],
+      );
+      await s.query(
+        `insert into sys_troops
+          (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
+         values (?, ?, 0, ?, 2, 0, unix_timestamp() - 600, 600, unix_timestamp() - 1, '1,3,100', '0', 0, 0)`,
+        [uid, cid, targetCid],
+      );
+      // [0] → NPC-type default; next five raw rand() → createmapSoldier counts. Same on both sides.
+      s.rng([0, 40, 30, 20, 10, 50]);
+      await s.tick('HandleTroop');
+      s.stopRng();
+      await s.query('delete from sys_troops where uid = ? or cid = ?', [uid, targetCid]);
+      await s.query('delete from sys_report where uid = ?', [uid]);
+      await s.query('delete from mem_world_schedule where wid = ?', [FIELD_WID]);
+      await s.query('update mem_world set state = 0 where wid = ?', [FIELD_WID]);
+    },
+    tables: SCOUT_RESOURCE_IGNORE,
+  },
 ];
 
 function wid2cid(wid: number): number {

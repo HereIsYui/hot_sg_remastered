@@ -20,6 +20,7 @@ import type { Database } from '../db/database.module';
 import { sprintf } from '../common/sprintf';
 import { phpIntval, phpNum, phpString } from '../core/php';
 import { array2troop, changePos, getBattleRange, troop2array } from './battle-math';
+import { checkSodier, type CheckSodierDeps } from './check-sodier';
 
 type Row = Record<string, unknown>;
 
@@ -51,8 +52,14 @@ export interface BattleArrivalDeps {
   soldierInfo(): Promise<
     Map<number, { speed: number; range: number; hp: number; ap: number; dp: number; type: number }>
   >;
+  /** `$GLOBALS['soldier']['soldiervalue']` (index 0 unused) — for checkSodier's createmapSoldier. */
+  soldierValue(): number[];
+  /** utils.php::addCitySoldiers — checkSodier tops up an NPC city's garrison through it. */
+  addCitySoldiers(cid: number, soldiers: Map<number, number>, add: boolean): Promise<void>;
   rand(min: number, max: number): number;
   mtRand(min: number, max: number): number;
+  /** PHP `rand()` with no args: the raw draw (createmapSoldier's `<6` regime uses it). */
+  randRaw(): number;
 }
 
 /** What `battleAdd`/`defcityadd` returned: the strings mem_battle needs for one side. */
@@ -110,6 +117,13 @@ export async function handleBattleArrival(deps: BattleArrivalDeps, a: ArrivalArg
   if (otherBattle) {
     await sql`update sys_troops set state = 2 where id = ${id}`.execute(db);
     return;
+  }
+
+  // cfg_js.php line 404: `if($type<4&&$field['uid']<1000) $hascreat=checkSodier($field);` — an NPC
+  // field/city tops up (or seeds) its garrison on arrival BEFORE the defender troop is resolved, so
+  // the battle meets the respawned force. The return value ($hascreat) is not branched on below.
+  if (type < 4 && phpNum(field.uid) < 1000) {
+    await checkSodier(checkSodierDepsOf(deps), field);
   }
 
   // Resolve the defender troop (the stationed force) and the real owner.
@@ -929,6 +943,20 @@ async function addCityDefences(
 
 function emptySide(): SideInfo {
   return { soldiers: '0', pos: '0', info: '', value: 0, hid: 0, hstate: '4', id: 0 };
+}
+
+/** Adapt the arrival's deps to the `CheckSodierDeps` shape checkSodier expects. */
+function checkSodierDepsOf(deps: BattleArrivalDeps): CheckSodierDeps {
+  return {
+    db: deps.db,
+    query: deps.query,
+    one: deps.one,
+    cell: deps.cell,
+    soldierValue: deps.soldierValue,
+    addCitySoldiers: deps.addCitySoldiers,
+    rand: () => deps.randRaw(),
+    mtRand: deps.mtRand,
+  };
 }
 
 /** The bak_troops snapshot insert (every column the original copied). */

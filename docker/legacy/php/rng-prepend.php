@@ -78,12 +78,30 @@ $bounded = function ($min = null, $max = null) use ($draw, $scale) {
     return ($min === null) ? $v : $scale($min, $max, $v);
 };
 
-uopz_function('rand', $bounded);
-uopz_function('mt_rand', $bounded);
+// uopz 2.0.7 (PHP 5.6, the version this image pins) does NOT let `uopz_function($name, ...)`
+// REPLACE an existing internal function the way modern uopz (5.x+) does — the native body keeps
+// winning and the override is silently ignored. The 2.x idiom is to rename the native out of the
+// way FIRST, then define the name fresh. `override()` does exactly that, guarding the rename so a
+// second include in the same process (or a function that has no native to move) does not fatal.
+$override = function ($name, $fn) {
+    static $done = array();
+    if (isset($done[$name])) {
+        return;
+    }
+    $backup = '__real_' . $name;
+    if (function_exists($name) && !function_exists($backup)) {
+        uopz_rename($name, $backup);
+    }
+    uopz_function($name, $fn);
+    $done[$name] = true;
+};
+
+$override('rand', $bounded);
+$override('mt_rand', $bounded);
 
 // array_rand($arr) / array_rand($arr, $num): pick key(s) by draw order. Only the common
 // single-pick form is scripted deterministically; a multi-pick draws $num keys in order.
-uopz_function('array_rand', function ($array, $num = 1) use ($draw, $scale) {
+$override('array_rand', function ($array, $num = 1) use ($draw, $scale) {
     $keys = array_keys($array);
     $n = count($keys);
     if ($n === 0) {
@@ -104,7 +122,7 @@ uopz_function('array_rand', function ($array, $num = 1) use ($draw, $scale) {
 
 // shuffle(&$arr): a Fisher–Yates driven by the scripted draws, matching no native algorithm but
 // reproducible and identical to the new server's scripted shuffle.
-uopz_function('shuffle', function (&$array) use ($draw, $scale) {
+$override('shuffle', function (&$array) use ($draw, $scale) {
     $values = array_values($array);
     for ($k = count($values) - 1; $k > 0; $k--) {
         $j = $scale(0, $k, $draw());
