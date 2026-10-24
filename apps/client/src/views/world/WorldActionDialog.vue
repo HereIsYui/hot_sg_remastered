@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useGame } from '../../game/game';
-import { BUILDING_GROUND } from '../../game/cityGrid';
+import { BUILDING_GOVERNMENT, BUILDING_GROUND } from '../../game/cityGrid';
+import { governBlockAlert, governGate, parseGovernInfo, type GovernInfo } from '../../game/govern';
 import {
   cid2wid,
   makeCid,
@@ -20,6 +21,7 @@ import FxButton from '../../ui/FxButton.vue';
 import FxCanvas from '../../ui/FxCanvas.vue';
 import FxLabel from '../../ui/FxLabel.vue';
 import FxText from '../../ui/FxText.vue';
+import GovernPanel from './GovernPanel.vue';
 
 /**
  * World/WorldActionDialog (shell): shows the clicked cell's field/city info and wires 收藏
@@ -27,7 +29,8 @@ import FxText from '../../ui/FxText.vue';
  * the CampaignDialog preset with this cell as the target (task combo indices per the AS3
  * `showCampaignDialog` / `setTask`: 运输=0, 派遣=1, 侦察=2, 掠夺=3, 占领=4); one of the player's own
  * fields shows 进入 (the `onEnterField` 附属野地 detail, where a flatland offers 筑城) instead.
- * 合城 / 管辖 are later waves and stay 暂未开放.
+ * 管辖 (`onGovern`) opens the embedded GovernPanel for a 名城 owner; 合城 is a later wave and
+ * stays 暂未开放.
  */
 const props = defineProps<{ cid: number }>();
 
@@ -77,10 +80,24 @@ const isSelf = computed(
 );
 
 /**
+ * `setGridInfo` (AS3 2933-3013): the 管辖 (label 政令, `World_WorldActionDialog_45_1`) button shows
+ * on city cells whose relationship flag is 2..8 — not for self (0), allies (1) or the 洛阳 overlay (9).
+ */
+const canGovern = computed(() => {
+  const flag = cityInfo.value?.flag ?? -1;
+  return isCity.value && flag >= 2 && flag <= 8;
+});
+
+/** `City.govermentLevel` (BloodWar.as:8083-8085): the 官府 (bid 6) building level, 0 without one. */
+const govermentLevel = computed(
+  () => city.buildings.find((b) => b.bid === BUILDING_GOVERNMENT)?.level ?? 0,
+);
+
+/**
  * The army-action buttons. Each opens the CampaignDialog preset with this cell as the target and
  * the matching task combo index (per the AS3 `onPatrol`→2, `onPlunder`→3, `onInvade`→4,
- * `onTransport`→0, `onDispatch`→1; 出征 leaves the combo at its default first item). 合城 / 管辖
- * stay 暂未开放 (building merge / govern are later waves).
+ * `onTransport`→0, `onDispatch`→1; 出征 leaves the combo at its default first item). 合城 stays
+ * 暂未开放 (building merge is a later wave); 管辖 is the GovernPanel (`onGovern`).
  */
 const CAMPAIGN_ACTIONS: { key: string; label: string; taskIndex: number }[] = [
   { key: 'dispatch', label: '出征', taskIndex: 0 },
@@ -90,10 +107,7 @@ const CAMPAIGN_ACTIONS: { key: string; label: string; taskIndex: number }[] = [
   { key: 'transport', label: '运输', taskIndex: 0 },
   { key: 'depute', label: '派遣', taskIndex: 1 },
 ];
-const UNPORTED: { key: string; label: string }[] = [
-  { key: 'merge', label: '合城' },
-  { key: 'govern', label: '管辖' },
-];
+const UNPORTED: { key: string; label: string }[] = [{ key: 'merge', label: '合城' }];
 
 /** One of the player's own fields (`getUserFields`): the original shows only 派遣 + 进入. */
 const isOwnField = computed(() => !isCity.value && world.userFieldCids.includes(props.cid));
@@ -131,6 +145,42 @@ async function onMark(): Promise<void> {
   }
 }
 
+/**
+ * `mGovernPanel` (AS3 167, 2654-2665): the embedded 下达政令 pop-up, hidden (null) until the
+ * `getGovernInfo` reply allows it — the original toggles `mGovernPanel.visible` the same way.
+ */
+const governInfo = ref<GovernInfo | null>(null);
+
+/** `onGovern` (AS3 2489-2536): the client-side gates, then `getGovernInfo [City.cid]`. */
+function onGovern(): void {
+  const gate = governGate(
+    {
+      cid: city.cid,
+      type: city.type,
+      govermentLevel: govermentLevel.value,
+      junId: city.junId,
+      provinceId: city.provinceId,
+    },
+    { cid: props.cid, junid: cell.value?.junid ?? 0, provinceid: cell.value?.provinceid ?? 0 },
+  );
+  if (gate) {
+    void showAlert(i18n(gate));
+    return;
+  }
+  game.sendWorldCommand('getGovernInfo', [city.cid]);
+}
+
+/** `WorldPanel.as:9334-9348` (getGovernInfo reply): `setGovernInfo` + `setFlag(1)`. */
+function onGetGovernInfo(data: unknown): void {
+  const info = parseGovernInfo(data);
+  const block = governBlockAlert(city.type, info);
+  if (block) {
+    void showAlert(block);
+    return;
+  }
+  governInfo.value = info;
+}
+
 /** `onSendMessage`: compose a mail to this cell's lord. */
 const lordName = computed(() =>
   isCity.value ? (cityInfo.value?.username ?? '') : (field.value?.username ?? ''),
@@ -145,6 +195,7 @@ function onUnported(): void {
 
 const unregister = game.addGlobalReceiver('world', (command, data) => {
   if (command === 'getWorldFieldInfo') field.value = parseWorldFieldInfo(data);
+  else if (command === 'getGovernInfo') onGetGovernInfo(data);
 });
 
 onMounted(() => {
@@ -251,7 +302,7 @@ onUnmounted(unregister);
         @click="onCampaign(1)"
       />
     </div>
-    <!-- army-action buttons: campaign targets wired, 合城/管辖 暂未开放 -->
+    <!-- army-action buttons: campaign targets wired, 合城 暂未开放, 管辖 opens GovernPanel -->
     <div v-else-if="!isSelf" class="actions">
       <FxButton
         v-for="(a, i) in CAMPAIGN_ACTIONS"
@@ -275,6 +326,17 @@ onUnmounted(unregister);
         :label="a.label"
         @click="onUnported"
       />
+      <!-- 管辖 (`govern`, AS3 1557): city cells with relationship flag 2..8 -->
+      <FxButton
+        v-if="canGovern"
+        :x="20 + ((UNPORTED.length + CAMPAIGN_ACTIONS.length) % 4) * 90"
+        :y="256 + Math.floor((UNPORTED.length + CAMPAIGN_ACTIONS.length) / 4) * 34"
+        :w="80"
+        :h="28"
+        style-name="ButtonGreen"
+        :label="i18n('World_WorldActionDialog_45_1') || '政令'"
+        @click="onGovern"
+      />
     </div>
     <FxText
       v-if="!isSelf && !isOwnField"
@@ -282,9 +344,17 @@ onUnmounted(unregister);
       :y="330"
       :w="360"
       :fx="{ color: 14329120, fontSize: 11 }"
-      :text="i18n('_CommonSrc_notOpen') || '合城 / 管辖 暂未开放'"
+      :text="i18n('_CommonSrc_notOpen') || '合城 暂未开放'"
     />
   </FxCanvas>
+  <!-- `mGovernPanel` (AS3 2654-2665): the embedded 下达政令 pop-up covering the dialog area -->
+  <GovernPanel
+    v-if="governInfo"
+    :target-cid="cid"
+    :target-uid="cityInfo?.uid ?? 0"
+    :info="governInfo"
+    @close="governInfo = null"
+  />
 </template>
 
 <style scoped>
