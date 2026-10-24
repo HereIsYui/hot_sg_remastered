@@ -27,6 +27,7 @@ function build(rules: Respond[]) {
     new CityRules(db.scope),
     new HeroRules(db.scope),
     new TaskRules(db.scope, users),
+    users,
     new ReportService(db.scope, mail),
     random,
   );

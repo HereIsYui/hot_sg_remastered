@@ -50,6 +50,7 @@ function service(rules: Respond[]) {
     new CityRules(db.scope),
     new HeroRules(db.scope),
     new TaskRules(db.scope, new UserRules(db.scope)),
+    new UserRules(db.scope),
     new ReportService(db.scope, new MailService(db.scope)),
     random,
   );

@@ -19,6 +19,7 @@ import { phpIntval, phpNum, phpString } from '../core/php';
 import { RandomService } from '../core/random.service';
 import { ReportService } from '../core/report.service';
 import { TaskRules } from '../core/task-rules.service';
+import { UserRules } from '../core/user-rules.service';
 import { DbScope } from '../db/database.module';
 import {
   type BattleRoundInput,
@@ -50,6 +51,7 @@ export class OldBattleService {
     private readonly cityRules: CityRules,
     private readonly heroes: HeroRules,
     private readonly tasks: TaskRules,
+    private readonly users: UserRules,
     private readonly report: ReportService,
     private readonly random: RandomService,
   ) {}
@@ -121,7 +123,9 @@ export class OldBattleService {
         (await sql<Row>`select * from mem_battle where id = ${id}`.execute(db)).rows[0] ?? mem;
       await this.applyEndTroops(id, mem, sys, result.battleEnd);
       await getBattleResult(this.resultDeps(), memAfter, result.battleEnd);
-      await sql`delete from mem_battle where id = ${id}`.execute(db);
+      // The settled mem_battle row stays until the next due tick removes it (HandleBattle's
+      // sys_battle.state = 1 check, mirrored in settleDueBattles above) — the original's cron
+      // deletes it the same way, one tick later.
       cache.delete(id);
     }
   }
@@ -291,6 +295,7 @@ export class OldBattleService {
         report: (key) => this.reportStr(key),
         row: (n) => this.reportRow(n),
         battle: (key) => this.battleStr(key),
+        battleArr: (key, index) => this.battleArr(key, index),
         soldierName: (sid) => this.soldierName(sid),
         defenceName: (did) => this.defenceName(did),
       },
@@ -308,6 +313,7 @@ export class OldBattleService {
         updateCityHeroChange: (uid, cid) => this.heroes.updateCityHeroChange(uid, cid),
       },
       tasks: { completeTask: (uid, goalId) => this.tasks.completeTask(uid, goalId) },
+      users: { bufferNobility: (uid, nobility) => this.users.bufferNobility(uid, nobility) },
       report: {
         sendReport: (uid, title, origincid, happencid, content) =>
           this.report.sendReport(uid, title, origincid, happencid, content),
@@ -352,6 +358,11 @@ export class OldBattleService {
   private battleStr(key: string): string {
     const v = this.lang.value<Record<string, unknown>>('battle')?.[key];
     return typeof v === 'string' ? v : '';
+  }
+  /** `$GLOBALS['battle'][key][index]` — the array lang values (citytype, juewei, ...). */
+  private battleArr(key: string, index: number): string {
+    const v = this.lang.value<Record<string, unknown>>('battle')?.[key];
+    return Array.isArray(v) ? phpString(v[index]) : '';
   }
   private soldierName(sid: number): string {
     const names = this.lang.value<Record<string, unknown>>('battle')?.patrol_report_soldier as

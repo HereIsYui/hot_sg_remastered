@@ -4211,6 +4211,85 @@ export const cases: DiffCase[] = [
       await s.command(session, 'mergeCity', 209355, 1005);
     },
   },
+  {
+    // 占城 + 抓将 (getBattleResult end-0, case 1): an overwhelming occupier takes a seeded player
+    // city of uid 1002 (wid 35 — block offset 35, inside the group_concat budget). The
+    // 5-strong garrison dies in the one forced round; the takeover gates pass (morale 0, the
+    // attacker raised to nobility 1 = two cities, ordinary type), the defender chief hero
+    // (loyalty 0) is caught via chose_hero → catchHero, and the city changes hands with its
+    // schedule cooldowns reset and the occupier's soldiers moved in. The economy / tech
+    // re-derive (check_city_resource / check_Technic) runs on the legacy side only and its
+    // tables are scoped out, as is the settled report (its hero-card / defender-report sections
+    // are not ported); building levels take an unpinnable rand()*4 shaving on capture.
+    name: 'battle: 占城 and 抓将 settle a player-city capture',
+    tables: {
+      mem_city_resource: { skip: () => true },
+      sys_city_res_add: { skip: () => true },
+      sys_city_technic: { skip: () => true },
+      sys_user_goal: { skip: () => true },
+      sys_report: { skip: () => true },
+      mem_world_schedule: { skip: () => true },
+      sys_building: { ignore: ['level'] },
+      sys_hero_captive: { offsets: ['captivetime'] },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const TARGET = 3005;
+      // check_nobility: nobility 1 (city_count 2) covers holding a second city.
+      await s.query('update sys_user set nobility = 1 where uid = ?', [uid]);
+      // The target: uid 1002's ordinary city on wid 35; a 13-level 官府 keeps the capture's
+      // rand()*4 level shaving at >= 10 so delBuildings' below-10 teardown never fires (the
+      // row sets then match with only the levels masked).
+      await s.query('update mem_world set type = 0, ownercid = ? where wid = 35', [TARGET]);
+      await s.query(
+        `insert into sys_city (cid, uid, name, type, state, province)
+         values (?, 1002, '被占城', 0, 0, 10)`,
+        [TARGET],
+      );
+      await s.query(
+        `insert into sys_building (cid, xy, bid, level) values (?, 120, 6, 13), (?, 121, 5, 15)`,
+        [TARGET, TARGET],
+      );
+      await s.query(
+        `insert into mem_city_resource (cid, people, food, wood, rock, iron, gold, morale, complaint, lastupdate)
+         values (?, 100, 2000, 3000, 4000, 5000, 6000, 0, 0, 0)`,
+        [TARGET],
+      );
+      // The defender chief (state 1, loyalty 0 — the catch roll always succeeds; level 10 sets
+      // the captured hero's exp from cfg_hero_level).
+      await s.query(
+        `insert into sys_city_hero (hid, uid, name, sex, face, cid, state, level, command_base,
+           affairs_base, bravery_base, wisdom_base, loyalty, herotype)
+         values (900101, 1002, '俘虏将', 0, 0, ?, 1, 10, 50, 60, 60, 60, 0, 0)`,
+        [TARGET],
+      );
+      await s.query('insert into sys_city_soldier (cid, sid, count) values (?, 3, 5)', [TARGET]);
+      // The occupier marches in (task 4).
+      await s.query(
+        `insert into sys_troops
+          (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
+         values (?, ?, 0, ?, 4, 0, unix_timestamp() - 600, 600, unix_timestamp() - 1, '1,1,30000', '0', 0, 0)`,
+        [uid, cid, TARGET],
+      );
+      s.rng([1, 1, 0, 0, 1, 2, 1, 1, 1, 1]);
+      await s.tick('HandleTroop');
+      // Breach the wall and make the round due: the garrison is wiped, the battle settles.
+      await s.query(
+        'update mem_battle set wallhp = 0, nexttime = unix_timestamp() - 1 where attackcid = ?',
+        [cid],
+      );
+      await s.tick('HandleBattle');
+      // The settled mem_battle row lingers until the NEXT due tick removes it (HandleBattle's
+      // sys_battle.state = 1 check) — force it due once more so both sides clean up.
+      await s.query('update mem_battle set nexttime = unix_timestamp() - 1 where attackcid = ?', [
+        cid,
+      ]);
+      await s.tick('HandleBattle');
+      s.stopRng();
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {
