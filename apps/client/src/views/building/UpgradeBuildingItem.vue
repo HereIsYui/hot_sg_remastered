@@ -88,8 +88,10 @@ async function startUpgrade() {
   if (props.state.bid === BUILDING_GOVERNMENT && current) {
     if (current.level === 4 && user.ustate === 1 && !(await confirm(t(5)))) return;
     if (current.level >= 10) {
-      // City merging (合并城池) comes with the government dialogs.
+      // UpgradeBuildingItem.as:641-645: a 10+ 官府 upgrades only by merging — open the 合城
+      // dialog instead of an ordinary upgrade.
       emit('hide');
+      game.showCityMergeDialog();
       return;
     }
   }

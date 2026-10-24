@@ -276,6 +276,12 @@ export class Game {
       // only re-centres the view, in its own `addGlobalReceiver('world')` branch.
       this.loadUserInfo();
       gameAlert(i18n('World_WorldPanelSrc_10'));
+    } else if (action === 'CityMerge' && command === 'mergeCity') {
+      // BloodWar.as:5913-5921: the merge succeeded — close the dialog, announce it and refresh
+      // the city list (the thrown error texts of a failed merge take the global failure path).
+      if (this.session.dialog?.name === 'cityMerge') this.session.dialog = null;
+      gameAlert(i18n('City_Merge_Dialog_2'));
+      void this.cmd.sendGlobalCommand('city', 'getUserCities');
     }
     for (const receiver of [...(this.globalReceivers.get(action) ?? [])]) receiver(command, data);
   }
@@ -780,6 +786,16 @@ export class Game {
    */
   showCityFieldDialog(wid = 0): void {
     this.session.dialog = { name: 'cityField', wid };
+  }
+
+  /**
+   * `DialogManager.showCityMergeDialog` + `mCityMergeDialog.selectCity(cid)` (WorldActionDialog
+   * `showMergeCityDialog`, AS3 2249-2253; also the 官府 10+ upgrade entry,
+   * UpgradeBuildingItem.as:641-645): the merge dialog, with the clicked city preselected as the
+   * 分城.
+   */
+  showCityMergeDialog(selectCid = 0): void {
+    this.session.dialog = { name: 'cityMerge', selectCid };
   }
 
   /** `CampaignFavouritesDialog.loadList`: the 收藏 dialog over the scene. */

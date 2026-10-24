@@ -29,6 +29,7 @@ export type DialogState =
   | { name: 'heroDetail'; hid: number }
   | { name: 'worldAction'; cid: number }
   | { name: 'cityField'; wid: number }
+  | { name: 'cityMerge'; selectCid: number }
   | { name: PlainDialog };
 
 /**

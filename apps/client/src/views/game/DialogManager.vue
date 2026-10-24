@@ -43,6 +43,7 @@ import TaskDialog from '../task/TaskDialog.vue';
 import WallDialog from '../wall/WallDialog.vue';
 import CampaignFavouritesDialog from '../world/CampaignFavouritesDialog.vue';
 import WorldActionDialog from '../world/WorldActionDialog.vue';
+import CityMergeDialog from '../world/CityMergeDialog.vue';
 import CampaignDialog from '../ground/CampaignDialog.vue';
 import TroopDialog from '../troop/TroopDialog.vue';
 import TroopDetailDialog from '../troop/TroopDetailDialog.vue';
@@ -100,6 +101,11 @@ function choose(action: 'all' | 'level') {
       v-else-if="dialog?.name === 'worldAction'"
       :key="`worldAction ${dialog.cid}`"
       :cid="dialog.cid"
+    />
+    <CityMergeDialog
+      v-else-if="dialog?.name === 'cityMerge'"
+      :key="`cityMerge ${dialog.selectCid}`"
+      :select-cid="dialog.selectCid"
     />
     <HeroDetailDialog
       v-else-if="dialog?.name === 'heroDetail'"

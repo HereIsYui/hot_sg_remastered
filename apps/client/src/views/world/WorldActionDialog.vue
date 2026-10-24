@@ -29,8 +29,8 @@ import GovernPanel from './GovernPanel.vue';
  * the CampaignDialog preset with this cell as the target (task combo indices per the AS3
  * `showCampaignDialog` / `setTask`: 运输=0, 派遣=1, 侦察=2, 掠夺=3, 占领=4); one of the player's own
  * fields shows 进入 (the `onEnterField` 附属野地 detail, where a flatland offers 筑城) instead.
- * 管辖 (`onGovern`) opens the embedded GovernPanel for a 名城 owner; 合城 is a later wave and
- * stays 暂未开放.
+ * 管辖 (`onGovern`) opens the embedded GovernPanel for a 名城 owner; an own city offers 合城
+ * (`showMergeCityDialog`, which preselects it as the 分城).
  */
 const props = defineProps<{ cid: number }>();
 
@@ -96,8 +96,8 @@ const govermentLevel = computed(
 /**
  * The army-action buttons. Each opens the CampaignDialog preset with this cell as the target and
  * the matching task combo index (per the AS3 `onPatrol`→2, `onPlunder`→3, `onInvade`→4,
- * `onTransport`→0, `onDispatch`→1; 出征 leaves the combo at its default first item). 合城 stays
- * 暂未开放 (building merge is a later wave); 管辖 is the GovernPanel (`onGovern`).
+ * `onTransport`→0, `onDispatch`→1; 出征 leaves the combo at its default first item). 管辖 is the
+ * GovernPanel (`onGovern`); an own city offers 合城 (`showMergeCityDialog`).
  */
 const CAMPAIGN_ACTIONS: { key: string; label: string; taskIndex: number }[] = [
   { key: 'dispatch', label: '出征', taskIndex: 0 },
@@ -107,7 +107,6 @@ const CAMPAIGN_ACTIONS: { key: string; label: string; taskIndex: number }[] = [
   { key: 'transport', label: '运输', taskIndex: 0 },
   { key: 'depute', label: '派遣', taskIndex: 1 },
 ];
-const UNPORTED: { key: string; label: string }[] = [{ key: 'merge', label: '合城' }];
 
 /** One of the player's own fields (`getUserFields`): the original shows only 派遣 + 进入. */
 const isOwnField = computed(() => !isCity.value && world.userFieldCids.includes(props.cid));
@@ -187,10 +186,6 @@ const lordName = computed(() =>
 );
 function onSendMessage(): void {
   game.showMailWrite(null, lordName.value);
-}
-
-function onUnported(): void {
-  gameAlert(i18n('_CommonSrc_notOpen') || '暂未开放');
 }
 
 const unregister = game.addGlobalReceiver('world', (command, data) => {
@@ -302,7 +297,7 @@ onUnmounted(unregister);
         @click="onCampaign(1)"
       />
     </div>
-    <!-- army-action buttons: campaign targets wired, 合城 暂未开放, 管辖 opens GovernPanel -->
+    <!-- army-action buttons: campaign targets wired, 管辖 opens GovernPanel -->
     <div v-else-if="!isSelf" class="actions">
       <FxButton
         v-for="(a, i) in CAMPAIGN_ACTIONS"
@@ -315,22 +310,11 @@ onUnmounted(unregister);
         :label="a.label"
         @click="onCampaign(a.taskIndex)"
       />
-      <FxButton
-        v-for="(a, i) in UNPORTED"
-        :key="a.key"
-        :x="20 + ((i + CAMPAIGN_ACTIONS.length) % 4) * 90"
-        :y="256 + Math.floor((i + CAMPAIGN_ACTIONS.length) / 4) * 34"
-        :w="80"
-        :h="28"
-        style-name="ButtonGrey"
-        :label="a.label"
-        @click="onUnported"
-      />
       <!-- 管辖 (`govern`, AS3 1557): city cells with relationship flag 2..8 -->
       <FxButton
         v-if="canGovern"
-        :x="20 + ((UNPORTED.length + CAMPAIGN_ACTIONS.length) % 4) * 90"
-        :y="256 + Math.floor((UNPORTED.length + CAMPAIGN_ACTIONS.length) / 4) * 34"
+        :x="20 + (CAMPAIGN_ACTIONS.length % 4) * 90"
+        :y="256 + Math.floor(CAMPAIGN_ACTIONS.length / 4) * 34"
         :w="80"
         :h="28"
         style-name="ButtonGreen"
@@ -338,14 +322,18 @@ onUnmounted(unregister);
         @click="onGovern"
       />
     </div>
-    <FxText
-      v-if="!isSelf && !isOwnField"
-      :x="20"
-      :y="330"
-      :w="360"
-      :fx="{ color: 14329120, fontSize: 11 }"
-      :text="i18n('_CommonSrc_notOpen') || '合城 暂未开放'"
-    />
+    <!-- own city: 合城 (`showMergeCityDialog`, AS3 2249-2253) preselects it as the 分城 -->
+    <div v-else-if="isCity" class="actions">
+      <FxButton
+        :x="150"
+        :y="256"
+        :w="80"
+        :h="28"
+        style-name="ButtonGreen"
+        :label="i18n('World_WorldActionDialog_47_1') || '合城'"
+        @click="game.showCityMergeDialog(cid)"
+      />
+    </div>
   </FxCanvas>
   <!-- `mGovernPanel` (AS3 2654-2665): the embedded 下达政令 pop-up covering the dialog area -->
   <GovernPanel
