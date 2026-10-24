@@ -594,6 +594,11 @@ export class Game {
     this.session.dialog = { name: 'friend' };
   }
 
+  /** `DialogManager.showUnionEmptyDialog` (the top bar's union button): the 联盟 dialog. */
+  openUnion(): void {
+    this.session.dialog = { name: 'union' };
+  }
+
   closeMail(): void {
     this.session.mail = null;
     this.session.mailDetail = null;

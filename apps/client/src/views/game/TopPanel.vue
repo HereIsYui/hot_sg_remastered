@@ -70,7 +70,7 @@ const session = useSessionStore();
       :tip="i18n('Bar_TopPanel_5_1')"
       @click="game.showTroopDialog()"
     />
-    <FxButton :x="565" :y="4" style-name="TopButtonUnion" />
+    <FxButton :x="565" :y="4" style-name="TopButtonUnion" @click="game.openUnion()" />
     <FxButton :x="630" :y="4" style-name="TopButtonMission" @click="game.showDialog('task')" />
     <FxButton :x="692" :y="4" style-name="LotteryBoxBtn" />
   </FxCanvas>

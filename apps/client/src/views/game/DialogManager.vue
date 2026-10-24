@@ -45,6 +45,7 @@ import CampaignFavouritesDialog from '../world/CampaignFavouritesDialog.vue';
 import WorldActionDialog from '../world/WorldActionDialog.vue';
 import CityMergeDialog from '../world/CityMergeDialog.vue';
 import FriendDialog from '../friend/FriendDialog.vue';
+import UnionDialog from '../union/UnionDialog.vue';
 import CampaignDialog from '../ground/CampaignDialog.vue';
 import TroopDialog from '../troop/TroopDialog.vue';
 import TroopDetailDialog from '../troop/TroopDetailDialog.vue';
@@ -109,6 +110,7 @@ function choose(action: 'all' | 'level') {
       :select-cid="dialog.selectCid"
     />
     <FriendDialog v-else-if="dialog?.name === 'friend'" />
+    <UnionDialog v-else-if="dialog?.name === 'union'" />
     <HeroDetailDialog
       v-else-if="dialog?.name === 'heroDetail'"
       :key="`hero ${dialog.hid}`"
