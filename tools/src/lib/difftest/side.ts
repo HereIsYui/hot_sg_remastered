@@ -72,19 +72,23 @@ export function legacyTarget(client = new LegacyClient()): Target {
       let script: string;
       if (fn === 'HandleBattle') {
         // HandleBattle has two parts on the new side (BattleTick.handleBattle): settle pending
-        // 演习 maneuvers via upManeuver, then the time-stepped mem_battle loop (scaffold only).
-        // The legacy 演习 settlement lives in cfg_js.php::upManeuver — no cron calls it (the
-        // 易语言 backend did), so eval the whole cfg_js battle region (`del` … end-of-file, which
-        // defines upManeuver, battleInfo, getNamePosition, action/checkPos/getTarget/SoBitSo/…)
-        // and drive a harness HandleBattle that settles every pending maneuver the way the new
-        // BattleTick does. The real OLdBattleCron::HandleBattle (mem_battle) is NOT ported on
-        // either side yet, so it is deliberately not run here.
+        // 演习 maneuvers via upManeuver, THEN advance due time-stepped mem_battle rounds via
+        // OLdBattleCron::HandleBattle (OldBattleService on the new side). Mirror both here so a
+        // settled mem_battle (占城 / 抓将 / getBattleResult) compares symmetrically. The 演习
+        // settlement lives in cfg_js.php::upManeuver — no cron calls it (the 易语言 backend did) —
+        // so eval the whole cfg_js battle region (`del` … end-of-file: upManeuver, battleInfo,
+        // getNamePosition, action/checkPos/getTarget/SoBitSo/…) and settle every pending maneuver,
+        // then require OLdBattleCron.php and call its HandleBattle() for the mem_battle loop
+        // (updateBattle / return_new_place / getBattleResult). OLdBattleCron's battle engine uses
+        // $_SESSION as a per-battle scratch cache; in CLI it auto-vivifies, so one HandleBattle()
+        // call settles a due battle the same way the request-scoped original did.
         script = `${RNG_REQUIRE} require_once "BattleFunc.php"; require_once "UtilsExtend.php";
-          require_once "HeroExpr.php";
+          require_once "HeroExpr.php"; require_once "OLdBattleCron.php";
           $cfg = file_get_contents("cfg_js.php");
           preg_match('/function del\\b.*/s', $cfg, $b); eval($b[0]);
           $pending = sql_fetch_rows("select id from mem_maneuver where state=0");
-          if (!empty($pending)) foreach ($pending as $m) { upManeuver($m['id'], 0); }`;
+          if (!empty($pending)) foreach ($pending as $m) { upManeuver($m['id'], 0); }
+          HandleBattle();`;
       } else {
         // HandleTroop's task-2 侦察 arrival (and the 掠夺/占领/攻击 battle arrivals) call into the
         // whole cfg_js battle region — battleAdd / defcityadd / upManeuver / count_desc /

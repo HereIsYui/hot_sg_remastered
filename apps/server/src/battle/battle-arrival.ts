@@ -19,7 +19,7 @@ import { sql } from 'kysely';
 import type { Database } from '../db/database.module';
 import { sprintf } from '../common/sprintf';
 import { phpIntval, phpNum, phpString } from '../core/php';
-import { array2troop, changePos, getBattleRange, troop2array } from './battle-math';
+import { changePos, getBattleRange, troop2array } from './battle-math';
 import { checkSodier, type CheckSodierDeps } from './check-sodier';
 
 type Row = Record<string, unknown>;
@@ -858,7 +858,7 @@ async function defcityadd(
     ret.pos = `${i},${posStr}`;
     ret.info = statStr;
     ret.value = value;
-    ret.soldiers = dsoldier.size ? array2troop(dsoldier) : '0';
+    ret.soldiers = dsoldier.size ? defenderSoldiers(dsoldier) : '0';
     if (type === 1) {
       if (defenceArray.size) {
         ret.defence = defenceTroop(defenceArray);
@@ -943,6 +943,25 @@ async function addCityDefences(
 
 function emptySide(): SideInfo {
   return { soldiers: '0', pos: '0', info: '', value: 0, hid: 0, hstate: '4', id: 0 };
+}
+
+/**
+ * UtilsExtend.php::array2troop (the $def=0 form) as cfg_js.php::defcityadd stores the defender
+ * garrison: `num,sid,cnt,sid,cnt,` WITH a trailing comma, in the dsoldier insertion order (NOT
+ * ksorted — that is the battle-math array2troop used elsewhere). defcityadd writes this string into
+ * sys_troops / mem_battle.resistsoldiers, so it must match the legacy byte-for-byte; the NPC-city
+ * garrison respawn is the first case with a non-empty defender snapshot where the comma shows.
+ */
+function defenderSoldiers(dsoldier: Map<number, number>): string {
+  let out = '';
+  let i = 0;
+  for (const [sid, cnt] of dsoldier) {
+    if (sid > 0 && cnt > 0) {
+      out += `${sid},${cnt},`;
+      i++;
+    }
+  }
+  return i ? `${i},${out}` : '0';
 }
 
 /** Adapt the arrival's deps to the `CheckSodierDeps` shape checkSodier expects. */

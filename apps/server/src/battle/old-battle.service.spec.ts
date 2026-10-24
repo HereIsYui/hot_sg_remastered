@@ -266,6 +266,172 @@ describe('getBattleResult via OldBattleService.resultDeps', () => {
       db.executed.some((q) => /delete from `?sys_city_soldier`? where cid = \?/i.test(q.sql)),
     ).toBe(true);
   });
+
+  /**
+   * 抓将 on a 占领 (type 1) city win: the winner's city has a free hero slot, so chose_hero picks
+   * the defeated city's low-loyalty hero and catchHero captures it — hid moves to the attacker
+   * (state 5, loyalty 0) and a sys_hero_captive row is written.
+   */
+  it('captures the defending hero on a won city 占领 (catchHero → sys_hero_captive)', async () => {
+    const { svc, db } = service([
+      { match: /select \* from sys_battle where id = /i, rows: [{ id: 10, resistdefence: '' }] },
+      {
+        match: /select \* from bak_troops where battleid = /i,
+        rows: [
+          {
+            id: 701,
+            uid: 1001,
+            task: 4,
+            state: 0,
+            cid: 3003,
+            soldiers: '1,1,2000',
+            resource: '0',
+            battlefieldid: 0,
+          },
+          {
+            id: 802,
+            uid: 894,
+            task: 5,
+            state: 4,
+            cid: 5005,
+            soldiers: '1,3,50',
+            resource: '0',
+            battlefieldid: 0,
+          },
+        ],
+      },
+      {
+        match: /select \* from sys_user where uid = /i,
+        rows: [{ uid: 1001, prestige: 100, nobility: 1 }],
+      },
+      { match: /select \* from mem_world where wid = /i, rows: [{ wid: 1, type: 0, level: 1 }] },
+      {
+        match: /select r.morale, r.complaint, c.type, c.name/i,
+        rows: [{ morale: 0, complaint: 0, type: 0, name: '乐城', province: 1, jun: 1 }],
+      },
+      { match: /select count\(cid\) as c from sys_city where uid = /i, rows: [{ c: 2 }] },
+      // cityHasHeroPosition: the attacker's city has a free counsellor slot.
+      {
+        match: /select chiefhid, generalid, counsellorid from sys_city where uid = /i,
+        rows: [{ chiefhid: 42, generalid: 1, counsellorid: 0 }],
+      },
+      // chose_hero: one defender hero, loyalty 10 (<=40 → always in the list).
+      {
+        match: /select \* from sys_city_hero where \(cid = /i,
+        rows: [{ hid: 555, uid: 894, cid: 5005, level: 10, loyalty: 10, herotype: 0, npcid: 0 }],
+      },
+      // catchHero exp lookup.
+      { match: /select total_exp as v from cfg_hero_level/i, rows: [{ v: 5000 }] },
+      // defcityadd's post-capture hero list for throwHeroToField loop (none).
+      { match: /select \* from sys_city_hero where cid = \? and uid = /i, rows: [] },
+      ...TAIL,
+    ]);
+    const mem = {
+      id: 10,
+      type: 1,
+      round: 7,
+      attacksoldiers: '1,1,1500',
+      resistsoldiers: '0',
+      state: 0,
+      attackcid: 3003,
+      resistcid: 5005,
+      attackhid: 42,
+      resisthid: 555,
+    };
+    // mtRand returns 100 so loyalty(10) <= catchRoll(100) → captured.
+    const d = svc.resultDeps();
+    (d as unknown as { mtRand: () => number }).mtRand = () => 100;
+    const { getBattleResult } = await import('./battle-result');
+    await getBattleResult(d, mem, 0);
+    // hero hid 555 captured: moved to attacker, state 5, loyalty 0.
+    expect(
+      db.executed.some((q) =>
+        /update sys_city_hero set uid = \?, cid = \?, state = 5/i.test(q.sql),
+      ),
+    ).toBe(true);
+    expect(db.executed.some((q) => /replace into sys_hero_captive/i.test(q.sql))).toBe(true);
+  });
+
+  /**
+   * 抓将 miss → flee: a 占领 (type 0, field) win where the catch roll fails (loyalty > roll). The
+   * hero's loyalty drops 3 and, on a wild field with an NPC hero and run>3, it flees
+   * (throwHeroToField). Drives catchHero's else branch via applyOutcome's 占领野地 path.
+   */
+  it('on a missed catch the NPC field hero loyalty-drops and flees', async () => {
+    const { svc, db } = service([
+      { match: /select \* from sys_battle where id = /i, rows: [{ id: 11, resistdefence: '' }] },
+      {
+        match: /select \* from bak_troops where battleid = /i,
+        rows: [
+          {
+            id: 901,
+            uid: 1001,
+            task: 4,
+            state: 0,
+            cid: 3003,
+            soldiers: '1,1,2000',
+            resource: '0',
+            battlefieldid: 0,
+          },
+          {
+            id: 902,
+            uid: 894,
+            task: 5,
+            state: 4,
+            cid: 5005,
+            soldiers: '1,3,50',
+            resource: '0',
+            battlefieldid: 0,
+          },
+        ],
+      },
+      {
+        match: /select \* from sys_user where uid = /i,
+        rows: [{ uid: 1001, prestige: 100, nobility: 1 }],
+      },
+      { match: /select \* from mem_world where wid = /i, rows: [{ wid: 1, type: 4, level: 2 }] },
+      // the 占领野地 branch reads the defeated defender hero (herotype 0).
+      {
+        match: /select \* from sys_city_hero where hid = \? and herotype = 0/i,
+        rows: [{ hid: 556, uid: 894, cid: 5005, level: 8, loyalty: 90, herotype: 0, npcid: 0 }],
+      },
+      // checkFeildCount: room available.
+      {
+        match: /select level as v from sys_building where cid = \? and bid = 6/i,
+        rows: [{ v: 5 }],
+      },
+      {
+        match: /select count\(ownercid\) as v from mem_world where ownercid = \? and type > 0/i,
+        rows: [{ v: 0 }],
+      },
+      ...TAIL,
+    ]);
+    const mem = {
+      id: 11,
+      type: 0,
+      round: 7,
+      attacksoldiers: '1,1,1500',
+      resistsoldiers: '0',
+      state: 0,
+      attackcid: 3003,
+      resistcid: 5005,
+      attackhid: 42,
+      resisthid: 556,
+    };
+    // mtRand returns 1 → catchRoll 1 < loyalty 90 → miss; then run = 1... but we want run>3 to flee.
+    // The first mtRand in catchHero is the catch roll, the second is `run`. Return 1 then 20.
+    const seq = [1, 20];
+    let i = 0;
+    const d = svc.resultDeps();
+    (d as unknown as { mtRand: () => number }).mtRand = () => seq[i++ % seq.length]!;
+    const { getBattleResult } = await import('./battle-result');
+    await getBattleResult(d, mem, 0);
+    // missed: loyalty-3 applied, and throwHeroToField was NOT reached via capture (no captive row).
+    expect(
+      db.executed.some((q) => /update sys_city_hero set loyalty = loyalty - 3/i.test(q.sql)),
+    ).toBe(true);
+    expect(db.executed.some((q) => /replace into sys_hero_captive/i.test(q.sql))).toBe(false);
+  });
 });
 
 describe('OldBattleService.settleDueBattles', () => {

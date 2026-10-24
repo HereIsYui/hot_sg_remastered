@@ -77,7 +77,14 @@ describe('createmapSoldier', () => {
 
 describe('array2troop', () => {
   it('serialises a sid→count map as `num,sid,cnt,` with a trailing comma', () => {
-    expect(array2troop(new Map([[13, 50], [14, 7]]))).toBe('2,13,50,14,7,');
+    expect(
+      array2troop(
+        new Map([
+          [13, 50],
+          [14, 7],
+        ]),
+      ),
+    ).toBe('2,13,50,14,7,');
   });
   it('returns the scalar 0 for an empty map', () => {
     expect(array2troop(new Map())).toBe('0');
@@ -110,7 +117,10 @@ describe('checkSodier (wild field respawn)', () => {
       // time since last respawn → none → clamps to 1.
       NO(/select \(unix_timestamp\(\) - last_create_npc\)/i),
       // cfg_field_npcvalue[3] = 5000.
-      { match: /select npcvalue from cfg_field_npcvalue where level = \?/i, rows: [{ npcvalue: 5000 }] },
+      {
+        match: /select npcvalue from cfg_field_npcvalue where level = \?/i,
+        rows: [{ npcvalue: 5000 }],
+      },
       // no NPC hero on the field cid.
       NO(/select cid from sys_city_hero where npcid <> 0/i),
       // no existing NPC troop on the field cid.
@@ -158,10 +168,7 @@ describe('checkSodier (wild field respawn)', () => {
 describe('createCityDefence', () => {
   it('seeds the per-level defence rows for an NPC city (type 0, uid<1000)', async () => {
     const field: Row = { wid: 20, type: 0, level: 2, uid: 894 };
-    const { d, db } = deps([
-      NO(/select \(unix_timestamp\(\) - last_create_defence\)/i),
-      NO(/.*/),
-    ]);
+    const { d, db } = deps([NO(/select \(unix_timestamp\(\) - last_create_defence\)/i), NO(/.*/)]);
     await createCityDefence(d, field);
     const inserts = db.executed.filter((q) => /insert into sys_city_defence/i.test(q.sql));
     // level 2 → two defence rows (did 1 and 2).

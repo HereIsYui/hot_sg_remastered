@@ -89,8 +89,8 @@ export class BattleArrivalService {
       mtRand: (min, max) => this.random.mtRand(min, max),
       randRaw: () => this.random.rand(),
       soldierValue: () => {
-        const sv = (this.lang.value<Record<string, unknown>>('soldier')?.soldiervalue ?? []) as
-          unknown[];
+        const sv = (this.lang.value<Record<string, unknown>>('soldier')?.soldiervalue ??
+          []) as unknown[];
         return sv.map((v) => phpNum(v));
       },
       addCitySoldiers: (cid, soldiers, add) => this.cityRules.addCitySoldiers(cid, soldiers, add),

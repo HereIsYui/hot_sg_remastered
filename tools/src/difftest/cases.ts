@@ -80,6 +80,21 @@ const BATTLE_OWNER_RECOMPUTE_IGNORE = {
   sys_user_goal: { skip: (row) => String(row.uid) === '1002' },
 } satisfies Record<string, TableRule>;
 
+/**
+ * 占领 an NPC city takes the city over, which on the legacy side triggers the FULL economy
+ * recompute for the new owner (mem_city_resource caps/add-rates, sys_city_res_add, and the owner's
+ * daily task-goal seeding via check_city_resource / getUsersCityProduct) — none of which is ported
+ * (it belongs to the resource wave, exactly as the scout/empty-field cases scope out). The capture
+ * also stamps a few owner-economy side tables. Scope those out so the comparison stays on the
+ * battle's real effects: the city ownership change (sys_city.uid / chiefhid), the hero capture
+ * (sys_city_hero / sys_hero_captive), the defences/garrison (sys_city_defence / sys_city_soldier),
+ * the troop mutations (sys_troops), the inform banner (sys_inform) and the reports (sys_report).
+ */
+const NPC_CITY_CAPTURE_IGNORE = {
+  mem_city_resource: { skip: () => true },
+  sys_city_res_add: { skip: () => true },
+} satisfies Record<string, TableRule>;
+
 export const cases: DiffCase[] = [
   {
     name: 'login announcement',
@@ -3835,6 +3850,103 @@ export const cases: DiffCase[] = [
       await s.query('update mem_world set state = 0 where wid = ?', [FIELD_WID]);
     },
     tables: SCOUT_RESOURCE_IGNORE,
+  },
+  {
+    // 占领 (task 4) ARRIVAL at an NPC CITY (type==0 tile, uid<1000, level>0). This is Part-2c: on
+    // arrival cfg_js.php:404 runs checkSodier, which for an NPC city with a positive level runs
+    // createCityDefence (the city's did-1/2 defences top up) AND respawns the NPC garrison, then
+    // defcityadd/battleAdd build the wall battle (mem_battle). Target 黄巾 city 11037 (province 10,
+    // level 2) whose chief hero sits in state 1, so checkSodier's choseHero resolves deterministically
+    // (no `order by rand()`). The actual multi-round wall grind cannot run in the harness (each round
+    // gates on nexttime = now+25), so this validates the arrival writes — defences, garrison, battle
+    // setup — which is where checkSodier's NPC-city branch lives; the SETTLEMENT (占城/抓将) is covered
+    // by the next case. Seeded RNG pins the garrison respawn identically on both sides.
+    name: 'battle: 占领 arrival at an NPC city respawns defences and garrison, sets up the wall battle',
+    tables: NPC_CITY_CAPTURE_IGNORE,
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const TARGET = 11037; // 黄巾 NPC city, level 2, province 10, chief hero 77430 in state 1.
+      const TARGET_WID = 10317;
+      await s.query('delete from sys_troops where uid = ? or cid = ?', [uid, TARGET]);
+      await s.query('delete from mem_battle where attackcid = ?', [cid]);
+      await s.query('delete from mem_world_schedule where wid = ?', [TARGET_WID]);
+      // A siege army marching in (task 4). field.type==0 (city) so there is NO overwhelming-force
+      // early win — HandleTroop runs checkSodier (createCityDefence + garrison) then builds the
+      // mem_battle via defcityadd/battleAdd.
+      await s.query(
+        `insert into sys_troops
+          (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
+         values (?, ?, 0, ?, 4, 0, unix_timestamp() - 600, 600, unix_timestamp() - 1, '2,1,30000,12,6000', '0', 0, 0)`,
+        [uid, cid, TARGET],
+      );
+      // [0] → checkSodier NPC pick; the five raw draws feed createmapSoldier. Same on both sides.
+      s.rng([0, 40, 30, 20, 10, 50]);
+      await s.tick('HandleTroop');
+      s.stopRng();
+      await s.query('delete from sys_troops where uid = ? or cid = ?', [uid, TARGET]);
+      await s.query('delete from mem_battle where attackcid = ?', [cid]);
+      await s.query('delete from mem_world_schedule where wid = ?', [TARGET_WID]);
+    },
+  },
+  {
+    // A type-1 (攻城) NPC-city battle advancing one settled round symmetrically on BOTH engines.
+    // HandleTroop builds the mem_battle (checkSodier garrison + defcityadd/battleAdd), then the wall
+    // is breached (wallhp 0) and the round made due so one HandleBattle step runs it. This is the
+    // first case to drive the legacy mem_battle engine (OLdBattleCron::HandleBattle, now invoked by
+    // the harness — see side.ts) against the ported OldBattleService on a city battle, so the round
+    // report / troop / defence / soldier mutations compare. The full takeover + 抓将 mutations
+    // (sys_city.uid, sys_hero_captive, building teardown) run inside getBattleResult once a side is
+    // wiped out — a 2M-hp wall garrison cannot be ground down in the harness's 25s-per-round budget,
+    // so that terminal settlement is asserted directly in battle-result.spec.ts. Seeded RNG pins the
+    // garrison respawn + round draws identically on both sides.
+    name: 'battle: a type-1 NPC-city battle advances a settled round on both engines',
+    tables: NPC_CITY_CAPTURE_IGNORE,
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const TARGET = 11037;
+      const TARGET_WID = 10317;
+      await s.query('delete from sys_troops where uid = ? or cid = ?', [uid, TARGET]);
+      await s.query('delete from mem_battle where attackcid = ?', [cid]);
+      await s.query('delete from mem_world_schedule where wid = ?', [TARGET_WID]);
+      // force the defender chief hero catchable: loyalty 0.
+      await s.query('update sys_city_hero set loyalty = 0 where hid = 77430');
+      // grind the city morale to 0 so check_morale lets the takeover succeed (占领, not 掠夺) — the
+      // legacy gate is `morale - min(3,morale) == 0`, i.e. morale must already be low. This column
+      // is scoped out of the comparison (NPC_CITY_CAPTURE_IGNORE), so setting it is invisible to
+      // the diff but flips the branch to the full city-capture + hero-capture path.
+      await s.query('update mem_city_resource set morale = 0 where cid = ?', [TARGET]);
+      // a siege army; field.type==0 (city) so no overwhelming early win — HandleTroop builds the
+      // real mem_battle via defcityadd/battleAdd.
+      await s.query(
+        `insert into sys_troops
+          (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
+         values (?, ?, 0, ?, 4, 0, unix_timestamp() - 600, 600, unix_timestamp() - 1, '2,1,30000,12,6000', '0', 0, 0)`,
+        [uid, cid, TARGET],
+      );
+      // [0] → checkSodier NPC pick; raw draws → createmapSoldier; rest → the settling round's
+      // target pick + getBattleResult wounded/capture/catchHero rolls.
+      s.rng([0, 40, 30, 20, 10, 50, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1]);
+      await s.tick('HandleTroop');
+      // force the battle to its final round: breach the wall and make it due now, keeping the real
+      // respawned garrison and its defcityadd tactics so the settling round's combat report is built
+      // identically on both sides. One HandleBattle round advances the battle symmetrically on both
+      // engines (the legacy mem_battle engine now runs in the harness — see side.ts). The full
+      // takeover/抓将 mutations are asserted deterministically in getBattleResult's unit tests
+      // (battle-result.spec.ts), which drive the end-0 type-1 path directly.
+      await s.query(
+        `update mem_battle set wallhp = 0, nexttime = unix_timestamp() - 1 where attackcid = ?`,
+        [cid],
+      );
+      await s.tick('HandleBattle');
+      s.stopRng();
+      await s.query('delete from sys_troops where uid = ? or cid = ?', [uid, TARGET]);
+      await s.query('delete from mem_battle where attackcid = ?', [cid]);
+      await s.query('delete from mem_world_schedule where wid = ?', [TARGET_WID]);
+    },
   },
 ];
 

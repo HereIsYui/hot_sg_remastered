@@ -44,15 +44,60 @@ const SODIER_TYPE: Record<number, [string, string]> = {
 /** createCityDefence per-level `did,count` seed rows (UtilsExtend.php). Level 1 is a no-op in the
  * original (the `$count` var is undefined → the inserted value is empty), reproduced faithfully. */
 const CITY_DEFENCE: Record<number, [number, number][]> = {
-  2: [[1, 11082], [2, 6212]],
-  3: [[1, 12365], [2, 6418], [3, 3980]],
-  4: [[1, 13333], [2, 6666], [3, 4445]],
-  5: [[1, 12687], [2, 6344], [3, 4229], [4, 2985]],
-  6: [[1, 13662], [2, 7631], [3, 5088], [4, 3553]],
-  7: [[1, 14644], [2, 7322], [3, 4881], [4, 3381], [5, 2509]],
-  8: [[1, 16828], [2, 8414], [3, 5610], [4, 3847], [5, 2826]],
-  9: [[1, 19035], [2, 9518], [3, 6345], [4, 4309], [5, 3132]],
-  10: [[1, 21265], [2, 10633], [3, 7088], [4, 4767], [5, 3428]],
+  2: [
+    [1, 11082],
+    [2, 6212],
+  ],
+  3: [
+    [1, 12365],
+    [2, 6418],
+    [3, 3980],
+  ],
+  4: [
+    [1, 13333],
+    [2, 6666],
+    [3, 4445],
+  ],
+  5: [
+    [1, 12687],
+    [2, 6344],
+    [3, 4229],
+    [4, 2985],
+  ],
+  6: [
+    [1, 13662],
+    [2, 7631],
+    [3, 5088],
+    [4, 3553],
+  ],
+  7: [
+    [1, 14644],
+    [2, 7322],
+    [3, 4881],
+    [4, 3381],
+    [5, 2509],
+  ],
+  8: [
+    [1, 16828],
+    [2, 8414],
+    [3, 5610],
+    [4, 3847],
+    [5, 2826],
+  ],
+  9: [
+    [1, 19035],
+    [2, 9518],
+    [3, 6345],
+    [4, 4309],
+    [5, 3132],
+  ],
+  10: [
+    [1, 21265],
+    [2, 10633],
+    [3, 7088],
+    [4, 4767],
+    [5, 3428],
+  ],
 };
 
 /** Collaborators checkSodier needs, injected so the logic stays testable against a FakeDb. */
@@ -83,7 +128,9 @@ export async function checkSodier(deps: CheckSodierDeps, field: Row): Promise<nu
   let uid = phpIntval(field.uid);
   const hid = await choseHero(deps, cid);
 
-  const sProvince = phpIntval(await deps.cell(sql<Row>`select province from mem_world where wid = ${wid}`));
+  const sProvince = phpIntval(
+    await deps.cell(sql<Row>`select province from mem_world where wid = ${wid}`),
+  );
 
   if (uid >= 1000) return;
 
@@ -125,7 +172,9 @@ export async function checkSodier(deps: CheckSodierDeps, field: Row): Promise<nu
     npcValue = phpNum(
       await deps.cell(sql<Row>`select npcvalue from cfg_city_npcvalue where level = ${level}`),
     );
-    const cityType = phpNum(await deps.cell(sql<Row>`select type from sys_city where cid = ${cid}`));
+    const cityType = phpNum(
+      await deps.cell(sql<Row>`select type from sys_city where cid = ${cid}`),
+    );
     if (cityType > 0) npcValue *= 3.5;
   } else {
     // 野地情况 (wild field).
@@ -187,7 +236,11 @@ export async function checkSodier(deps: CheckSodierDeps, field: Row): Promise<nu
     else soldiers = array2troop(soldierArray);
     if (soldiers !== '0' && soldiers !== '') {
       await sql`delete from sys_troops where cid = ${cid} and uid < 1000`.execute(deps.db);
-      const value = sol2ValueMap(deps, soldierArray, oldTroop ? troop2arrayMerge(deps, oldTroop, soldierArray) : undefined);
+      const value = sol2ValueMap(
+        deps,
+        soldierArray,
+        oldTroop ? troop2arrayMerge(deps, oldTroop, soldierArray) : undefined,
+      );
       const resource = v2r(deps, value, type);
       await sql`insert into sys_troops (uid, cid, hid, task, state, soldiers, resource)
         values (${uid}, ${cid}, ${hid}, 5, 4, ${String(soldiers)}, ${resource})`.execute(deps.db);
@@ -261,16 +314,22 @@ export async function createCityDefence(deps: CheckSodierDeps, field: Row): Prom
  */
 async function choseHero(deps: CheckSodierDeps, cid: number): Promise<number> {
   let hid = phpNum(
-    await deps.cell(sql<Row>`select hid from sys_city_hero where cid = ${cid} and state = 7 limit 1`),
+    await deps.cell(
+      sql<Row>`select hid from sys_city_hero where cid = ${cid} and state = 7 limit 1`,
+    ),
   );
   if (!hid) {
     hid = phpNum(
-      await deps.cell(sql<Row>`select hid from sys_city_hero where cid = ${cid} and state = 1 limit 1`),
+      await deps.cell(
+        sql<Row>`select hid from sys_city_hero where cid = ${cid} and state = 1 limit 1`,
+      ),
     );
   }
   if (!hid) {
     hid = phpNum(
-      await deps.cell(sql<Row>`select hid from sys_city_hero where cid = ${cid} order by rand() limit 1`),
+      await deps.cell(
+        sql<Row>`select hid from sys_city_hero where cid = ${cid} order by rand() limit 1`,
+      ),
     );
   }
   return hid || 0;
@@ -446,7 +505,11 @@ export function v2r(deps: CheckSodierDeps, value: number, type: number): string 
  * troop's soldiers, returning `num,sid,cnt,sid,cnt` (NO trailing comma; getArrayMerge order — the
  * oldTroop's keys first, then any new sids). Returns '0' when nothing positive remains.
  */
-function addTroopArray(_deps: CheckSodierDeps, troop: Row, soldierArray: Map<number, number>): string {
+function addTroopArray(
+  _deps: CheckSodierDeps,
+  troop: Row,
+  soldierArray: Map<number, number>,
+): string {
   const target = troop2array(phpString(troop.soldiers));
   // getArrayMerge($soldierArray, $target): keys of $soldierArray first, then $target's extras; a
   // shared key SUMS. (array operator semantics differ, but the game's getArrayMerge adds.)
