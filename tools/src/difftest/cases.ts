@@ -4291,25 +4291,16 @@ export const cases: DiffCase[] = [
     },
   },
   {
-    // 好友/仇人 (FriendFunc.php): addUserRelation guards (type>=2 / unknown user / cap 20) throw
-    // EMPTY messages — the $GLOBALS['friend'] group is missing from lang.php, as in the original.
-    // The success insert references the nonexistent tname column, so both servers fail with the
-    // same MySQL error and sys_user_relation stays empty; getUserRelation then compares as [].
-    name: 'friend: relations guards and the original broken tname column',
+    // 好友/仇人 read side (FriendFunc.php): getUserRelation compares empty on both sides (the
+    // shipped game cannot add relations — the original carried the writes over the external chat
+    // server, absent from the 单机包; the remaster's command-channel writes have no legacy
+    // baseline and are covered by unit tests). addFriendsTaskFinish is whitelisted and lands
+    // task 313's goals identically. addUserRelation/removeRelation on the legacy answer
+    // `$funcName + 你异常了!!!` (whitelist), so the write-side commands are not difftested.
+    name: 'friend: getUserRelation and the task finish',
     run: async (s) => {
       const session = await s.login(EXISTING_PLAYER);
-      // type beyond 仇人
-      await s.command(session, 'addUserRelation', '张三', 2);
-      // unknown user
-      await s.command(session, 'addUserRelation', '不存在的人', 0);
-      // a real user (uid 1002) at type 1 (仇人): both sides die on the tname column
-      const [row] = await s.query<{ name: string }>('select name from sys_user where uid = 1002');
-      await s.command(session, 'addUserRelation', row?.name ?? '', 1);
-      // removeRelation (also references tname — same shared failure)
-      await s.command(session, 'removeRelation', '张三', 0);
-      // the list reads fine and compares empty on both sides
       await s.command(session, 'getUserRelation');
-      // the task-completion command (51-platform branch skipped on both)
       await s.command(session, 'addFriendsTaskFinish', '张三');
     },
   },

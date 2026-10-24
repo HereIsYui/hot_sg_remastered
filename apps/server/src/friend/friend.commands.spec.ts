@@ -74,3 +74,49 @@ describe('FriendCommands.addFriendsTaskFinish', () => {
     expect(goal.length).toBeGreaterThan(0);
   });
 });
+
+describe('FriendCommands.addUserRelation', () => {
+  it('rejects a type beyond 仇人 with an empty message', async () => {
+    const { cmd } = build([NO(/.*/)]);
+    const err = await cmd.addUserRelation(ctx, ['张三', 2]).catch((e: unknown) => e as Error);
+    expect(err.message).toBe('');
+  });
+
+  it('rejects an unknown target user and the 20-relation cap', async () => {
+    const { cmd } = build([{ match: /select uid as v from sys_user/i, rows: [] }, NO(/.*/)]);
+    const err = await cmd.addUserRelation(ctx, ['张三', 0]).catch((e: unknown) => e as Error);
+    expect(err.message).toBe('');
+    const { cmd: cmd2 } = build([
+      { match: /select uid as v from sys_user/i, rows: [{ v: 1002 }] },
+      { match: /select count\(\*\) as v from sys_user_relation/i, rows: [{ v: 20 }] },
+      NO(/.*/),
+    ]);
+    const err2 = await cmd2.addUserRelation(ctx, ['张三', 0]).catch((e: unknown) => e as Error);
+    expect(err2.message).toBe('');
+  });
+
+  it('inserts the relation (tname column dropped) and completes task 313 for friends', async () => {
+    const { cmd, db } = build([
+      { match: /select uid as v from sys_user/i, rows: [{ v: 1002 }] },
+      { match: /select count\(\*\) as v from sys_user_relation/i, rows: [{ v: 3 }] },
+      { match: /cfg_task_goal/i, rows: [{ id: 102486 }] },
+      NO(/insert into sys_user_relation/i),
+      NO(/replace into sys_user_goal/i),
+      NO(/.*/),
+    ]);
+    expect(await cmd.addUserRelation(ctx, ['张三', 0])).toEqual([1002, '张三', 0]);
+    const insert = db.executed.find((q) => /insert into sys_user_relation/i.test(q.sql));
+    expect(insert!.sql).not.toMatch(/tname/);
+    expect(insert!.parameters[0]).toBe(1001);
+    expect(db.executed.some((q) => /replace into sys_user_goal/i.test(q.sql))).toBe(true);
+  });
+});
+
+describe('FriendCommands.removeRelation', () => {
+  it('deletes by the target name scoped to the caller', async () => {
+    const { cmd, db } = build([NO(/.*/)]);
+    expect(await cmd.removeRelation(ctx, ['张三', 0])).toEqual(['张三', 0]);
+    expect(db.executed[0]!.sql).toMatch(/delete u from sys_user_relation u join sys_user s/i);
+    expect(db.executed[0]!.parameters).toEqual([1001, '张三', 0]);
+  });
+});
