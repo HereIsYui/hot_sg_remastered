@@ -4128,6 +4128,89 @@ export const cases: DiffCase[] = [
       await s.command(session, 'governOthers', 4, 188128, 1002, 209355, '南皮');
     },
   },
+  {
+    // 合城 (mergeCity, CityMergeFunc.php:14) error branches: 分城不是普通城 / 分城不归属 /
+    // 分城有兵 / 官府不足（「召回开往分城的军队」这条 update 写在官府校验之前，原版在报错
+    // 前已提交——种子军队最终 state=1 出现在两边增量里）/ 官府已满 15 级（该文案在 lang.php
+    // 里缺失，原版抛空消息）。主城 209355 是 type 5（跳过名城契约校验），爵位门槛只在官府
+    // 10-14 级检查；分城是在野地 wid 15 (cid 1005) 上种出来的 uid 1001 普通城。
+    name: 'world: mergeCity error branches',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      // 分城不是普通城: 188128 ships as type 5.
+      await s.command(session, 'mergeCity', 209355, 188128);
+      // 分城不归属: NPC city 11037 (uid 894, type 0, at peace).
+      await s.command(session, 'mergeCity', 209355, 11037);
+      // seed the sub city on free flatland wid 15 (cid 1005, province 10): 官府 1 + 民房 2 +
+      // 农田 1, a little of each resource.
+      await s.query('update mem_world set type = 0, ownercid = 1005 where wid = 15');
+      await s.query(
+        `insert into sys_city (cid, uid, name, type, state, province)
+         values (1005, 1001, '合城测试', 0, 0, 10)`,
+      );
+      await s.query(
+        `insert into sys_building (cid, xy, bid, level)
+         values (1005, 120, 6, 1), (1005, 121, 5, 2), (1005, 131, 1, 1)`,
+      );
+      await s.query(
+        `insert into mem_city_resource (cid, people, food, wood, rock, iron, gold, lastupdate)
+         values (1005, 100, 2000, 3000, 4000, 5000, 6000, 0)`,
+      );
+      // 分城有兵 (sid <= 12).
+      await s.query('insert into sys_city_soldier (cid, sid, count) values (1005, 1, 10)');
+      await s.command(session, 'mergeCity', 209355, 1005);
+      await s.query('delete from sys_city_soldier where cid = 1005');
+      // 官府不足: level 9 (nobility 4 — no gate below 10); a troop marching at the sub city is
+      // recalled (state → 1) BEFORE the level check throws. The row stays in the delta with
+      // state 1 on both sides, proving the pre-check write committed as in the original.
+      await s.query('update sys_building set level = 9 where cid = 209355 and bid = 6');
+      await s.query('update sys_user set nobility = 4 where uid = 1001');
+      await s.query(
+        `insert into sys_troops
+          (id, uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
+         values (900011, 1002, 188128, 0, 1005, 5, 0, unix_timestamp() - 600, 600, unix_timestamp() - 1, '0', '0', 0, 0)`,
+      );
+      await s.command(session, 'mergeCity', 209355, 1005);
+      // 官府已满 (the shipped level 15): the government_max_level text is missing from
+      // lang.php, so the original throws an empty message.
+      await s.query('update sys_building set level = 15 where cid = 209355 and bid = 6');
+      await s.command(session, 'mergeCity', 209355, 1005);
+    },
+  },
+  {
+    // 合城 success: the seeded sub city merges into 209355 (官府 10 → 11, nobility 4). The sub's
+    // building investment becomes the upgrade budget — everything in the main city is level 15
+    // except the 民房 at xy 100 dropped to 3, which is the only building below the new 官府 cap,
+    // so the upgrade loop exercises a real level-up and the budget remainder returns to the main
+    // city's resources. The type-5 main city skips the 名城契约 check, but reduceMingchengqiyue
+    // still runs unconditionally: addGoods(-1) seeds sys_goods (1001, 160052, 0) + a log_qiyue
+    // row. The merge report (title 53) diffs the before/after building tables.
+    name: 'world: mergeCity merges a sub city into the main city',
+    tables: {
+      log_qiyue: { offsets: ['time'] },
+      log_merge_city: { offsets: ['time'] },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      await s.query('update sys_building set level = 10 where cid = 209355 and bid = 6');
+      await s.query('update sys_building set level = 3 where cid = 209355 and xy = 100');
+      await s.query('update sys_user set nobility = 4 where uid = 1001');
+      await s.query('update mem_world set type = 0, ownercid = 1005 where wid = 15');
+      await s.query(
+        `insert into sys_city (cid, uid, name, type, state, province)
+         values (1005, 1001, '合城测试', 0, 0, 10)`,
+      );
+      await s.query(
+        `insert into sys_building (cid, xy, bid, level)
+         values (1005, 120, 6, 1), (1005, 121, 5, 2), (1005, 131, 1, 1)`,
+      );
+      await s.query(
+        `insert into mem_city_resource (cid, people, food, wood, rock, iron, gold, lastupdate)
+         values (1005, 100, 2000, 3000, 4000, 5000, 6000, 0)`,
+      );
+      await s.command(session, 'mergeCity', 209355, 1005);
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {
