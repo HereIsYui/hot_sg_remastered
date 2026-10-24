@@ -6,6 +6,7 @@ import { CityModule } from './city/city.module';
 import { CommonModule } from './common/common.module';
 import { ConfigModule } from './config/config.module';
 import { CoreModule } from './core/core.module';
+import { FriendModule } from './friend/friend.module';
 import { DatabaseModule } from './db/database.module';
 import { GatewayModule } from './gateway/gateway.module';
 import { GoodsModule } from './goods/goods.module';
@@ -47,6 +48,7 @@ import { WorldModule } from './world/world.module';
     MailModule,
     TroopModule,
     BattleModule,
+    FriendModule,
   ],
   controllers: [HealthController],
 })
