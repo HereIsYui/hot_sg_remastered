@@ -400,7 +400,11 @@ export function playRound(
     let fanjiEnd = 0;
     let isAttack: number;
     const tacticKey = `${value.attack === 1 ? 1 : 0}:${stype}`;
-    const tactics: RoundTactic = input.tactics.get(tacticKey) ?? { action: 0, target: 0 };
+    // PHP: sql_fetch_one() returns false when no mem_battle_tactics row exists, and
+    // `false['action']` concatenates as '' in the report (not 0). Logic still treats it as 0.
+    const tacticRow = input.tactics.get(tacticKey);
+    const tactics: RoundTactic = tacticRow ?? { action: 0, target: 0 };
+    const tacticActionField = tacticRow ? String(tactics.action) : '';
 
     if (value.attack === 1) {
       isAttack = 1;
@@ -606,7 +610,7 @@ export function playRound(
 
     // 战报行
     report +=
-      `${isAttack}.000000,${isCity}.000000,${sid}.000000,${tactics.action}.000000,${speed}.000000,` +
+      `${isAttack}.000000,${isCity}.000000,${sid}.000000,${tacticActionField}.000000,${speed}.000000,` +
       `${istarget}.000000,${shanghai}.000000,${targetType}.000000,${targetSid}.000000,${targetStart}.000000,` +
       `${siwang}.000000,${targetEnd}.000000,${ableFanji}.000000,${fanjiShanghai}.000000,${targetStartD}.000000,` +
       `${fanjiSiwang}.000000,${fanjiEnd}.000000;`;
