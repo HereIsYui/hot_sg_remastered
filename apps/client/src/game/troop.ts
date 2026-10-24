@@ -55,7 +55,10 @@ export function targetWorldTypeName(wtype: number): string {
   return i18n(key) || fallback;
 }
 
-/** `CampaignDialog` task combo labels (`Ground_CampaignDialog_14..18`): 侦察/掠夺/占领/运输/派遣. */
+/**
+ * `CampaignDialog` task combo labels, in combo order (index 0..4): the original builds the combo
+ * from `Ground_CampaignDialog_14..18` = 运输 / 派遣 / 侦察 / 掠夺 / 占领 (CampaignDialog.as:3021).
+ */
 export function campaignTaskName(index: number): string {
   return i18n(`Ground_CampaignDialog_${14 + index}`) || CAMPAIGN_TASK_FALLBACK[index] || '';
 }
@@ -63,10 +66,13 @@ export function campaignTaskName(index: number): string {
 const TASK_FALLBACK = ['驻扎', '支援', '侦察', '掠夺', '占领', '运输', '', '派遣', '', ''];
 const STATE_FALLBACK = ['前进', '返回', '驻扎', '战斗', '集结', '集结'];
 const TARGET_WORLD_FALLBACK = ['城池', '平原', '树林', '石山', '湖泊', '沙漠', '火山', '沼泽'];
-/** 出征 task options, in CampaignDialog order (combo index 0..4). */
-export const CAMPAIGN_TASK_FALLBACK = ['侦察', '掠夺', '占领', '运输', '派遣'];
-/** The server `task` id for each CampaignDialog combo index (侦察=2, 掠夺=3, 占领=4, 运输=5, 派遣=7). */
-export const CAMPAIGN_TASK_SERVER_ID = [2, 3, 4, 5, 7];
+/**
+ * The 出征 task combo in index order, used only when the lang bundle is missing.
+ * `StartTroop` takes this index as-is (the original passes `taskSelect.selectedIndex` straight
+ * through and the server reads it the same way: 运输=0, 派遣=1, 侦察=2, 掠夺=3, 占领=4 — see
+ * `taskname` in apps/server/src/world/start-troop.commands.ts).
+ */
+export const CAMPAIGN_TASK_FALLBACK = ['运输', '派遣', '侦察', '掠夺', '占领'];
 
 // ---- getTroopScheme: the saved 出征方案 ----
 

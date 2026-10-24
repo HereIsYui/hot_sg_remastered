@@ -281,7 +281,7 @@ const cityIndex = computed({
         :y="73"
         style-name="MyCityField"
         :tip="i18n('UserInfo_InfoPanel_22_1')"
-        @click="game.showDialog('cityField')"
+        @click="game.showCityFieldDialog()"
       />
     </FxCanvas>
 

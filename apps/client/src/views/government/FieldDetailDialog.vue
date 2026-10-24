@@ -10,7 +10,8 @@ export interface Field {
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { serverTime, timeLeftText } from '../../core/clock';
-import { fieldDescription, wid2cid, worldTypeName } from '../../game/field';
+import { BUILDING_GROUND } from '../../game/cityGrid';
+import { canCreateCityOnField, fieldDescription, fieldTitle, wid2cid } from '../../game/field';
 import { useGame } from '../../game/game';
 import { i18n } from '../../i18n';
 import { useCityStore } from '../../stores/city';
@@ -24,8 +25,9 @@ import FxLabel from '../../ui/FxLabel.vue';
 
 /**
  * Government.FieldDetailDialog: one field's stationed troops, which can be recalled (the
- * player's) or sent away (others'). 派遣 needs the 校场's campaign dialog, 采集 / 收获 the
- * gathering rewards and 筑城 the world commands, none of which are ported.
+ * player's) or sent away (others'). 派遣 opens the 校场's campaign dialog on this field, 筑城 sends
+ * `createCityFromLand`. 采集 / 收获 (`gatherFieldStart` / `gatherFieldEnd`) are city commands the
+ * server has not ported, so those two buttons stay disabled.
  */
 const props = defineProps<{ field: Field; data: unknown[] | null }>();
 const emit = defineEmits<{ close: [] }>();
@@ -45,13 +47,11 @@ interface Troop {
 }
 
 const cid = computed(() => wid2cid(props.field.wid));
-const title = computed(
-  () => `${worldTypeName(props.field.type)}:(${cid.value % 1000},${Math.floor(cid.value / 1000)})`,
-);
+const title = computed(() => fieldTitle(props.field.type, props.field.wid));
 const description = computed(() =>
   fieldDescription(props.field.type, props.field.level, props.field.province, global.yysType),
 );
-const canCreateCity = computed(() => props.field.type === 1);
+const canCreateCity = computed(() => canCreateCityOnField(props.field.type));
 
 /** `loadData`: `[troops, gathering or false]`. */
 const troops = computed<Troop[]>(() => {
@@ -101,6 +101,28 @@ async function onDiscard() {
   emit('close');
 }
 
+/**
+ * `onDispatch` (AS3 847-875): open the 校场's campaign dialog with this field as the target and
+ * the 派遣 task preselected (`setCampaignTarget(wid2cid(mWid), 1)` — combo index 1 = 派遣).
+ * Without a 校场 the original alerts `Government_FieldDetailDialog_13_1`.
+ */
+function onDispatch() {
+  const ground = city.buildings.find((b) => b.bid === BUILDING_GROUND && b.level > 0);
+  if (!ground) {
+    void showAlert(t(13));
+    return;
+  }
+  game.closeDialog();
+  game.showCampaign(ground.bid, ground.y * 10 + ground.x, cid.value, 1);
+}
+
+/** `onCreateCity` / `onCreateCityAlert` (AS3 771-781, 1084-1087): confirm, then 筑城. */
+async function onCreateCity() {
+  if ((await showAlert(t(36), '', ['yes', 'no'])) !== 'yes') return;
+  game.sendWorldCommand('createCityFromLand', [props.field.wid]);
+  emit('close');
+}
+
 let timer: ReturnType<typeof setInterval> | undefined;
 onMounted(() => (timer = setInterval(() => (now.value = serverTime()), 1000)));
 onUnmounted(() => clearInterval(timer));
@@ -140,7 +162,7 @@ onUnmounted(() => clearInterval(timer));
         :bottom="15"
         :fx="{ fontSize: 16 }"
         :label="t(1)"
-        :enabled="false"
+        @click="onDispatch"
       />
       <FxCanvas :x="20" :y="84" :w="430" :h="212" style-name="BoardListUp">
         <FxDataGrid
@@ -205,6 +227,7 @@ onUnmounted(() => clearInterval(timer));
         :text="description"
         :tip="description"
       />
+      <!-- 采集 / 收获: gatherFieldStart / gatherFieldEnd are not ported on the server yet. -->
       <FxButton
         v-if="gatherStart === null && !canCreateCity"
         :w="65"
@@ -258,7 +281,7 @@ onUnmounted(() => clearInterval(timer));
         :bottom="15"
         :fx="{ fontSize: 16 }"
         :label="t(12)"
-        :enabled="false"
+        @click="onCreateCity"
       />
     </FxCanvas>
   </FxCanvas>

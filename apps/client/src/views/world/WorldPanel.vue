@@ -355,7 +355,12 @@ function onMinimapClick(e: MouseEvent): void {
 const unregister = game.addGlobalReceiver('world', (command, data) => {
   if (command === 'getBlockData') onGetBlockData(data);
   else if (command === 'getWorldCityInfo' || command === 'startWar') onGetWorldCityInfo(data);
-  else if (command === 'getUserFields') {
+  else if (command === 'createCityFromLand') {
+    // WorldPanel.as:9324 `moveViewTo(mgx, mgy)`: re-centre on the current view so the flatland
+    // that just became a city reloads its block (loadUserInfo + the 筑城成功 toast are app-level,
+    // handled in Game.onGlobalCommand).
+    moveViewTo(world.centre.x, world.centre.y);
+  } else if (command === 'getUserFields') {
     world.userFieldCids = parseUserFields(data);
     redraw();
   } else if (command === 'getActionField') {
@@ -440,34 +445,22 @@ watch(() => world.centre, redraw, { deep: true });
         <FxButton :w="34" :h="22" style-name="ButtonGreen" label="↓" @click="onDown" />
       </div>
 
-      <!-- coordinate jump -->
+      <!-- coordinate jump (a remaster addition — the original had no jump inputs) -->
       <div class="jump">
         <FxTextInput v-model="jumpX" :w="48" :h="22" placeholder="X" />
         <FxTextInput v-model="jumpY" :w="48" :h="22" placeholder="Y" />
-        <FxButton
-          :w="44"
-          :h="22"
-          style-name="ButtonRed"
-          :label="i18n('World_WorldPanelSrc_9') || '定位'"
-          @click="onJump"
-        />
+        <FxButton :w="44" :h="22" style-name="ButtonRed" label="定位" @click="onJump" />
       </div>
 
-      <!-- search by name -->
+      <!-- search by name: the original's nameInput prompt (WorldPanel.as:14501) -->
       <div class="search">
         <FxTextInput
           v-model="searchName"
           :w="100"
           :h="22"
-          :placeholder="i18n('World_WorldPanelSrc_8') || '城池名'"
+          :placeholder="i18n('World_WorldPanel_10_3') || '请输入城池名称'"
         />
-        <FxButton
-          :w="44"
-          :h="22"
-          style-name="ButtonRed"
-          :label="i18n('World_WorldPanelSrc_7') || '查找'"
-          @click="onSearch"
-        />
+        <FxButton :w="44" :h="22" style-name="ButtonRed" label="查找" @click="onSearch" />
       </div>
       <ul v-if="results.length" class="results">
         <li v-for="r in results" :key="r.cid" @click="jumpToResult(r.cid)">
@@ -475,12 +468,12 @@ watch(() => world.centre, redraw, { deep: true });
         </li>
       </ul>
 
-      <!-- favourites entry -->
+      <!-- favourites entry (label from the action dialog's 收藏 button) -->
       <FxButton
         :w="150"
         :h="24"
         style-name="ButtonGreen"
-        :label="i18n('World_WorldPanelSrc_6') || '收藏'"
+        :label="i18n('World_WorldActionDialog_44_1') || '收藏'"
         @click="game.showFavourites()"
       />
 

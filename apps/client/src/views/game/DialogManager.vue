@@ -86,7 +86,11 @@ function choose(action: 'all' | 'level') {
     <BuildingListDialog v-else-if="dialog?.name === 'buildingList'" />
     <ResourceProductDialog v-else-if="dialog?.name === 'resourceProduct'" />
     <CityListDialog v-else-if="dialog?.name === 'cityList'" />
-    <CityFieldDialog v-else-if="dialog?.name === 'cityField'" />
+    <CityFieldDialog
+      v-else-if="dialog?.name === 'cityField'"
+      :key="`cityField ${dialog.wid}`"
+      :wid="dialog.wid"
+    />
     <OpenLockDialog v-else-if="dialog?.name === 'openLock'" :type="dialog.type" />
     <ModifyPasswordDialog v-else-if="dialog?.name === 'modifyPassword'" />
     <TaskDialog v-else-if="dialog?.name === 'task'" />

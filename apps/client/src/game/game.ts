@@ -270,6 +270,12 @@ export class Game {
       // The shop row behind a `not_enough_goods` error: open the buy-and-use popup.
       const row = asRow((data as unknown[] | undefined)?.[0]);
       if (row) this.session.buyAndUse = { goods: row };
+    } else if (action === 'world' && command === 'createCityFromLand') {
+      // WorldPanel.as:9324 `createCityFromLand`: the app reloads the user (the new city) and
+      // toasts 筑城成功 (`BloodWar.loadUserInfo` / `Global.app.alert` are app-level); the panel
+      // only re-centres the view, in its own `addGlobalReceiver('world')` branch.
+      this.loadUserInfo();
+      gameAlert(i18n('World_WorldPanelSrc_10'));
     }
     for (const receiver of [...(this.globalReceivers.get(action) ?? [])]) receiver(command, data);
   }
@@ -766,6 +772,14 @@ export class Game {
   /** `WorldPanel.onMouseUp` -> `showSpecialPanel`: open the action dialog for a clicked cell. */
   showWorldAction(cid: number): void {
     this.session.dialog = { name: 'worldAction', cid };
+  }
+
+  /**
+   * `DialogManager.showCityFieldDialog(wid)` (WorldActionDialog `onEnterField`): the 附属野地 list
+   * of the current city; a wid > 0 pre-opens that field's detail (`CityFieldDialog.setAutoLoad`).
+   */
+  showCityFieldDialog(wid = 0): void {
+    this.session.dialog = { name: 'cityField', wid };
   }
 
   /** `CampaignFavouritesDialog.loadList`: the 收藏 dialog over the scene. */

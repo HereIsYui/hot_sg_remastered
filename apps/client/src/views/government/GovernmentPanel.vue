@@ -18,12 +18,14 @@ const city = useCityStore();
 const t = (n: number) => i18n(`Government_GovernmentPanel_${n}_1`);
 
 /**
- * `action` opens a pop-up of the 官府, `dialog` another dialog.
+ * `action` opens a pop-up of the 官府, `dialog` another dialog; `cityField` is the 附属野地 list
+ * (`DialogManager.showCityFieldDialog`).
  */
 const buttons: {
   label: number;
   action?: GovernmentAction;
   dialog?: PlainDialog;
+  cityField?: boolean;
 }[] = [
   { label: 1, dialog: 'buildingList' },
   { label: 5, dialog: 'resourceProduct' },
@@ -31,7 +33,7 @@ const buttons: {
   { label: 3, action: 'pacify' },
   { label: 4, action: 'levy' },
   { label: 6, action: 'rename' },
-  { label: 16, dialog: 'cityField' },
+  { label: 16, cityField: true },
   { label: 17, dialog: 'cityList' },
   { label: 9, action: 'heroExpr' },
 ];
@@ -41,6 +43,7 @@ const buttonLayout = computed(() => buttons.map((b, i) => ({ ...b, x: 1 + i * 72
 
 function onButton(b: (typeof buttons)[number]) {
   if (b.action) emit('open', b.action);
+  else if (b.cityField) game.showCityFieldDialog();
   else if (b.dialog) game.showDialog(b.dialog);
 }
 

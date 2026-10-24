@@ -6,7 +6,7 @@ import { useGame } from '../../game/game';
 import {
   buildTroopResourceString,
   buildTroopSoldiersString,
-  CAMPAIGN_TASK_SERVER_ID,
+  CAMPAIGN_TASK_FALLBACK,
   campaignFoodUse,
   campaignPathTime,
   campaignSoldiers,
@@ -104,7 +104,7 @@ const heroes = computed(() => {
   return list;
 });
 
-const taskOptions = computed(() => CAMPAIGN_TASK_SERVER_ID.map((_, i) => campaignTaskName(i)));
+const taskOptions = computed(() => CAMPAIGN_TASK_FALLBACK.map((_, i) => campaignTaskName(i)));
 const heroOptions = computed(() => heroes.value.map((h) => h.name));
 
 /** `City.getTechnicLevel`. */
@@ -262,7 +262,9 @@ function startTroop(): void {
   const tx = parseInt(destX.value, 10) || 0;
   const ty = parseInt(destY.value, 10) || 0;
   const targetcid = ty * 1000 + tx;
-  const task = CAMPAIGN_TASK_SERVER_ID[taskIndex.value] ?? 2;
+  // The task is the combo index itself (`startTroop` AS3 1805 passes `taskSelect.selectedIndex`;
+  // the server reads it as 运输=0 / 派遣=1 / 侦察=2 / 掠夺=3 / 占领=4).
+  const task = taskIndex.value;
   const resourceStr = buildTroopResourceString(resources);
   sendGround(
     'StartTroop',
@@ -273,9 +275,14 @@ function startTroop(): void {
 }
 
 async function onStartClick(): Promise<void> {
-  // 占领 (index 2) / 运输 (index 3) require a hero in the original
-  if (heroIndex.value === 0 && (taskIndex.value === 2 || taskIndex.value === 3)) {
+  // 掠夺 (index 3) and 占领 (index 4) require a hero (`startCampaign` AS3 3475-3486, each with
+  // its own message).
+  if (heroIndex.value === 0 && taskIndex.value === 3) {
     void showAlert(i18n('Ground_CampaignDialogSrc_7') || '该任务需要带将领');
+    return;
+  }
+  if (heroIndex.value === 0 && taskIndex.value === 4) {
+    void showAlert(i18n('Ground_CampaignDialogSrc_8') || '该任务需要带将领');
     return;
   }
   if (useFlag.value) {

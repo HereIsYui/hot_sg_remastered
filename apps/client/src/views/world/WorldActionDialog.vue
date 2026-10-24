@@ -24,8 +24,10 @@ import FxText from '../../ui/FxText.vue';
 /**
  * World/WorldActionDialog (shell): shows the clicked cell's field/city info and wires 收藏
  * (addFavourites), 标记 (markCity) and the army actions. 出征 / 侦察 / 掠夺 / 占领 / 运输 / 派遣 open
- * the CampaignDialog preset with this cell as the target; 建城 / 合城 / 管辖 are later waves and stay
- * 暂未开放.
+ * the CampaignDialog preset with this cell as the target (task combo indices per the AS3
+ * `showCampaignDialog` / `setTask`: 运输=0, 派遣=1, 侦察=2, 掠夺=3, 占领=4); one of the player's own
+ * fields shows 进入 (the `onEnterField` 附属野地 detail, where a flatland offers 筑城) instead.
+ * 合城 / 管辖 are later waves and stay 暂未开放.
  */
 const props = defineProps<{ cid: number }>();
 
@@ -75,23 +77,32 @@ const isSelf = computed(
 );
 
 /**
- * The army-action buttons. 出征 / 侦察 / 掠夺 / 占领 / 运输 / 派遣 open the CampaignDialog preset with
- * this cell as the target and the matching task combo index (per AS3 `setTask`); 建城 / 合城 / 管辖
+ * The army-action buttons. Each opens the CampaignDialog preset with this cell as the target and
+ * the matching task combo index (per the AS3 `onPatrol`→2, `onPlunder`→3, `onInvade`→4,
+ * `onTransport`→0, `onDispatch`→1; 出征 leaves the combo at its default first item). 合城 / 管辖
  * stay 暂未开放 (building merge / govern are later waves).
  */
 const CAMPAIGN_ACTIONS: { key: string; label: string; taskIndex: number }[] = [
   { key: 'dispatch', label: '出征', taskIndex: 0 },
-  { key: 'scout', label: '侦察', taskIndex: 0 },
-  { key: 'plunder', label: '掠夺', taskIndex: 1 },
-  { key: 'invade', label: '占领', taskIndex: 2 },
-  { key: 'transport', label: '运输', taskIndex: 3 },
-  { key: 'depute', label: '派遣', taskIndex: 4 },
+  { key: 'scout', label: '侦察', taskIndex: 2 },
+  { key: 'plunder', label: '掠夺', taskIndex: 3 },
+  { key: 'invade', label: '占领', taskIndex: 4 },
+  { key: 'transport', label: '运输', taskIndex: 0 },
+  { key: 'depute', label: '派遣', taskIndex: 1 },
 ];
 const UNPORTED: { key: string; label: string }[] = [
-  { key: 'build', label: '建城' },
   { key: 'merge', label: '合城' },
   { key: 'govern', label: '管辖' },
 ];
+
+/** One of the player's own fields (`getUserFields`): the original shows only 派遣 + 进入. */
+const isOwnField = computed(() => !isCity.value && world.userFieldCids.includes(props.cid));
+
+/** `onEnterField` (AS3 2281-2285): the 附属野地 list opened on this field's detail. */
+function onEnterField(): void {
+  game.closeDialog();
+  game.showCityFieldDialog(cell.value?.wid ?? cid2wid(props.cid));
+}
 
 /** `WorldActionDialog.showCampaignDialog`: open 出征 from the current city's 校场 at this target. */
 function onCampaign(taskIndex: number): void {
@@ -219,8 +230,29 @@ onUnmounted(unregister);
       @click="onSendMessage"
     />
 
-    <!-- army-action buttons: campaign targets wired, 建城/合城/管辖 暂未开放 -->
-    <div v-if="!isSelf" class="actions">
+    <!-- own field: 进入 (the detail dialog, where a flatland offers 筑城) + 派遣 -->
+    <div v-if="isOwnField" class="actions">
+      <FxButton
+        :x="20"
+        :y="256"
+        :w="80"
+        :h="28"
+        style-name="ButtonGreen"
+        :label="i18n('World_WorldActionDialog_40_1') || '进入'"
+        @click="onEnterField"
+      />
+      <FxButton
+        :x="110"
+        :y="256"
+        :w="80"
+        :h="28"
+        style-name="ButtonGreen"
+        :label="i18n('World_WorldActionDialog_38_1') || '派遣'"
+        @click="onCampaign(1)"
+      />
+    </div>
+    <!-- army-action buttons: campaign targets wired, 合城/管辖 暂未开放 -->
+    <div v-else-if="!isSelf" class="actions">
       <FxButton
         v-for="(a, i) in CAMPAIGN_ACTIONS"
         :key="a.key"
@@ -245,12 +277,12 @@ onUnmounted(unregister);
       />
     </div>
     <FxText
-      v-if="!isSelf"
+      v-if="!isSelf && !isOwnField"
       :x="20"
       :y="330"
       :w="360"
       :fx="{ color: 14329120, fontSize: 11 }"
-      :text="i18n('_CommonSrc_notOpen') || '建城 / 合城 / 管辖 暂未开放'"
+      :text="i18n('_CommonSrc_notOpen') || '合城 / 管辖 暂未开放'"
     />
   </FxCanvas>
 </template>

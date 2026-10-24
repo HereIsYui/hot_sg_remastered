@@ -1,10 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { setStrings } from '../i18n';
 import {
   buildTroopResourceString,
   buildTroopSoldiersString,
   campaignFoodUse,
   campaignPathTime,
   campaignSoldiers,
+  campaignTaskName,
   campaignTotalCarry,
   makeTimeLeftString,
   parseStayTroops,
@@ -17,6 +19,25 @@ import {
   type CampaignResource,
   type CampaignSoldier,
 } from './troop';
+
+describe('campaign task combo order', () => {
+  // `Ground_CampaignDialog_14..18` in combo order: the combo INDEX is what StartTroop receives
+  // (CampaignDialog.as:1805 passes `taskSelect.selectedIndex`; the server reads it as
+  // 运输=0 / 派遣=1 / 侦察=2 / 掠夺=3 / 占领=4).
+  beforeAll(() => {
+    setStrings({
+      Ground_CampaignDialog_14: '运输',
+      Ground_CampaignDialog_15: '派遣',
+      Ground_CampaignDialog_16: '侦察',
+      Ground_CampaignDialog_17: '掠夺',
+      Ground_CampaignDialog_18: '占领',
+    });
+  });
+
+  it('labels the combo in the original order', () => {
+    expect([0, 1, 2, 3, 4].map(campaignTaskName)).toEqual(['运输', '派遣', '侦察', '掠夺', '占领']);
+  });
+});
 
 describe('makeTimeLeftString', () => {
   it('pads hours/minutes/seconds and clamps negatives', () => {

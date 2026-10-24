@@ -12,6 +12,7 @@ import FxLabel from '../../ui/FxLabel.vue';
 import FieldDetailDialog, { type Field } from './FieldDetailDialog.vue';
 
 /** Government.CityFieldDialog: the wild fields the city holds. */
+const props = defineProps<{ wid?: number }>();
 const game = useGame();
 const city = useCityStore();
 const t = (n: number) => i18n(`Government_CityFieldDialog_${n}_1`);
@@ -53,6 +54,11 @@ function onGetCityField(data: unknown) {
     position: cityPosition(wid2cid(int(f.wid))),
     stateName: stateName(f),
   }));
+  // `onGetCityField` (AS3 283-297): a wid from `setAutoLoad` opens that field's detail right away.
+  if (props.wid && props.wid > 0) {
+    const row = rows.value.find((r) => r.wid === props.wid);
+    if (row) onView(row);
+  }
 }
 
 /** `viewFieldDetail`. */

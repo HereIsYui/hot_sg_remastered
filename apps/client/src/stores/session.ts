@@ -7,12 +7,11 @@ export type Screen = 'loading' | 'login' | 'createRole' | 'game';
 /** Main scene selected in the top bar. */
 export type View = 'cityInner' | 'city' | 'world' | 'battle';
 
-/** Dialogs opened without arguments (`showBuildingListDialog`, `showCityFieldDialog`, ...). */
+/** Dialogs opened without arguments (`showBuildingListDialog`, `showResourceProductDialog`, ...). */
 export type PlainDialog =
   | 'buildingList'
   | 'resourceProduct'
   | 'cityList'
-  | 'cityField'
   | 'modifyPassword'
   | 'task'
   | 'myGoods'
@@ -20,7 +19,8 @@ export type PlainDialog =
 
 /**
  * `DialogManager.showCreateBuildingDialog(kind)` (0 fields, 1 inner, 2 wall), `showBuildingDialog`,
- * `showOpenLockDialog(type)` and the plain dialogs.
+ * `showOpenLockDialog(type)` and the plain dialogs. `cityField` carries the wid the original
+ * `showCityFieldDialog(wid)` pre-opens the field detail for (0 = the plain list).
  */
 export type DialogState =
   | { name: 'createBuilding'; kind: number }
@@ -28,6 +28,7 @@ export type DialogState =
   | { name: 'openLock'; type: string }
   | { name: 'heroDetail'; hid: number }
   | { name: 'worldAction'; cid: number }
+  | { name: 'cityField'; wid: number }
   | { name: PlainDialog };
 
 /**

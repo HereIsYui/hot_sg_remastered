@@ -12,6 +12,17 @@ export function worldTypeName(type: number): string {
   return type >= 0 && type <= 7 ? i18n(`_Define_${type + 1}`) : '';
 }
 
+/** `FieldDetailDialog.setField`: the title line `地形:(x,y)` for a field's world id. */
+export function fieldTitle(type: number, wid: number): string {
+  const cid = wid2cid(wid);
+  return `${worldTypeName(type)}:(${cid % 1000},${Math.floor(cid / 1000)})`;
+}
+
+/** `FieldDetailDialog.setField`: 筑城 is offered on 平地 only (`mCanCreateCity = type == 1`). */
+export function canCreateCityOnField(type: number): boolean {
+  return type === 1;
+}
+
 /** Per terrain: the bonus at level 0 < level, and per level (CityFunc.php::updateFieldResourceAdd). */
 const BONUS: Record<number, [base: number, per: number]> = {
   2: [3, 2],
