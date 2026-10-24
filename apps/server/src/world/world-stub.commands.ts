@@ -7,18 +7,12 @@ import { GlobalCommand } from '../gateway/decorators';
  * (the client shows the standard 暂未开放 placeholder). Porting them needs the battle / troop
  * dispatch pipeline and the union/city-merge flows:
  *
- *  - `governOthers`        — issue a 政令 against another city (needs addCityResources / soldier moves).
  *  - `startWar`            — declare a personal war (needs sendReport + union event feed).
  *  - `unionAssit`          — buy a 2h 免战 for an ally (needs addMoney + mem_user_buffer).
  *  - `mergeCity`           — CityMergeFunc.php city merge (whole separate flow).
  */
 @Injectable()
 export class WorldStubCommands {
-  @GlobalCommand()
-  governOthers(): never {
-    throw new Error('governOthers: 政令 not ported');
-  }
-
   @GlobalCommand()
   startWar(): never {
     throw new Error('startWar: war declaration not ported');

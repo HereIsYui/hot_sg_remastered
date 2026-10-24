@@ -20,6 +20,12 @@ export interface Respond {
   match: RegExp;
   rows?: Record<string, unknown>[];
   insertId?: number;
+  /**
+   * Optional: also require these exact parameter values (loosely equal, compared per position).
+   * Disambiguates repeated identical SQL that must answer differently per call site, e.g.
+   * `select type from sys_city where cid = ?` for the own vs. the target city.
+   */
+  params?: unknown[];
 }
 
 /**
@@ -33,14 +39,19 @@ export class FakeDb {
 
   constructor(private rules: Respond[] = []) {
     const executed = this.executed;
-    const matchRules = (sql: string) => this.rules.find((r) => r.match.test(sql));
+    const matchRules = (sql: string, parameters: readonly unknown[]) =>
+      this.rules.find(
+        (r) =>
+          r.match.test(sql) &&
+          (r.params === undefined || r.params.every((p, i) => parameters[i] == p)),
+      );
     const connection: DatabaseConnection = {
       async executeQuery<R>(compiled: {
         sql: string;
         parameters: readonly unknown[];
       }): Promise<QueryResult<R>> {
         executed.push({ sql: compiled.sql, parameters: compiled.parameters });
-        const rule = matchRules(compiled.sql);
+        const rule = matchRules(compiled.sql, compiled.parameters);
         const rows = (rule?.rows ?? []) as R[];
         return {
           rows,

@@ -11,6 +11,12 @@ describe('sprintf', () => {
     expect(sprintf('%2$s-%1$s', 'a', 'b')).toBe('b-a');
     expect(sprintf('%s and %s', 'only')).toBe('only and ');
   });
+
+  it('formats %.0f like PHP (half away from zero)', () => {
+    expect(sprintf('损失黄金%.0f。', 1234)).toBe('损失黄金1234。');
+    expect(sprintf('损失%.0f/%.0f/%.0f', 1234.5, 1234.4, -2.5)).toBe('损失1235/1234/-3');
+    expect(sprintf('%sf=%.2f', 'v', 3.14159)).toBe('vf=3.14');
+  });
 });
 
 describe('LangService', () => {

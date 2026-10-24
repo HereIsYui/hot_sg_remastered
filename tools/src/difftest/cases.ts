@@ -4026,6 +4026,108 @@ export const cases: DiffCase[] = [
       await s.command(session, 'createCityFromLand', wid);
     },
   },
+  {
+    // 政令 (governOthers, WorldFunc.php:547) error branches: 城池不属于自己 / 普通城 / 盟友 /
+    // 封禁中 / 越出郡·州的范围 / 目标当日已被政令 / 当日次数上限. changle's 209355 (官府 15 级,
+    // province 4 / jun 8) is promoted to a 名城 for the case; player 1002's 188128 (province 10 /
+    // jun 5, type 5 counts as a 普通城) is the target throughout.
+    name: 'world: governOthers error branches',
+    tables: {
+      mem_city_schedule: {
+        ignore: ['next_good_event', 'next_bad_event'],
+        offsets: ['last_anming', 'last_reset_recruit', 'last_govern_time', 'last_be_govern_time'],
+      },
+      sys_user_state: { offsets: ['forbistart', 'forbiend', 'vacstart', 'vacend'] },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      // 城池不属于自己: the ordering "city" 188128 belongs to 1002.
+      await s.command(session, 'governOthers', 0, 188128, 1002, 188128, '平原');
+      // 普通城: 209355 ships as type 5, which counts as 0.
+      await s.command(session, 'governOthers', 0, 188128, 1002, 209355, '南皮');
+      // promote 209355 to a 郡城 (type 2); its 官府 is already level 15.
+      await s.query('update sys_city set type = 2 where cid = 209355');
+      // 盟友: both players in union 7.
+      await s.query('update sys_user set union_id = 7 where uid in (1001, 1002)');
+      await s.command(session, 'governOthers', 0, 188128, 1002, 209355, '南皮');
+      await s.query('update sys_user set union_id = 0 where uid in (1001, 1002)');
+      // 封禁中的目标 (the original reuses the 免战 text for this, kept as-is).
+      await s.query(
+        `insert into sys_user_state (uid, forbiend, vacend, reason)
+         values (1002, unix_timestamp() + 3600, 0, '')`,
+      );
+      await s.command(session, 'governOthers', 0, 188128, 1002, 209355, '南皮');
+      await s.query('delete from sys_user_state where uid = 1002');
+      // 越出郡 (type-2 city, target in another commandery), then 越出州 as a 州城 (type 3).
+      await s.command(session, 'governOthers', 0, 188128, 1002, 209355, '南皮');
+      await s.query('update sys_city set type = 3 where cid = 209355');
+      await s.command(session, 'governOthers', 0, 188128, 1002, 209355, '南皮');
+      // 都城 (type 4) has no range gate — the daily gates apply instead.
+      await s.query('update sys_city set type = 4 where cid = 209355');
+      // 目标当日已被政令.
+      await s.query(
+        'update mem_city_schedule set last_be_govern_time = unix_timestamp() where cid = 188128',
+      );
+      await s.command(session, 'governOthers', 0, 188128, 1002, 209355, '南皮');
+      await s.query('update mem_city_schedule set last_be_govern_time = 0 where cid = 188128');
+      // 当日次数上限: officepos 0 caps a type-4 city at 0 政令 per day.
+      await s.query(
+        'update mem_city_schedule set govern_count = 5, last_govern_time = unix_timestamp() where cid = 209355',
+      );
+      await s.command(session, 'governOthers', 0, 188128, 1002, 209355, '南皮');
+    },
+  },
+  {
+    // 政令 征税 (type 0) success: a type-4 名城 (no range gate; officepos 13 → 10/day) takes a
+    // tenth of the target's gold, the target is notified by report, both mem_city_schedule rows
+    // stamp and the success message is thrown. 209355's schedule row ships zeroed, so the first
+    // 政令 of the day opens a fresh count.
+    name: 'world: governOthers 征税 takes a tenth of the gold',
+    tables: {
+      mem_city_schedule: {
+        ignore: ['next_good_event', 'next_bad_event'],
+        offsets: ['last_anming', 'last_reset_recruit', 'last_govern_time', 'last_be_govern_time'],
+      },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      await s.query('update sys_city set type = 4 where cid = 209355');
+      await s.query('update sys_user set officepos = 13 where uid = 1001');
+      await s.command(session, 'governOthers', 0, 188128, 1002, 209355, '南皮');
+    },
+  },
+  {
+    // 政令 抽丁/征粮/收编/裁军 (types 1-4) on the same day against the same target: the target's
+    // last_be_govern_time is cleared between orders so each passes the once-per-day gate, and the
+    // own govern_count climbs 1..4 under the type-4 / officepos-13 cap of 10. 收编 reads the
+    // largest fromcity soldier row (seeded sid 1 with 1000), 裁军 the largest row of any kind
+    // (sid 1 again, shaved to 980 by 收编).
+    name: 'world: governOthers 抽丁/征粮/收编/裁军',
+    tables: {
+      mem_city_schedule: {
+        ignore: ['next_good_event', 'next_bad_event'],
+        offsets: ['last_anming', 'last_reset_recruit', 'last_govern_time', 'last_be_govern_time'],
+      },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      await s.query('update sys_city set type = 4 where cid = 209355');
+      await s.query('update sys_user set officepos = 13 where uid = 1001');
+      // 抽丁: 150 people → a fifth (30).
+      await s.command(session, 'governOthers', 1, 188128, 1002, 209355, '南皮');
+      await s.query('update mem_city_schedule set last_be_govern_time = 0 where cid = 188128');
+      // 征粮: 9100 food → a tenth (910).
+      await s.command(session, 'governOthers', 2, 188128, 1002, 209355, '南皮');
+      await s.query('update mem_city_schedule set last_be_govern_time = 0 where cid = 188128');
+      await s.query('delete from sys_city_soldier where cid = 188128');
+      await s.query('insert into sys_city_soldier (cid, sid, count) values (188128, 1, 1000)');
+      // 收编: 1000 of the fromcity row → a fiftieth (20), half (10) to the governor.
+      await s.command(session, 'governOthers', 3, 188128, 1002, 209355, '南皮');
+      await s.query('update mem_city_schedule set last_be_govern_time = 0 where cid = 188128');
+      // 裁军: the same row now at 980 → a twentieth (49), nothing to the governor.
+      await s.command(session, 'governOthers', 4, 188128, 1002, 209355, '南皮');
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {
