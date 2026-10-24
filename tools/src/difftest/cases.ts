@@ -3948,6 +3948,84 @@ export const cases: DiffCase[] = [
       await s.query('delete from mem_world_schedule where wid = ?', [TARGET_WID]);
     },
   },
+  {
+    // 野地建城 (createCityFromLand, WorldFunc.php:254) error branches: 非平地 / 平地不附属 /
+    // 交战中 / 旧城资源不足 / 爵位城数上限. Every throw sits before the first write, so each
+    // failed command leaves the database untouched and the error text is the whole comparison.
+    name: 'world: createCityFromLand error branches',
+    tables: {
+      mem_city_resource: { offsets: ['lastupdate'] },
+      log_user_action: { offsets: ['time'] },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      // 非平地: any wild-field tile (type > 1) fails the first check regardless of ownership.
+      const [hill] = await s.query<{ wid: string }>(
+        'select wid from mem_world where type > 1 and state = 0 order by wid limit 1',
+      );
+      await s.command(session, 'createCityFromLand', Number(hill?.wid ?? 0));
+      // 平地不附属: an unowned flatland (ownercid 0 vs the player's lastcid).
+      const [flat] = await s.query<{ wid: string }>(
+        'select wid from mem_world where type = 1 and ownercid = 0 and state = 0 order by wid limit 1',
+      );
+      const wid = Number(flat?.wid ?? 0);
+      await s.command(session, 'createCityFromLand', wid);
+      // 交战中: own the flatland but leave it at war (state 1).
+      await s.query('update mem_world set ownercid = ?, state = 1 where wid = ?', [cid, wid]);
+      await s.command(session, 'createCityFromLand', wid);
+      // 资源不足: peaceful owned flatland, but the founding city drops below 10000 iron.
+      await s.query('update mem_world set state = 0 where wid = ?', [wid]);
+      await s.query('update mem_city_resource set iron = 5000 where cid = ?', [cid]);
+      await s.command(session, 'createCityFromLand', wid);
+      await s.query('update mem_city_resource set iron = 1000000 where cid = ?', [cid]);
+      // 爵位上限: changle is nobility 0 (city_count 1) and already holds one city.
+      await s.command(session, 'createCityFromLand', wid);
+    },
+  },
+  {
+    // 野地建城 success: a held peaceful flatland with two stationed (state 4) troops becomes a new
+    // city — the old city pays 10000 of each resource, the troops' resource/soldier CSVs merge in
+    // (same-sid rows accumulate), the first troop's hero (the lord hero 80213) becomes 城守, both
+    // troops and their tactics rows are deleted, goal 169 completes and the new city gains 5000 of
+    // each resource. No RNG anywhere. The new city's rows stamp wall-clock times (lastupdate /
+    // log_user_action.time), which the per-case offsets rules normalize.
+    name: 'world: createCityFromLand founds a new city',
+    tables: {
+      mem_city_resource: { offsets: ['lastupdate'] },
+      log_user_action: { offsets: ['time'] },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      // nobility 0 caps the player at 1 city and changle already holds one — raise to 爵位 1
+      // (city_count 2) for this case; the snapshot rollback puts it back.
+      await s.query('update sys_user set nobility = 1 where uid = ?', [uid]);
+      const [flat] = await s.query<{ wid: string }>(
+        'select wid from mem_world where type = 1 and ownercid = 0 and state = 0 order by wid limit 1',
+      );
+      const wid = Number(flat?.wid ?? 0);
+      const target = wid2cid(wid);
+      await s.query('update mem_world set ownercid = ? where wid = ?', [cid, wid]);
+      // Two stationed troops: the lord hero leads the first (becomes 城守), the second carries no
+      // hero. soldiers CSV is "种数,sid,数量,…"; resource CSV is "gold,food,wood,rock,iron".
+      await s.query(
+        `insert into sys_troops
+          (id, uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
+         values
+          (900001, ?, ?, 80213, ?, 5, 4, unix_timestamp() - 600, 0, 0, '2,1,300,3,500', '1200,3400,5600,7800,9100', 0, 0),
+          (900002, ?, ?, 0, ?, 5, 4, unix_timestamp() - 600, 0, 0, '1,2,50', '100,200,300,400,500', 0, 0)`,
+        [uid, cid, target, uid, cid, target],
+      );
+      await s.query(
+        `insert into sys_troop_tactics (troopid, plunder, invade, patrol, field)
+         values (900001, '', '', '', '')`,
+      );
+      await s.command(session, 'createCityFromLand', wid);
+    },
+  },
 ];
 
 function wid2cid(wid: number): number {
