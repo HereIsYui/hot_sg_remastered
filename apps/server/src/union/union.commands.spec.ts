@@ -249,3 +249,40 @@ describe('UnionCommands.loadUnionMemberList', () => {
     expect(query!.sql).toMatch(/s\.lastupdate/);
   });
 });
+
+describe('UnionCommands.getUnionRelation', () => {
+  it('returns the diplomacy rows of the requested type', async () => {
+    const { cmd, db } = build([
+      { match: /select union_id as v from sys_user/i, rows: [{ v: 42 }] },
+      { match: /as relationtype/i, rows: [{ unionid: 43, name: '别盟', rank: 2 }] },
+      NO(/.*/),
+    ]);
+    const res = (await cmd.getUnionRelation(ctx, ['2'])) as unknown[];
+    expect(res[0]).toBe(1);
+    expect(res[1]).toEqual([{ unionid: 43, name: '别盟', rank: 2 }]);
+    expect(db.executed.find((q) => /relationtype/i.test(q.sql))!.sql).toMatch(/ur\.type = 2/);
+  });
+
+  it('reports not-in-union', async () => {
+    const { cmd } = build([{ match: /select union_id as v from sys_user/i, rows: [] }]);
+    const res = (await cmd.getUnionRelation(ctx, ['0'])) as unknown[];
+    expect(res[0]).toBe(0);
+  });
+});
+
+describe('UnionCommands.getRequestList', () => {
+  it('returns the pending friendly attempts and clears the alarm when settled', async () => {
+    const { cmd, db } = build([
+      { match: /select union_id as v from sys_user/i, rows: [{ v: 42 }] },
+      { match: /select union_pos as v from sys_user/i, rows: [{ v: 0 }] },
+      { match: /mem_union_relation where target = \? and type = 0$/i, rows: [] },
+      { match: /ur\.target = \? and ur\.type = 0/i, rows: [{ flag: -1, unionid: 43 }] },
+      { match: /select count\(\*\) as v from mem_union_relation/i, rows: [{ v: 0 }] },
+      NO(/.*/),
+    ]);
+    const res = (await cmd.getRequestList(ctx)) as unknown[];
+    expect(res[0]).toBe(1);
+    expect(res[1]).toEqual([{ flag: -1, unionid: 43 }]);
+    expect(db.executed.some((q) => /update sys_alarm/i.test(q.sql))).toBe(true);
+  });
+});

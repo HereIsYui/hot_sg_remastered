@@ -511,6 +511,65 @@ export class UnionCommands {
       and tid = 112005`.execute(this.scope.db);
   }
 
+  /** `[type]`: the diplomacy list of the caller's union (getUnionRelation, 918-935). */
+  @GlobalCommand()
+  async getUnionRelation(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const type = phpString(param[0]);
+    const unionid = phpIntval(
+      await this.cell(sql<Row>`select union_id as v from sys_user where uid = ${ctx.uid}`),
+    );
+    if (unionid <= 0) {
+      return [0, this.lang.t('getUnionRelation.not_belongTo_union')];
+    }
+    const rows = (await this.rows(sql<Row>`select ${sql.raw(type)} as relationtype,
+        ur.target as unionid, u.name, r.leader, u.prestige, u.member, r.rank
+      from sys_union_relation ur
+      left join sys_union u on u.id = ur.target
+      left join rank_union r on r.uid = ur.target
+      where ur.unionid = ${unionid} and ur.type = ${sql.raw(type)}`)) as unknown[];
+    return [1, rows];
+  }
+
+  /** `[]`: the pending friendly-union attempts toward the caller (getRequestList, 937-969). */
+  @GlobalCommand()
+  async getRequestList(ctx: CommandContext): Promise<unknown[]> {
+    const uid = ctx.uid;
+    const unionid = phpIntval(
+      await this.cell(sql<Row>`select union_id as v from sys_user where uid = ${uid}`),
+    );
+    const unionpos = phpIntval(
+      await this.cell(sql<Row>`select union_pos as v from sys_user where uid = ${uid}`),
+    );
+    if (unionid <= 0) return [0, this.lang.t('getUnionRelation.not_belongTo_union')];
+    const requests = await this.rows(sql<Row>`select * from mem_union_relation
+      where target = ${unionid} and type = 0`);
+    for (const request of requests) {
+      const fromunionid = phpIntval(request.unionid);
+      if (!(await this.check(sql<Row>`select 1 as v from sys_union where id = ${fromunionid}`))) {
+        await sql`delete from mem_union_relation where target = ${unionid}
+          and unionid = ${fromunionid} and type = 0`.execute(this.scope.db);
+      }
+    }
+    const ret: unknown[] = [
+      1,
+      (await this.rows(sql<Row>`select -1 as flag, ur.unionid as unionid,
+          from_unixtime(ur.time) as time, u.name, r.leader, u.prestige, u.member, r.rank
+        from mem_union_relation ur
+        left join sys_union u on u.id = ur.unionid
+        left join rank_union r on r.uid = ur.unionid
+        where ur.target = ${unionid} and ur.type = 0`)) as unknown[],
+    ];
+    const count = phpNum(
+      await this.cell(
+        sql<Row>`select count(*) as v from mem_union_relation where target = ${unionid}`,
+      ),
+    );
+    if (count === 0 || unionpos >= 3 || unionpos <= 0) {
+      await sql`update sys_alarm set \`union\` = 0 where uid = ${uid}`.execute(this.scope.db);
+    }
+    return ret;
+  }
+
   /** utils.php::notifyUnionChange: the polled union-change cache row. */
   private async notifyUnionChange(uid: number, unionid: number, state: number): Promise<void> {
     const name = phpString(
