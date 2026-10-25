@@ -1003,6 +1003,55 @@ export class UnionCommands {
     return level < (gates[gid] ?? 0);
   }
 
+  /** `[unionid]`: claims the union-rank reward (getUnionReward, 2315-2338). */
+  @GlobalCommand()
+  async getUnionReward(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const uid = ctx.uid;
+    const unionid = phpIntval(param[0]);
+    if (
+      !(await this.check(sql<Row>`select 1 as v from sys_user where uid = ${uid}
+      and union_id = ${unionid}`))
+    ) {
+      throw GameError.lang('unionreward.not_in_union');
+    }
+    if (
+      !(await this.check(sql<Row>`select 1 as v from sys_union_reward where uid = ${uid}
+        and unionid = ${unionid}`))
+    ) {
+      throw GameError.lang('unionreward.not_in_rank');
+    }
+    if (
+      await this.check(sql<Row>`select 1 as v from sys_union_reward where uid = ${uid}
+        and unionid = ${unionid} and time > 1`)
+    ) {
+      throw GameError.lang('unionreward.has_got_reward');
+    }
+    const rewards = await this.rows(sql<Row>`select a.gid, a.count from cfg_union_reward a,
+      sys_union_reward b where a.rank = b.rank and a.pos = b.pos and b.uid = ${uid}
+      and b.unionid = ${unionid}`);
+    for (const reward of rewards) {
+      await this.goods.addGoods(uid, phpIntval(reward.gid), phpIntval(reward.count), 1);
+    }
+    await sql`update sys_union_reward set time = unix_timestamp() where uid = ${uid}
+      and unionid = ${unionid}`.execute(this.scope.db);
+    return [await this.loadUnionRewardData(ctx), this.lang.t('unionreward.recieve_reward')];
+  }
+
+  /** `[]`: the top-10 union ranks and the caller's reward stamp (loadUnionRewardData). */
+  @GlobalCommand()
+  async loadUnionRewardData(ctx: CommandContext): Promise<unknown[]> {
+    const rankInfo = await this.rows(sql<Row>`select rank, name from rank_union
+      order by rank asc limit 10`);
+    const userInfo =
+      (await this.row(sql<Row>`select r.rank, u.union_pos from rank_union r, sys_user u
+        where r.uid = u.union_id and u.uid = ${ctx.uid} limit 1`)) ?? {};
+    const rewardInfo = await this.row(
+      sql<Row>`select * from sys_union_reward where uid = ${ctx.uid} limit 1`,
+    );
+    userInfo.getrewardtime = phpEmpty(rewardInfo) ? 0 : phpNum(rewardInfo!.time);
+    return [rankInfo, userInfo];
+  }
+
   /** utils.php::notifyUnionChange: the polled union-change cache row. */
   private async notifyUnionChange(uid: number, unionid: number, state: number): Promise<void> {
     const name = phpString(
