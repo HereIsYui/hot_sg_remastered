@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { sql, type RawBuilder } from 'kysely';
 import { GameError } from '../common/game-error';
 import { phpEmpty, phpIntval, phpNum, phpString } from '../core/php';
+import { GoodsRules } from '../core/goods-rules.service';
 import { TaskRules } from '../core/task-rules.service';
 import { TaskRewards } from '../task/task-rewards.service';
 import { UserRules } from '../core/user-rules.service';
@@ -55,6 +56,7 @@ export class UnionCommands {
     private readonly tasks: TaskRules,
     private readonly lang: LangService,
     private readonly mail: MailService,
+    private readonly goods: GoodsRules,
     private readonly rewards: TaskRewards,
   ) {}
 
@@ -841,6 +843,164 @@ export class UnionCommands {
         where unionid = ${unionid} and bid = 1`),
     );
     return Math.trunc(heroLevel / 5) * 3 + Math.trunc(buildingLevel / 5);
+  }
+
+  /** `[flag, fromids, count]`: the union store exchange (exchangeUnionGoods, 2204-2313). */
+  @GlobalCommand()
+  async exchangeUnionGoods(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const uid = ctx.uid;
+    const fromids = (Array.isArray(param[0]) ? (param[0] as unknown[]) : [param[0]]).map((v) =>
+      phpIntval(v),
+    );
+    const count = phpIntval(param[1]);
+    const flag = phpIntval(param[2]); // fromid;0:gid;1:sid
+    if (count < 0) throw GameError.raw('');
+    if (count !== fromids.length && flag === 1) throw GameError.raw('');
+    const user = await this.row(
+      sql<Row>`select name, union_id, union_pos from sys_user where uid = ${uid}`,
+    );
+    const unionid = phpIntval(user?.union_id);
+    // 商票不进行最大次数检测
+    if (flag === 1 || phpIntval(fromids[0]) !== 19302) {
+      const info = await this.row(sql<Row>`select * from sys_user_donate where uid = ${uid}
+        and unionid = ${unionid}`);
+      if (phpEmpty(info)) {
+        await sql`insert into sys_user_donate (uid, unionid, duihuan)
+          values (${uid}, ${unionid}, 0)`.execute(this.scope.db);
+      }
+      const hasDuihuan = phpNum(
+        await this.cell(sql<Row>`select duihuan as v from sys_user_donate where uid = ${uid}
+          and unionid = ${unionid}`),
+      );
+      const maxDuihuan = await this.maxDuihuan(uid, unionid);
+      if (hasDuihuan + count > maxDuihuan) throw GameError.lang('donate.too_much');
+    }
+    if (await this.checkMarketLevel(unionid, flag, fromids)) {
+      throw GameError.lang('donate.level_low');
+    }
+    if (flag === 1 && count < 1) throw GameError.lang('duihuan.not_enogh');
+    let fromid = 0;
+    if (flag === 0) {
+      fromid = phpIntval(fromids[0]);
+      const rates: Record<number, [number, number]> = {
+        35: [1, 1],
+        36: [5, 2],
+        37: [10, 3],
+        38: [10, 5],
+        152: [100, 5],
+        10960: [100, 5],
+        19302: [1, 10],
+      };
+      const [needMul, getMul] = rates[fromid] ?? [0, 0];
+      const need = count * needMul;
+      const get = count * getMul;
+      const tmpCount = phpNum(
+        await this.cell(
+          sql<Row>`select count as v from sys_goods where uid = ${uid} and gid = ${fromid}`,
+        ),
+      );
+      if (phpEmpty(tmpCount) || tmpCount < need) throw GameError.lang('duihuan.not_enogh');
+      await this.reduceGoods(uid, fromid, need);
+      await this.goods.addGoods(uid, 19210, get, 1);
+    }
+    if (flag === 1) {
+      for (const sid of fromids) {
+        const armorType = await this.cell(sql<Row>`select a.type as v from cfg_armor a,
+          sys_user_armor b where a.id = b.armorid and b.sid = ${sid}`);
+        if (phpIntval(armorType) !== 4) throw GameError.lang('duihuan.not_blue_armor');
+        if (
+          await this.check(
+            sql<Row>`select 1 as v from sys_user_armor where hid > 0 and sid = ${sid}`,
+          )
+        ) {
+          throw GameError.lang('duihuan.not_blue_armor');
+        }
+        await sql`delete from sys_user_armor where sid = ${sid}`.execute(this.scope.db);
+        await this.goods.addGoods(uid, 19210, 5, 1011);
+      }
+    }
+    if (!(flag === 0 && fromid === 19302)) {
+      // 商票兑换不影响每日兑换上限
+      await sql`update sys_user_donate set duihuan = duihuan + ${count}, time = unix_timestamp()
+        where uid = ${uid} and unionid = ${unionid}`.execute(this.scope.db);
+    }
+    const store = await this.getUnionStoreInfo(uid);
+    return [store, this.lang.t('unionreward.recieve_reward')];
+  }
+
+  /** UnionFunc.php:2434 getUnionStoreInfo: the market level, the remaining exchanges and rows. */
+  private async getUnionStoreInfo(uid: number): Promise<unknown[]> {
+    const user = await this.row(
+      sql<Row>`select union_id, union_pos from sys_user where uid = ${uid}`,
+    );
+    const unionid = phpIntval(user?.union_id);
+    const day = phpNum(await this.cell(sql<Row>`select unix_timestamp(substr(now(), 1, 10)) as v`));
+    if (
+      await this.check(sql<Row>`select 1 as v from sys_user_donate where uid = ${uid}
+        and unionid = ${unionid} and time < ${day}`)
+    ) {
+      await sql`update sys_user_donate set duihuan = 0, curnum = 0 where uid = ${uid}
+        and unionid = ${unionid}`.execute(this.scope.db);
+    }
+    const markLevel = phpNum(
+      await this.cell(sql<Row>`select level as v from sys_union_building
+        where unionid = ${unionid} and bid = 9 limit 1`),
+    );
+    const level = phpEmpty(markLevel) ? 1 : markLevel;
+    const ret: unknown[] = [level];
+    const hasDuihuan = phpNum(
+      await this.cell(sql<Row>`select duihuan as v from sys_user_donate where uid = ${uid}
+        and unionid = ${unionid}`),
+    );
+    const maxDuihuan = await this.maxDuihuan(uid, unionid);
+    ret.push(maxDuihuan - hasDuihuan > 0 ? maxDuihuan - hasDuihuan : 0);
+    const allGoods = await this.rows(sql<Row>`select * from cfg_union_store order by level asc`);
+    for (const goods of allGoods) {
+      const goodInfo = await this.row(
+        sql<Row>`select * from cfg_goods where gid = ${phpIntval(goods.gid)} limit 1`,
+      );
+      const owned = phpIntval(
+        await this.cell(sql<Row>`select count as v from sys_goods where uid = ${uid}
+          and gid = ${phpIntval(goods.gid)}`),
+      );
+      ret.push({ ...goods, goodInfo: { ...(goodInfo ?? {}), count: owned <= 0 ? 0 : owned } });
+    }
+    return ret;
+  }
+
+  /** UnionFunc.php:2196 getMaxDuihuan: 3 + 君主将等级/5 exchanges per day. */
+  private async maxDuihuan(uid: number, unionid: number): Promise<number> {
+    if (
+      !(await this.check(sql<Row>`select 1 as v from sys_user where uid = ${uid}
+        and union_id = ${unionid}`))
+    ) {
+      return 0;
+    }
+    const heroLevel = phpNum(
+      await this.cell(sql<Row>`select level as v from sys_city_hero where uid = ${uid}
+        and herotype = 1000`),
+    );
+    return 3 + Math.trunc(heroLevel / 5);
+  }
+
+  /** UnionFunc.php:2495 checkMarketLevel: true when the market level gates the exchange. */
+  private async checkMarketLevel(unionid: number, flag: number, gids: number[]): Promise<boolean> {
+    const level = phpNum(
+      await this.cell(sql<Row>`select level as v from sys_union_building
+        where unionid = ${unionid} and bid = 9 limit 1`),
+    );
+    if (flag === 1) return level < 70;
+    const gates: Record<number, number> = {
+      35: 1,
+      19302: 1,
+      36: 10,
+      37: 20,
+      38: 30,
+      152: 40,
+      10960: 50,
+    };
+    const gid = phpIntval(gids[0]);
+    return level < (gates[gid] ?? 0);
   }
 
   /** utils.php::notifyUnionChange: the polled union-change cache row. */

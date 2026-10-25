@@ -46,6 +46,7 @@ function build(rules: Respond[]) {
     new TaskRules(db.scope, users),
     lang,
     new MailService(db.scope),
+    new GoodsRules(db.scope),
     new TaskRewards(
       db.scope,
       lang,
