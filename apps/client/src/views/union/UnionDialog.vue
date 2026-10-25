@@ -6,6 +6,7 @@ import FxButton from '../../ui/FxButton.vue';
 import FxCanvas from '../../ui/FxCanvas.vue';
 import FxLabel from '../../ui/FxLabel.vue';
 import FxText from '../../ui/FxText.vue';
+import FxDataGrid from '../../ui/FxDataGrid.vue';
 import FxTextInput from '../../ui/FxTextInput.vue';
 
 /**
@@ -22,16 +23,49 @@ const unionName = ref('');
 const pending = ref('');
 const nameInput = ref('');
 
+interface MemberRow extends Record<string, unknown> {
+  name: string;
+  union_pos: number;
+  donate: number;
+}
+interface EventRow extends Record<string, unknown> {
+  content: string;
+}
+
+const members = ref<MemberRow[]>([]);
+const events = ref<EventRow[]>([]);
+const transferName = ref('');
+const isLeader = computed(() => unionPos.value === 5);
+
 const reload = (): void => game.sendGlobalCommand('union_empty', 'getUnionApplyInvite');
 const unregister = game.addGlobalReceiver('union_empty', (command, data) => {
-  if (command !== 'getUnionApplyInvite') return;
   const d = (Array.isArray(data) ? data : []) as unknown[];
-  unionId.value = Number(d[0] ?? 0);
-  unionPos.value = Number(d[1] ?? 0);
-  unionName.value = String(d[2] ?? '');
-  pending.value = unionId.value > 0 ? '' : String(d[2] ?? '');
+  if (command === 'getUnionApplyInvite') {
+    unionId.value = Number(d[0] ?? 0);
+    unionPos.value = Number(d[1] ?? 0);
+    unionName.value = String(d[2] ?? '');
+    pending.value = unionId.value > 0 ? '' : String(d[2] ?? '');
+    if (unionId.value > 0) {
+      game.sendGlobalCommand('union_empty', 'loadUnionMemberList');
+      game.sendGlobalCommand('union_empty', 'getUnionEvent', [0]);
+    }
+  } else if (command === 'loadUnionMemberList') {
+    members.value = (d as unknown as MemberRow[]) ?? [];
+  } else if (command === 'getUnionEvent') {
+    const rows = Array.isArray(d?.[2]) ? (d[2] as unknown as EventRow[]) : [];
+    events.value = rows.slice(0, 12);
+  }
 });
 reload();
+
+/** `changeLeader` via the dialog's 转让 input (盟主 only). */
+function onTransfer(): void {
+  const name = transferName.value.trim();
+  if (!name) return;
+  game.sendGlobalCommand('union_empty', 'changeLeader', [name]);
+  transferName.value = '';
+  reload();
+}
 
 /** `NewUnionDialog.onCreate` (the create confirm): createUnion, then reload. */
 function onCreate(): void {
@@ -47,6 +81,7 @@ function onClose(): void {
 }
 
 const isMember = computed(() => unionId.value > 0);
+const eventText = computed(() => events.value.map((e) => String(e.content ?? '')).join('\n'));
 onUnmounted(unregister);
 </script>
 
@@ -62,13 +97,39 @@ onUnmounted(unregister);
       />
     </FxCanvas>
     <template v-if="isMember">
-      <FxCanvas :x="23" :y="83" :w="635" :h="200" style-name="BoardListDown">
-        <FxText
+      <FxCanvas :x="23" :y="83" :w="635" :h="330" style-name="BoardListDown">
+        <FxDataGrid
+          :x="3"
+          :y="3"
+          :w="629"
+          :h="200"
+          :row-height="26"
+          :columns="[
+            { header: i18n('friend_FriendDialog_4_1'), field: 'name', width: 160 },
+            { header: i18n('Union_UnionMemberListDialog_3_1'), field: 'union_pos', width: 110 },
+            { header: i18n('Union_UnionMemberListDialog_6_1'), field: 'donate', width: 120 },
+          ]"
+          :rows="members"
+        />
+        <FxText :x="10" :y="206" :w="615" :h="120" :text="eventText" />
+        <FxTextInput
+          v-if="isLeader"
+          v-model="transferName"
           :x="10"
-          :y="10"
-          :w="615"
-          :h="180"
-          :text="i18n('Union_UnionDialog_27_1') + '：' + unionName"
+          :y="300"
+          :w="180"
+          :h="24"
+          :max-chars="8"
+        />
+        <FxButton
+          v-if="isLeader"
+          :x="200"
+          :y="298"
+          :w="90"
+          :h="28"
+          style-name="ButtonGreen"
+          label="转让盟主"
+          @click="onTransfer"
         />
       </FxCanvas>
     </template>
