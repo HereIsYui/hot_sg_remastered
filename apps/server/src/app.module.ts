@@ -8,6 +8,7 @@ import { ConfigModule } from './config/config.module';
 import { CoreModule } from './core/core.module';
 import { FriendModule } from './friend/friend.module';
 import { UnionModule } from './union/union.module';
+import { MarketModule } from './market/market.module';
 import { TaskModule } from './task/task.module';
 import { DatabaseModule } from './db/database.module';
 import { GatewayModule } from './gateway/gateway.module';
@@ -51,6 +52,7 @@ import { WorldModule } from './world/world.module';
     BattleModule,
     FriendModule,
     UnionModule,
+    MarketModule,
   ],
   controllers: [HealthController],
 })

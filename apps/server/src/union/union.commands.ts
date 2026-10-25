@@ -785,11 +785,10 @@ export class UnionCommands {
       await this.cell(sql<Row>`select curnum as v from sys_union_building
         where unionid = ${unionid} and bid = ${bid}`),
     );
-    let totalDonateNum = curNum + count;
-    let level = curLevel;
+    const totalDonateNum = curNum + count;
     while (totalDonateNum >= needNum) {
       upgradeLevel++;
-      level = curLevel + upgradeLevel;
+      const level = curLevel + upgradeLevel;
       if (level < 100) {
         needNum = phpNum(
           await this.cell(sql<Row>`select num as v from cfg_union_building_upgrade
