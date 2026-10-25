@@ -4334,6 +4334,10 @@ export const cases: DiffCase[] = [
       await s.command(other, 'acceptInvite', unionid);
       await s.command(other, 'getUnionEvent', 0);
       await s.command(session, 'loadUnionMemberList');
+      // the leader transfers leadership to the joined member (kicking needs a scheduled cron)
+      await s.command(session, 'changeLeader', '飓鼎玩网单');
+      await s.command(session, 'loadUnionInfo');
+      await s.command(other, 'getUnionEvent', 0);
     },
   },
 ];

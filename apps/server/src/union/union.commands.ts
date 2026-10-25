@@ -27,6 +27,10 @@ const EVT_ADD_UNION = 0;
 const POS_LEADER = 5;
 /** EVENT_PAGE_CPP (UnionFunc.php:8): the union-event page size. */
 const EVENT_PAGE = 10;
+/** EVT_CHANGE_LEADER (UnionFunc.php:13). */
+const EVT_CHANGE_LEADER = 3;
+/** The leader-transfer badge gid (exchangeUnionState). */
+const LEADER_BADGE_GID = 161501;
 
 /**
  * UnionFunc.php wave 3a: createUnion (54-124), applyJoin (159-187), getUnionApplyInvite
@@ -391,6 +395,120 @@ export class UnionCommands {
     );
     // the PUSH_SNS_UNION_MSG platform event is skipped, as in the single build
     return [unionid, 1];
+  }
+
+  /** `[username]`: kicks a member (kickMember, 662-714): 长老+ only, the target below officer,
+   * never oneself — the removal schedules a mem_union_remove row whose delay scales with the
+   * target's position (the actual ejection is the cron's later wave). */
+  @GlobalCommand()
+  async kickMember(ctx: CommandContext, param: unknown[]): Promise<never> {
+    const uid = ctx.uid;
+    const username = phpString(param[0]).trim();
+    if (phpEmpty(username)) throw GameError.lang('kickMember.enter_target_name');
+    if (username.length > 8) throw GameError.lang('kickMember.name_length_most');
+    const me = await this.row(
+      sql<Row>`select name, union_id, union_pos from sys_user where uid = ${uid}`,
+    );
+    const unionid = phpIntval(me?.union_id);
+    const unionpos = phpIntval(me?.union_pos);
+    if (unionid <= 0 || unionpos === 0 || unionpos < 4) {
+      throw GameError.lang('kickMember.not_elder');
+    }
+    const target = await this.row(
+      sql<Row>`select uid, name, union_id, union_pos from sys_user
+        where name = ${username} and union_id = ${unionid}`,
+    );
+    if (phpEmpty(target)) throw GameError.lang('kickMember.target_not_in_your_union');
+    if (phpIntval(target!.union_pos) > 3) {
+      throw GameError.lang('kickMember.descend_target_level');
+    }
+    if (phpIntval(target!.uid) === uid) throw GameError.lang('kickMember.cant_kick_oneself');
+    if (
+      await this.check(
+        sql<Row>`select 1 as v from mem_union_remove where uid = ${phpIntval(target!.uid)}`,
+      )
+    ) {
+      throw GameError.lang('kickMember.union_member_removed');
+    }
+    const needTime = { 0: 10800, 1: 21600, 2: 43200 }[phpIntval(target!.union_pos)] ?? 86400;
+    await sql`insert into mem_union_remove (douid, uid, unionid, time)
+      values (${uid}, ${phpIntval(target!.uid)}, ${unionid}, unix_timestamp() + ${needTime})`.execute(
+      this.scope.db,
+    );
+    throw GameError.lang('kickMember.kick_succ');
+  }
+
+  /** `[username]`: the 盟主 transfers leadership (changeLeader, 780-833). */
+  @GlobalCommand()
+  async changeLeader(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const uid = ctx.uid;
+    const username = phpString(param[0]).trim();
+    if (phpEmpty(username)) throw GameError.lang('changeLeader.enter_target_name');
+    if (username.length > 8) throw GameError.lang('changeLeader.name_length_most');
+    const old = await this.row(sql<Row>`select name, union_id from sys_user where uid = ${uid}`);
+    const unionid = phpIntval(old?.union_id);
+    const union = await this.row(sql<Row>`select * from sys_union where id = ${unionid}`);
+    if (phpIntval(union?.leader) !== uid) throw GameError.lang('changeLeader.you_are_not_chief');
+    const user = await this.row(sql<Row>`select uid, name, union_id from sys_user
+      where name = ${username}`);
+    if (phpEmpty(user)) throw GameError.lang('changeLeader.target_name_not_exist');
+    if (phpIntval(user!.union_id) !== unionid) {
+      throw GameError.lang('changeLeader.target_not_in_your_union');
+    }
+    if (
+      await this.check(
+        sql<Row>`select 1 as v from mem_union_remove where uid = ${phpIntval(user!.uid)}
+          and unionid = ${unionid}`,
+      )
+    ) {
+      throw GameError.lang('union.user_can_not_transfer');
+    }
+    const leader = phpIntval(user!.uid);
+    if (leader !== uid) {
+      await sql`update sys_user set union_pos = 0 where uid = ${uid}`.execute(this.scope.db);
+      await sql`update sys_user set union_pos = 5 where uid = ${leader}`.execute(this.scope.db);
+      await sql`update sys_union set leader = ${leader} where id = ${unionid}`.execute(
+        this.scope.db,
+      );
+      await this.exchangeUnionState(uid, leader);
+      await this.addUnionEvent(
+        unionid,
+        EVT_CHANGE_LEADER,
+        this.lang.t('changeLeader.addUnionEvent', phpString(old?.name), username),
+      );
+      await this.rewards.finishAchievement(uid, CREATE_UNION_ACHIEVEMENT);
+    }
+    return this.loadUnionInfo(ctx);
+  }
+
+  /** GoodsFunc.php::exchangeUnionState: the leader badge/buffers/task move to the new leader. */
+  private async exchangeUnionState(fromleader: number, toleader: number): Promise<void> {
+    const gid = LEADER_BADGE_GID;
+    const count = await this.cell(
+      sql<Row>`select count as v from sys_goods where uid = ${fromleader} and gid = ${gid}`,
+    );
+    if (!phpEmpty(count)) {
+      await sql`insert into sys_goods (uid, gid, count) values (${toleader}, ${gid}, ${phpNum(count)})
+        on duplicate key update count = ${phpNum(count)}`.execute(this.scope.db);
+    }
+    await sql`delete from sys_goods where uid = ${fromleader} and gid = ${gid}`.execute(
+      this.scope.db,
+    );
+    const now = phpNum(await this.cell(sql<Row>`select unix_timestamp() as v`));
+    const bufs = await this.rows(sql<Row>`select * from mem_user_buffer where uid = ${fromleader}
+      and endtime > ${now} and buftype = ${gid}`);
+    if (bufs.length > 0) {
+      await sql`delete from mem_user_buffer where uid = ${toleader} and buftype = ${gid}`.execute(
+        this.scope.db,
+      );
+      await sql`update mem_user_buffer set uid = ${toleader} where uid = ${fromleader}
+        and buftype = ${gid}`.execute(this.scope.db);
+    }
+    await sql`delete from sys_user_task where uid = ${toleader} and tid = 112005`.execute(
+      this.scope.db,
+    );
+    await sql`update sys_user_task set uid = ${toleader} where uid = ${fromleader}
+      and tid = 112005`.execute(this.scope.db);
   }
 
   /** utils.php::notifyUnionChange: the polled union-change cache row. */
