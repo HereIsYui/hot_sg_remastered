@@ -4329,6 +4329,11 @@ export const cases: DiffCase[] = [
       // wave 3b: the leader's detail header and the member list
       await s.command(session, 'loadUnionInfo');
       await s.command(session, 'loadUnionMemberList');
+      // the leader invites the applicant by name; the applicant accepts and joins
+      await s.command(session, 'inviteUser', '飓鼎玩网单');
+      await s.command(other, 'acceptInvite', unionid);
+      await s.command(other, 'getUnionEvent', 0);
+      await s.command(session, 'loadUnionMemberList');
     },
   },
 ];

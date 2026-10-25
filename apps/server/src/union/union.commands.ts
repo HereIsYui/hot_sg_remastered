@@ -25,6 +25,8 @@ const CREATE_UNION_ACHIEVEMENT = 13;
 const EVT_ADD_UNION = 0;
 /** union_pos of the creator (盟主). */
 const POS_LEADER = 5;
+/** EVENT_PAGE_CPP (UnionFunc.php:8): the union-event page size. */
+const EVENT_PAGE = 10;
 
 /**
  * UnionFunc.php wave 3a: createUnion (54-124), applyJoin (159-187), getUnionApplyInvite
@@ -259,6 +261,136 @@ export class UnionCommands {
     ret.push(union ?? {});
     ret.push(await this.memberMaxCount(unionid));
     return ret;
+  }
+
+  /** `[page]`: the union-event pages of the caller's union (getUnionEvent, 1690-1719). */
+  @GlobalCommand()
+  async getUnionEvent(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const uid = ctx.uid;
+    const unionid = phpIntval(
+      await this.cell(sql<Row>`select union_id as v from sys_user where uid = ${uid}`),
+    );
+    if (unionid <= 0) throw GameError.lang('getUnionEvent.not_in_union');
+    const evtCount = phpNum(
+      await this.cell(
+        sql<Row>`select count(*) as v from sys_union_event where unionid = ${unionid}`,
+      ),
+    );
+    let page = phpIntval(param[0]);
+    let pageCount = Math.ceil(evtCount / EVENT_PAGE);
+    if (page >= pageCount) page = pageCount - 1;
+    if (page < 0) {
+      page = 0;
+      pageCount = 0;
+    }
+    const ret: unknown[] = [pageCount, page];
+    if (evtCount > 0) {
+      ret.push(
+        (await this.rows(sql<Row>`select * from sys_union_event where unionid = ${unionid}
+          order by evttime desc limit ${page * EVENT_PAGE}, ${EVENT_PAGE}`)) as unknown[],
+      );
+    } else {
+      ret.push([]);
+    }
+    return ret;
+  }
+
+  /** `[username]`: a 正式成员+ invites a player into the union (inviteUser, 610-660). */
+  @GlobalCommand()
+  async inviteUser(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const uid = ctx.uid;
+    const username = phpString(param[0]).trim();
+    if (phpEmpty(username)) throw GameError.lang('inviteUser.enter_target_name');
+    if (username.length > 8) throw GameError.lang('inviteUser.name_length_most');
+    const my = await this.row(
+      sql<Row>`select name, union_id, union_pos from sys_user where uid = ${uid}`,
+    );
+    const unionid = phpIntval(my?.union_id);
+    const unionpos = phpIntval(my?.union_pos);
+    if (unionid <= 0 || unionpos < 2) throw GameError.lang('inviteUser.you_are_not_official');
+    const user = await this.row(
+      sql<Row>`select uid, name, union_id from sys_user where name = ${username}`,
+    );
+    if (phpEmpty(user)) throw GameError.lang('inviteUser.named_user_not_exist');
+    if (phpIntval(user!.uid) === uid) throw GameError.lang('inviteUser.cant_invite_yourself');
+    if (phpIntval(user!.union_id) > 0) {
+      throw GameError.lang('inviteUser.taget_joined_other_union');
+    }
+    const maxmember = await this.memberMaxCount(unionid);
+    const inviteCount = phpNum(
+      await this.cell(
+        sql<Row>`select count(*) as v from sys_union_invite where unionid = ${unionid}`,
+      ),
+    );
+    const member = phpNum(
+      await this.cell(sql<Row>`select member as v from sys_union where id = ${unionid}`),
+    );
+    if (member + inviteCount > maxmember) throw GameError.lang('inviteUser.your_union_is_full');
+    await sql`replace into sys_union_invite (unionid, inviter, uid, time)
+      values (${unionid}, ${phpString(my?.name)}, ${phpIntval(user!.uid)}, unix_timestamp())`.execute(
+      this.scope.db,
+    );
+    return this.getInviteList(uid);
+  }
+
+  /** UnionFunc.php:586 getInviteList: the union's pending invitations. */
+  private async getInviteList(uid: number): Promise<unknown[]> {
+    const union = await this.row(
+      sql<Row>`select union_id, union_pos from sys_user where uid = ${uid}`,
+    );
+    const unionid = phpIntval(union?.union_id);
+    if (unionid <= 0 || phpIntval(union?.union_pos) === 0) {
+      throw GameError.lang('getInviteList.you_are_not_official');
+    }
+    return (await this.rows(sql<Row>`select u.uid as userid, u.name, u.rank, u.prestige,
+      i.inviter, i.time from sys_union_invite i left join sys_user u on u.uid = i.uid
+      where i.unionid = ${unionid}`)) as unknown[];
+  }
+
+  /** `[unionid]`: accepts an invitation and joins (acceptInvite, 321-362). */
+  @GlobalCommand()
+  async acceptInvite(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const uid = ctx.uid;
+    const unionid = phpIntval(param[0]);
+    const invite = await this.row(
+      sql<Row>`select * from sys_union_invite where unionid = ${unionid} and uid = ${uid}`,
+    );
+    if (phpEmpty(invite)) throw GameError.lang('acceptInvite.invalid_invitation');
+    if (!(await this.check(sql<Row>`select 1 as v from sys_union where id = ${unionid}`))) {
+      throw GameError.lang('acceptInvite.union_not_exist');
+    }
+    const honglu = await this.cell(sql<Row>`select max(b.level) as v from sys_building b,
+      sys_city c where b.bid = ${BUILDING_HONGLU} and b.cid = c.cid and c.uid = ${uid}`);
+    if (phpEmpty(honglu)) throw GameError.lang('acceptInvite.no_HongLu_built');
+    const user = await this.row(sql<Row>`select name, union_id from sys_user where uid = ${uid}`);
+    if (phpIntval(user?.union_id) > 0) {
+      throw GameError.lang('acceptInvite.already_joined_other_union');
+    }
+    await sql`update sys_user set union_id = ${unionid}, union_pos = 0 where uid = ${uid}`.execute(
+      this.scope.db,
+    );
+    await sql`update sys_union set member = member + 1 where id = ${unionid}`.execute(
+      this.scope.db,
+    );
+    const famouscity = phpNum(
+      await this.cell(sql<Row>`select count(*) as v from sys_city where uid = ${uid}
+        and type > 0 and type < 5`),
+    );
+    if (famouscity > 0) {
+      await sql`update sys_union_city set count = GREATEST(0, count + ${famouscity})
+        where unionid = ${unionid}`.execute(this.scope.db);
+    }
+    await this.tasks.completeTask(uid, CREATE_UNION_TASK);
+    await this.notifyUnionChange(uid, unionid, 1);
+    await this.users.updateUnionRank(unionid);
+    await sql`delete from sys_union_invite where uid = ${uid}`.execute(this.scope.db);
+    await this.addUnionEvent(
+      unionid,
+      EVT_ADD_UNION,
+      this.lang.t('acceptInvite.addUnionEvent', phpString(invite!.inviter), phpString(user?.name)),
+    );
+    // the PUSH_SNS_UNION_MSG platform event is skipped, as in the single build
+    return [unionid, 1];
   }
 
   /** utils.php::notifyUnionChange: the polled union-change cache row. */
