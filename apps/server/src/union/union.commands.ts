@@ -31,6 +31,10 @@ const EVENT_PAGE = 10;
 /** EVT_CHANGE_LEADER (UnionFunc.php:13). */
 /** EVT_RELATION_FRIEND (UnionFunc.php:15): the diplomacy event type. */
 const EVT_RELATION_FRIEND = 5;
+/** EVT_CHANGE_NAME (UnionFunc.php:14): the donate/upgrade event type. */
+const EVT_CHANGE_NAME = 4;
+/** The union-donation item gid. */
+const DONATE_GID = 19210;
 const EVT_CHANGE_LEADER = 3;
 /** The leader-transfer badge gid (exchangeUnionState). */
 const LEADER_BADGE_GID = 161501;
@@ -726,6 +730,117 @@ export class UnionCommands {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     return h > 0 ? `${h}小时${m}分` : `${m}分`;
+  }
+
+  /** `[bid, count]`: donates 联盟捐献 items into a union building (donateGoods, 2127-2195). */
+  @GlobalCommand()
+  async donateGoods(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const uid = ctx.uid;
+    const bid = phpIntval(param[0]);
+    const count = phpIntval(param[1]);
+    const user = await this.row(
+      sql<Row>`select name, union_id, union_pos from sys_user where uid = ${uid}`,
+    );
+    const unionid = phpIntval(user?.union_id);
+    if (unionid <= 0) throw GameError.lang('leaveUnion.you_belongTo_none_union');
+    if (!(await this.check(sql<Row>`select 1 as v from sys_union where id = ${unionid}`))) {
+      throw GameError.lang('leaveUnion.you_belongTo_none_union');
+    }
+    if (bid > 16 || bid < 0) throw GameError.lang('upgradeBuilding.not_exist');
+    if (count < 1) throw GameError.raw('');
+    if (![1, 2, 9].includes(bid)) throw GameError.lang('goods.not_available');
+    const myGoodsNum = phpNum(
+      await this.cell(
+        sql<Row>`select count as v from sys_goods where uid = ${uid} and gid = ${DONATE_GID}`,
+      ),
+    );
+    if (myGoodsNum < count) throw GameError.lang('duihuan.not_enogh');
+    const building = await this.row(sql<Row>`select * from sys_union_building
+      where bid = ${bid} and unionid = ${unionid}`);
+    const curLevel = phpIntval(building?.level);
+    if (curLevel >= 100) throw GameError.lang('donate.max_level');
+    const totalNum = await this.maxDonate(uid, unionid);
+    const donatedNum = phpNum(
+      await this.cell(sql<Row>`select curnum as v from sys_user_donate where uid = ${uid}
+        and unionid = ${unionid}`),
+    );
+    if (count + donatedNum > totalNum) throw GameError.lang('donate.too_much');
+    const num = count * 100;
+    await sql`insert into sys_user_donate (uid, unionid, donate) values (${uid}, ${unionid}, ${num})
+      on duplicate key update donate = donate + ${num}`.execute(this.scope.db);
+    await sql`update sys_user_donate set curnum = curnum + ${count}, time = unix_timestamp()
+      where uid = ${uid} and unionid = ${unionid}`.execute(this.scope.db);
+    await sql`update sys_union set donate = donate + ${num} where id = ${unionid}`.execute(
+      this.scope.db,
+    );
+    await this.reduceGoods(uid, DONATE_GID, count);
+    let upgradeLevel = 0;
+    let needNum = phpNum(
+      await this.cell(sql<Row>`select num as v from cfg_union_building_upgrade
+        where level = ${curLevel} + 1 and bid = ${bid}`),
+    );
+    const curNum = phpNum(
+      await this.cell(sql<Row>`select curnum as v from sys_union_building
+        where unionid = ${unionid} and bid = ${bid}`),
+    );
+    let totalDonateNum = curNum + count;
+    let level = curLevel;
+    while (totalDonateNum >= needNum) {
+      upgradeLevel++;
+      level = curLevel + upgradeLevel;
+      if (level < 100) {
+        needNum = phpNum(
+          await this.cell(sql<Row>`select num as v from cfg_union_building_upgrade
+            where level = ${level} + 1 and bid = ${bid}`),
+        );
+      } else {
+        needNum = totalDonateNum + 1; // 到100级强制退出
+      }
+    }
+    await sql`update sys_union_building set curnum = curnum + ${count}
+      where bid = ${bid} and unionid = ${unionid}`.execute(this.scope.db);
+    await this.addUnionEvent(
+      unionid,
+      EVT_CHANGE_NAME,
+      this.lang.t('donate.donate', phpString(user?.name), count),
+    );
+    if (upgradeLevel > 0) {
+      await sql`update sys_union_building set level = level + ${upgradeLevel}
+        where bid = ${bid} and unionid = ${unionid}`.execute(this.scope.db);
+      const name = phpString(
+        await this.cell(sql<Row>`select name as v from cfg_union_building_upgrade
+          where bid = ${bid} limit 1`),
+      );
+      await this.addUnionEvent(
+        unionid,
+        EVT_CHANGE_NAME,
+        this.lang.t('upgradeBuilding.upgrade', name, curLevel + upgradeLevel),
+      );
+    }
+    const left = totalNum - count - donatedNum;
+    return [this.lang.t('donate.can_donate', left)];
+  }
+
+  /** utils.php::reduceGoods. */
+  private async reduceGoods(uid: number, gid: number, count: number): Promise<void> {
+    await sql`insert into sys_goods (uid, gid, count) values (${uid}, ${gid}, ${count})
+      on duplicate key update count = count - ${count}`.execute(this.scope.db);
+    await sql`delete from sys_goods where uid = ${uid} and gid = ${gid} and count <= 0`.execute(
+      this.scope.db,
+    );
+  }
+
+  /** UnionFunc.php:2119 getMaxDonate: 君主将等级/5 * 3 + 联盟官府等级/5. */
+  private async maxDonate(uid: number, unionid: number): Promise<number> {
+    const heroLevel = phpNum(
+      await this.cell(sql<Row>`select level as v from sys_city_hero where uid = ${uid}
+        and herotype = 1000`),
+    );
+    const buildingLevel = phpNum(
+      await this.cell(sql<Row>`select level as v from sys_union_building
+        where unionid = ${unionid} and bid = 1`),
+    );
+    return Math.trunc(heroLevel / 5) * 3 + Math.trunc(buildingLevel / 5);
   }
 
   /** utils.php::notifyUnionChange: the polled union-change cache row. */

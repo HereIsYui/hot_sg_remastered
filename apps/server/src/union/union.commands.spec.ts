@@ -288,3 +288,54 @@ describe('UnionCommands.getRequestList', () => {
     expect(db.executed.some((q) => /update sys_alarm/i.test(q.sql))).toBe(true);
   });
 });
+
+describe('UnionCommands.donateGoods', () => {
+  const DONATE_RULES: Respond[] = [
+    {
+      match: /select name, union_id, union_pos from sys_user/i,
+      rows: [{ name: '长乐', union_id: 42, union_pos: 5 }],
+    },
+    { match: /select 1 as v from sys_union where id = \?/i, rows: [{ 1: 1 }] },
+    { match: /select count as v from sys_goods/i, rows: [{ v: 50 }] },
+    { match: /select \* from sys_union_building where bid = \?/i, rows: [{ level: 1, curnum: 0 }] },
+    {
+      match: /select level as v from sys_union_building\s+where unionid = \? and bid = 1/i,
+      rows: [{ v: 5 }],
+    },
+    { match: /select curnum as v from sys_user_donate/i, rows: [{ v: 0 }] },
+    { match: /select num as v from cfg_union_building_upgrade/i, rows: [{ v: 100 }] },
+    { match: /select curnum as v from sys_union_building/i, rows: [{ v: 0 }] },
+    { match: /select name as v from sys_user where uid = \?/i, rows: [{ v: '长乐' }] },
+    NO(/.*/),
+  ];
+
+  it('rejects a closed building and an over-limit donation', async () => {
+    const closed = build([
+      { match: /select level as v from sys_city_hero/i, rows: [{ v: 100 }] },
+      ...DONATE_RULES,
+      NO(/.*/),
+    ]);
+    await expect(closed.cmd.donateGoods(ctx, [5, 1])).rejects.toThrow('goods.not_available');
+    const tooMuch = build([
+      { match: /select level as v from sys_city_hero/i, rows: [{ v: 5 }] },
+      ...DONATE_RULES,
+      NO(/.*/),
+    ]);
+    await expect(tooMuch.cmd.donateGoods(ctx, [1, 50])).rejects.toThrow('donate.too_much');
+  });
+
+  it('donates: pays the item, banks the contribution and lands the donate event', async () => {
+    const { cmd, db } = build([
+      { match: /select level as v from sys_city_hero/i, rows: [{ v: 100 }] },
+      ...DONATE_RULES,
+      NO(/.*/),
+    ]);
+    const res = (await cmd.donateGoods(ctx, [1, 10])) as unknown[];
+    expect(res).toHaveLength(1);
+    const find = (re: RegExp) => db.executed.filter((q) => re.test(q.sql));
+    expect(find(/insert into sys_user_donate/i)).toHaveLength(1);
+    expect(find(/update sys_union set donate = donate \+/i)).toHaveLength(1);
+    expect(find(/delete from sys_goods/i)).toHaveLength(1);
+    expect(find(/insert into sys_union_event/i)[0]!.parameters[1]).toBe(4);
+  });
+});
