@@ -5,6 +5,7 @@ import { phpEmpty, phpIntval, phpNum, phpString } from '../core/php';
 import { TaskRules } from '../core/task-rules.service';
 import { TaskRewards } from '../task/task-rewards.service';
 import { UserRules } from '../core/user-rules.service';
+import { MailService } from '../core/mail.service';
 import { LangService } from '../common/lang.service';
 import { DbScope } from '../db/database.module';
 import { GlobalCommand, type CommandContext } from '../gateway/decorators';
@@ -28,6 +29,8 @@ const POS_LEADER = 5;
 /** EVENT_PAGE_CPP (UnionFunc.php:8): the union-event page size. */
 const EVENT_PAGE = 10;
 /** EVT_CHANGE_LEADER (UnionFunc.php:13). */
+/** EVT_RELATION_FRIEND (UnionFunc.php:15): the diplomacy event type. */
+const EVT_RELATION_FRIEND = 5;
 const EVT_CHANGE_LEADER = 3;
 /** The leader-transfer badge gid (exchangeUnionState). */
 const LEADER_BADGE_GID = 161501;
@@ -47,6 +50,7 @@ export class UnionCommands {
     private readonly users: UserRules,
     private readonly tasks: TaskRules,
     private readonly lang: LangService,
+    private readonly mail: MailService,
     private readonly rewards: TaskRewards,
   ) {}
 
@@ -568,6 +572,160 @@ export class UnionCommands {
       await sql`update sys_alarm set \`union\` = 0 where uid = ${uid}`.execute(this.scope.db);
     }
     return ret;
+  }
+
+  /** `[type, targetUnionid]`: the diplomacy write (addUnionRelation, 995-1156). Type 0 sends a
+   * friendly attempt (the mem_union_relation ask + officer mail/alarm), type 1 applies
+   * immediately, type 2 declares hostilities bilaterally (the original timestamp kept so the
+   * 8-hour windows do not restart) with mail/alarm/scroll/union events on both sides. Every
+   * path ends by throwing the diplomacy_send_succ text. */
+  @GlobalCommand()
+  async addUnionRelation(ctx: CommandContext, param: unknown[]): Promise<never> {
+    const uid = ctx.uid;
+    const type = phpIntval(param[0]);
+    if (type < 0 || type > 2) throw GameError.lang('addUnionRelation.no_this_diplomacy');
+    const target = phpIntval(param[1]);
+    const my = await this.row(
+      sql<Row>`select name, union_id, union_pos from sys_user where uid = ${uid}`,
+    );
+    const unionid = phpIntval(my?.union_id);
+    const unionpos = phpIntval(my?.union_pos);
+    const union = await this.row(
+      sql<Row>`select name, leader from sys_union where id = ${unionid}`,
+    );
+    // 盟主 副盟主 有权限，长老也不行
+    if (unionid <= 0 || unionpos === 0 || unionpos < 3) {
+      throw GameError.lang('addUnionRelation.you_are_not_chief');
+    }
+    if (unionid === target) throw GameError.lang('addUnionRelation.cant_contact_with_oneself');
+    const targetunion = await this.row(
+      sql<Row>`select name, leader from sys_union where id = ${target} limit 1`,
+    );
+    if (phpEmpty(targetunion)) throw GameError.lang('addUnionRelation.target_union_not_exist');
+    const old = await this.row(sql<Row>`select *, unix_timestamp() as nowtime
+      from sys_union_relation where unionid = ${unionid} and target = ${target}`);
+    if (!phpEmpty(old) && phpNum(old!.time) > phpNum(old!.nowtime) - 900) {
+      throw GameError.lang(
+        'addUnionRelation.too_frequency',
+        this.makeTimeLeft(900 + phpNum(old!.time) - phpNum(old!.nowtime)),
+      );
+    }
+    if (!phpEmpty(old) && phpIntval(old!.type) === type) {
+      const relation =
+        type === 0
+          ? this.lang.t('addUnionRelation.friendly')
+          : type === 1
+            ? this.lang.t('addUnionRelation.neutral')
+            : this.lang.t('addUnionRelation.hostile');
+      throw GameError.lang('addUnionRelation.have_done', relation);
+    }
+    if (type === 0) {
+      const attempt = await this.row(sql<Row>`select *, unix_timestamp() as nowtime
+        from mem_union_relation where unionid = ${unionid} and target = ${target} and type = 0`);
+      if (!phpEmpty(attempt)) throw GameError.lang('addUnionRelation.friendly_have_sent');
+      await sql`insert into mem_union_relation (type, unionid, target, time)
+        values (0, ${unionid}, ${target}, unix_timestamp())
+        on duplicate key update type = 0, time = unix_timestamp()`.execute(this.scope.db);
+      const receivers = await this.rows(sql<Row>`select uid, union_pos from sys_user
+        where union_id = ${target} and union_pos >= 3 and union_pos <= 5`);
+      for (const receiver of receivers) {
+        await this.mail.send(
+          phpIntval(receiver.uid),
+          this.lang.t('addUnionRelation.friendly_attempt_mail_title'),
+          this.lang.t(
+            'addUnionRelation.friendly_attempt_mail_content_AtoB',
+            phpString(union?.name),
+          ),
+        );
+        if (phpIntval(receiver.union_pos) >= 4) {
+          await sql`insert into sys_alarm (uid, \`union\`) values (${phpIntval(receiver.uid)}, 1)
+            on duplicate key update \`union\` = 1`.execute(this.scope.db);
+        }
+        await sql`insert into sys_info_alarm (uid, type, info, time)
+          values (${phpIntval(receiver.uid)}, 0, ${this.lang.t('addUnionRelation.friendly_attempt_alarm_info', phpString(union?.name))}, unix_timestamp())`.execute(
+          this.scope.db,
+        );
+      }
+    } else if (type === 2) {
+      if (!phpEmpty(old) && phpIntval(old!.type) === 2) {
+        throw GameError.lang('addUnionRelation.hostile_have_done');
+      }
+      const otherside = await this.cell(sql<Row>`select time as v from sys_union_relation
+        where type = 2 and unionid = ${target} and target = ${unionid}`);
+      if (phpEmpty(otherside)) {
+        await sql`insert into sys_union_relation (type, unionid, target, time)
+          values (2, ${unionid}, ${target}, unix_timestamp())
+          on duplicate key update type = 2, time = unix_timestamp()`.execute(this.scope.db);
+        await sql`insert into sys_union_relation (type, unionid, target, time)
+          values (2, ${target}, ${unionid}, unix_timestamp())
+          on duplicate key update type = 2, time = unix_timestamp()`.execute(this.scope.db);
+      } else {
+        // 之前打过，按照之前的时间，避免重新计算8小时
+        await sql`insert into sys_union_relation (type, unionid, target, time)
+          values (2, ${unionid}, ${target}, ${otherside})
+          on duplicate key update type = 2, time = ${otherside}`.execute(this.scope.db);
+      }
+      const declareTo = async (receiverUnion: number, textKey: string, alarmKey: string) => {
+        const receivers = await this.rows(
+          sql<Row>`select uid from sys_user where union_id = ${receiverUnion}`,
+        );
+        for (const receiver of receivers) {
+          const targetName = phpString(receiverUnion === target ? union?.name : targetunion?.name);
+          await this.mail.send(
+            phpIntval(receiver.uid),
+            this.lang.t('addUnionRelation.hostile_mail_title'),
+            this.lang.t(textKey, targetName, targetName),
+          );
+          await sql`insert into sys_info_alarm (uid, type, info, time)
+            values (${phpIntval(receiver.uid)}, 0, ${this.lang.t(alarmKey, targetName)}, unix_timestamp())`.execute(
+            this.scope.db,
+          );
+        }
+      };
+      await declareTo(
+        target,
+        'addUnionRelation.hostile_mail_content_BtoA',
+        'addUnionRelation.hostile_attempt_alarm_info_BtoA',
+      );
+      await declareTo(
+        unionid,
+        'addUnionRelation.hostile_mail_content_AtoB',
+        'addUnionRelation.hostile_attempt_alarm_info_AtoB',
+      );
+      const scroll = `select id from sys_inform where scrollcount = ${100000 + unionid}`;
+      if (!(await this.check(sql<Row>`${scroll}`))) {
+        await sql`insert into sys_inform (type, inuse, starttime, endtime, \`interval\`, scrollcount, color, msg)
+          values (0, 1, unix_timestamp(), unix_timestamp() + 600, 50000, ${100000 + unionid}, 16727871,
+          ${this.lang.t('addUnionRelation.hostile_unionWar', phpString(union?.name), phpString(targetunion?.name))})`.execute(
+          this.scope.db,
+        );
+      }
+      await this.addUnionEvent(
+        target,
+        EVT_RELATION_FRIEND,
+        this.lang.t('addUnionRelation.hostile_union_message_B_to_A', phpString(union?.name)),
+      );
+      await this.addUnionEvent(
+        unionid,
+        EVT_RELATION_FRIEND,
+        this.lang.t('addUnionRelation.hostile_union_message_A_to_B', phpString(targetunion?.name)),
+      );
+      // the PUSH_SNS_UNION_MSG platform events are skipped, as in the single build
+    }
+    // type 1 (中立) applies immediately with no side effects beyond the relation row below
+    if (type === 1 || type === 2) {
+      await sql`insert into sys_union_relation (type, unionid, target, time)
+        values (${type}, ${unionid}, ${target}, unix_timestamp())
+        on duplicate key update type = ${type}, time = unix_timestamp()`.execute(this.scope.db);
+    }
+    throw GameError.lang('addUnionRelation.diplomacy_send_succ');
+  }
+
+  /** utils.php::MakeTimeLeft, the countdown text of a remaining window. */
+  private makeTimeLeft(seconds: number): string {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    return h > 0 ? `${h}小时${m}分` : `${m}分`;
   }
 
   /** utils.php::notifyUnionChange: the polled union-change cache row. */

@@ -8,6 +8,7 @@ import { HeroRules } from '../core/hero-rules.service';
 import { RandomService } from '../core/random.service';
 import { UserRules } from '../core/user-rules.service';
 import { TaskRewards } from '../task/task-rewards.service';
+import { MailService } from '../core/mail.service';
 import { UnionCommands } from './union.commands';
 
 const lang = new LangService({
@@ -44,6 +45,7 @@ function build(rules: Respond[]) {
     users,
     new TaskRules(db.scope, users),
     lang,
+    new MailService(db.scope),
     new TaskRewards(
       db.scope,
       lang,
