@@ -88,7 +88,7 @@ legacy/          本地生成的原版文件（不提交）
 | 3 城池经济                                                                             | 完成       |
 | 4 将领与道具（主体完成，剩余见下）                                                     | 完成       |
 | 5 世界与战斗（波 1–4 前后端完成并实测，占城/抓将已比对，MVP 串跑通过）                 | 完成       |
-| 6 社交与经济（好友/聊天/联盟核心完成；联盟外交与建筑、市场未做）                       | **进行中** |
+| 6 社交与经济（好友/聊天/联盟 20 命令完成；市场自动运输完成，交易行/商人未做）          | **进行中** |
 | 7–11 成长、活动、独立战场、GM、发布                                                    | 未开始     |
 
 ### 阶段 3 已完成
@@ -156,8 +156,24 @@ legacy/          本地生成的原版文件（不提交）
 - 联盟核心（波 3a/3b，服务端 11 命令 + 客户端面板）：创建（10000 黄金/鸿胪寺 2 级/禁用名/冷却）、申请与鸿胪寺视图、成员列表、分页事件、邀请入盟、踢人预约、盟主转让（信物/缓冲随位迁移）。浏览器实测建盟/成员/事件/禁用名拦截全通过。关键差异：`EVT_ADD_UNION` 为 0、事件文案走 lang 模板；`union`/`force` 同为 MySQL 8 保留字需反引号。
 - 世界聊天的私聊/联盟频道服务端已就绪（联盟频道随联盟上线即通）。
 - 联盟 3c（20 命令总计）：捐献（每日上限=君主将/5×3+官府/5、升级循环到 100 级）、商城兑换（商票不计上限、市场等级门槛、蓝装熔换）、奖励领取（rank_union 前 10）。外交读写侧完成（友好申请/中立/宣战双边、信件与公告）。
+- 市场波 4 首片（自动运输）：`addAutoTrans` / `removeAutoTrans` / `getAutoTrans` / `hasAutoTrans`——目的地须为己方城、数量上限=出发城市场等级×100000、商队契约（buftype 17 / 物品 120）三日有效、距离×网格耗时、任务 314、同时 10 条上限。
 
-剩余：外交关系族（addUnionRelation 等 6 函数）、联盟建筑/捐献/奖励（3c）、市场交易与自动运输（波 4）、ChatPanel 完整 UI。
+#### 阶段 6 未完成（按优先级）
+
+1. **市场交易行**（MarketFunc.php 275-503）：`sellToUser` / `buyFromUser` / `cancelSell` / `getUserBuyList` / `getUserSellData`、`accelerateSell`、`getMerchantInfo` / `buyFromMerchant` / `sellToMerchant` / `logMerchantAction`（商人买卖、交易行挂单与成交、加速出售），以及市场客户端面板。
+2. **联盟剩余**：`leaveUnion`（退盟）、`demissionUnion`（解散）、`upgradePosition` / `doAppoint`（职务任免）、`cancelKickMember`、`getKickLeavingTime`（踢人撤销与倒计时）、`getUnionIntro` / `modifyIntro`（联盟简介与公告）、`setUnionProvicy`（私有化）、`getUnionReport*`（联盟战报）、`loadUnionChiefCityInfo`、`getUnionArea` 系列（势力范围四色视图）、`getUnionMarkCity`、`getSelfUnionInfo(2)`、`loadUnionDetail`（外盟详情）、`pendingFriendly` / `removeUnionRelation`（外交应答与解除）、`addUnionRelationByName`、`leaveUnion` 相关的 `canUserLeaveUnion`、`upgradeBuilding`（联盟建筑升级）。
+3. **联盟客户端**：成员列表/事件/邀请/外交/仓库/联盟主城/商城页签的完整 UI（当前面板只有成员格、事件文本、转让入口）；联盟申请与邀请的界面入口。
+4. **差分用例补齐**：外交写侧（addUnionRelation 三分支）、联盟捐献/商城兑换/奖励、自动运输（时间相关字段需 mask）。
+5. **ChatPanel 完整 UI**：频道页签、私聊输入、屏蔽词管理；聊天频道里的联盟/私聊广播 UI。
+6. **市场剩余与阶段 7 之后**：宫廷/鸿胪寺界面细化、自动运输的结算 cron 侧（`mem_city_autotrans` 的到货处理在 MarketFunc 之外的 cron 里）。
+
+#### 已知差异与实现说明
+
+- `union`、`force` 是 MySQL 8 保留字，相关 UPDATE 需反引号（原版无引号在 MySQL 5.1 下不报错）。
+- `EVT_ADD_UNION` 为 0、`EVT_CHANGE_LEADER` 为 3、`EVT_CHANGE_NAME` 为 4、`EVT_RELATION_FRIEND` 为 5；事件文案全部走 lang 模板。
+- 好友关系的写路径走主命令通道（原版走外部聊天服，单机包无该服务）；聊天协议 JSON 化但 proc 号照原版。
+- 原版 `bak_troops` 无 `troopid` 列，结算里 `where id=troopidN` 全是死写法；`mem_battle` 结算后保留下个 tick 清理——均已忠实复刻。
+- 世界地图每块 `group_concat` 受 1024 字节截断（块内前 ~56 格可加载），原版同样如此。
 
 ## 开发流程
 
