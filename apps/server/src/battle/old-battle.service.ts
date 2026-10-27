@@ -293,6 +293,7 @@ export class OldBattleService {
       cell: async (q) => Object.values((await q.execute(this.scope.db)).rows[0] ?? {})[0],
       lang: {
         report: (key) => this.reportStr(key),
+        reportArr: (key, index) => this.reportArr(key, index),
         row: (n) => this.reportRow(n),
         battle: (key) => this.battleStr(key),
         battleArr: (key, index) => this.battleArr(key, index),
@@ -323,6 +324,7 @@ export class OldBattleService {
       rand: (min, max) => this.random.randRange(min, max),
       mtRand: (min, max) => this.random.mtRand(min, max),
       usepeople: this.usepeopleTable(),
+      carry: this.carryTable(),
     };
   }
 
@@ -355,6 +357,10 @@ export class OldBattleService {
     const v = rows?.[n];
     return typeof v === 'string' ? v : '';
   }
+  private reportArr(key: string, index: number): string {
+    const v = this.lang.value<Record<string, unknown>>('report')?.[key];
+    return Array.isArray(v) ? phpString(v[index]) : '';
+  }
   private battleStr(key: string): string {
     const v = this.lang.value<Record<string, unknown>>('battle')?.[key];
     return typeof v === 'string' ? v : '';
@@ -379,6 +385,13 @@ export class OldBattleService {
       { usepeople?: Record<string, unknown> } | undefined;
     const out: Record<number, number> = {};
     if (v?.usepeople) for (const [k, n] of Object.entries(v.usepeople)) out[Number(k)] = phpNum(n);
+    return out;
+  }
+  private carryTable(): Record<number, number> {
+    const v = this.lang.value<Record<string, unknown>>('soldier') as
+      { carry?: Record<string, unknown> } | undefined;
+    const out: Record<number, number> = {};
+    if (v?.carry) for (const [k, n] of Object.entries(v.carry)) out[Number(k)] = phpNum(n);
     return out;
   }
 }

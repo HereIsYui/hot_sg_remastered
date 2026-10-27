@@ -6,6 +6,7 @@ import { phpEmpty, phpIntval, phpNum } from '../core/php';
 import { TaskRules } from '../core/task-rules.service';
 import { DbScope } from '../db/database.module';
 import { DialogCommand, type CommandContext } from '../gateway/decorators';
+import { GRID_DISTANCE, MERCHANT_MOVE_SPEED } from './market-rules.service';
 
 type Row = Record<string, unknown>;
 
@@ -15,9 +16,6 @@ const BUILDING_MARKET = 13;
 const CONTRACT_GID = 120;
 const CONTRACT_BUFTYPE = 17;
 const CONTRACT_SECONDS = 259200;
-/** GRID_DISTANCE / MERCHANT_MOVE_SPEED (common.php): one grid's travel seconds. */
-const GRID_DISTANCE = 10000;
-const MERCHANT_MOVE_SPEED = 60000;
 /** The member cap of concurrent auto-transports (hasAutoTrans). */
 const AUTOTRANS_MAX = 10;
 /** completeTaskWithTaskid($uid, 314) — the auto-transport task. */

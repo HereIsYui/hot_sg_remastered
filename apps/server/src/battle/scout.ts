@@ -8,7 +8,10 @@ import { RandomService } from '../core/random.service';
 import { ReportService } from '../core/report.service';
 import { TaskRules } from '../core/task-rules.service';
 import { DbScope } from '../db/database.module';
-import { countDescIndex } from './battle-math';
+import { countDescIndex, getArraySub } from './battle-math';
+import type { SideInfo } from './battle-arrival';
+import { BattleArrivalService } from './battle-arrival.service';
+import { BattleEngineService } from './battle-engine.service';
 import { checkSodier, type CheckSodierDeps } from './check-sodier';
 
 type Row = Record<string, unknown>;
@@ -21,16 +24,11 @@ type Row = Record<string, unknown>;
  * What the legacy `case 2:` does, arrival of a scout troop:
  *
  *  1. `$result=0` — a scout always turns home after reporting.
- *  2. `if($field['uid']<1000) checkSodier($field)` — an NPC field/city tops up its garrison. This
- *     draws `mt_rand` / `createmapSoldier` (NONDETERMINISTIC), so the deterministic difftest cases
- *     scout a PLAYER-owned city (uid>1000), which skips it. It is ported as `topUpNpcGarrison`
- *     but only as a faithful stub boundary — see the note there.
+ *  2. `if($field['uid']<1000) checkSodier($field)` — an NPC field/city tops up its garrison through
+ *     `topUpNpcGarrison`, sharing the request's scripted RNG with the legacy differential test.
  *  3. Find a stationed enemy troop (`state=4`) at the target; build the defender combat stats and
  *     the `$patrol` count via `defcityadd` (city, type 1-3) or `battleAdd` (field, a stationed
- *     troop) with the patrol flag. These two functions reach `take_dtactics` / `take_atactics` /
- *     `getAdd` / `soldierinfo`, NONE of which are ported — so a REAL patrol fight cannot be driven
- *     here. `buildPatrol` throws `PATROL_NOT_PORTED` when a patrol would be fought; the report
- *     assembly for the patrol case is nevertheless ported below for when those helpers land.
+ *     troop) with the patrol flag.
  *  4. If `$patrol>0`: run the instant 演习 loop (`upManeuver`) over a one-round scout-vs-patrol
  *     engagement, apply the scout losses to the troop and the patrol losses to the garrison.
  *  5. `switch($end)` — note the legacy `case 0:` has NO `break`, so a win (end 0) FALLS THROUGH
@@ -61,6 +59,8 @@ export class ScoutService {
     private readonly tasks: TaskRules,
     private readonly cityRules: CityRules,
     private readonly random: RandomService,
+    private readonly arrival: BattleArrivalService,
+    private readonly engine: BattleEngineService,
   ) {}
 
   /**
@@ -73,94 +73,176 @@ export class ScoutService {
       ctx;
     const happencid = targetcid;
     const soldierArray = troop2array(phpString(row.soldiers));
-
-    // $result=0 — a scout always turns home.
-    // $field['uid']<1000 → checkSodier: top up the NPC garrison (random; see the stub note).
     if (phpNum(field.uid) < 1000) await this.topUpNpcGarrison(field);
 
-    // The stationed enemy troop the scout might meet (not itself).
     const targetrow = await this.one(sql<Row>`select * from sys_troops
       where state = 4 and id <> ${id} and (targetcid = ${targetcid} or cid = ${targetcid})
       order by endtime asc limit 1`);
-
-    // Defender combat info + patrol count. City (type 1-3) → defcityadd; field with a stationed
-    // troop → battleAdd. Both reach unported tactic/stat helpers, so a real patrol is refused.
+    let targetInfo: SideInfo | undefined;
     let patrol = 0;
     if (type > 0 && type < 4) {
-      patrol = await this.buildPatrol('city', field, targetcid);
+      targetInfo = await this.buildPatrol('city', field, targetcid);
+      patrol = phpIntval(troop2array(targetInfo.soldiers).get(3));
     } else if (targetrow) {
-      patrol = await this.buildPatrol('troop', targetrow, targetcid);
+      targetInfo = await this.buildPatrol('troop', targetrow, targetcid);
+      patrol = phpIntval(troop2array(targetInfo.soldiers).get(3));
     }
-    if (!patrol) patrol = 0;
 
-    // The scout-vs-patrol fight only runs when a patrol exists. It needs defcityadd/battleAdd's
-    // precomputed stat strings and the 演习 loop; those stat helpers are not ported, so buildPatrol
-    // has already thrown PATROL_NOT_PORTED above. Everything below is therefore the NO-PATROL path:
-    // $patrol 0, $end 0 (a win), $round 1, no scout losses — and PHP's `case 0:` has no break, so a
-    // win falls straight through into the intel block (`case 2:`). The end-1 (scout wiped) and the
-    // draw-halving (end 2) branches only occur with a patrol, and land when buildPatrol is ported.
-    if (patrol > 0) throw new Error('PATROL_NOT_PORTED');
+    let end = 0;
+    let round = 1;
+    let attackdie = 0;
+    let resistdie = 0;
+    let actOverArray = soldierArray;
+    if (targetInfo && patrol > 0) {
+      const myInfo = await this.arrival.buildBattleAdd(row, type, 0, 1);
+      const result = this.engine.settlePatrol({
+        attacksoldiers: `1,3,${soldierArray.get(3) ?? 0}`,
+        resistsoldiers: `1,3,${patrol}`,
+        attackadd: myInfo.info,
+        resistadd: targetInfo.info,
+      });
+      end = result.end;
+      round = result.round;
+      attackdie = result.attackdie;
+      resistdie = result.resistdie;
+      actOverArray = getArraySub(soldierArray, new Map([[3, attackdie]]));
+      if (type > 0 && type < 4) {
+        await this.cityRules.addCitySoldier(targetcid, 3, -resistdie);
+      } else if (targetrow) {
+        await sql`update sys_troops set soldiers = ${array2troop(new Map([[3, patrol - resistdie]]))}
+          where id = ${phpIntval(targetrow.id)}`.execute(db);
+      }
+    }
 
-    // ── report assembly (no-patrol: a clean win, full intel) ──
-    let content = this.reportTitle(cityname, targetcityname, task, state, 0);
+    if (end === 1) {
+      await sql`delete from sys_troops where id = ${id}`.execute(db);
+      await sql`update sys_city_hero set state = 0 where hid = ${hid}`.execute(db);
+    } else {
+      await sql`update sys_troops set soldiers = ${array2troop(actOverArray)}, state = 1,
+        starttime = unix_timestamp(), endtime = pathtime + unix_timestamp() where id = ${id}`.execute(
+        db,
+      );
+      await sql`update sys_city_hero set state = 2 where hid = ${hid}`.execute(db);
+    }
+
+    let teLevel: number;
+    let binfouser = '';
+    if (end !== 1) {
+      if (phpIntval(field.type) === 0) await this.completeTask(uid, 133);
+      else await this.completeTask(uid, 132);
+      teLevel = phpIntval(
+        await this.cell(
+          sql<Row>`select level from sys_city_technic where tid = 7 and cid = ${cid}`,
+        ),
+      );
+      if (phpIntval(field.type) > 0 && teLevel) {
+        if (teLevel < 3) teLevel = 6;
+        else if (teLevel < 6) teLevel = 7;
+        else if (teLevel < 9) teLevel += 2;
+        else teLevel = 10;
+      }
+      if (end === 2) teLevel = Math.floor(teLevel / 2);
+      binfouser = await this.buildIntel(teLevel, targetcid, field);
+    }
+
+    const users = await this.rows(
+      sql<Row>`select * from sys_user where uid = ${uid} or uid = ${phpIntval(field.uid)}`,
+    );
+    const userInfo1 = users.find((entry) => phpIntval(entry.uid) === uid) ?? {};
+    const userInfo2 = users.find((entry) => phpIntval(entry.uid) !== uid) ?? {};
+    if (phpIntval(userInfo2.uid) === 895) userInfo2.name = '山贼';
+    const myw = end === 0 ? '胜利' : end === 1 ? '失败' : '平局';
+    const youw = end === 0 ? '失败' : end === 1 ? '胜利' : '平局';
+    const mresult = end === 1 ? '<td width="50" height="24" class="LoseRed">失败</td>' : '';
+    const yresult = end === 1 ? '<td width="50" class="WinGreen">胜利</td>' : '';
+
     let content1 = this.reportTitle(cityname, targetcityname, task, state, 0);
-
-    // 情报任务：野地 133 / 城池 132（完成对应侦察任务目标）。
-    if (phpIntval(field.type) === 0) await this.completeTask(uid, 133);
-    else await this.completeTask(uid, 132);
-
-    // intel level: the scout's own 侦察技巧 (tid 7) at its ORIGIN city, bumped onto a coarser band
-    // for a wild-field target. (A draw would halve it, but a no-patrol scout never draws.)
-    let teLevel = phpIntval(
-      await this.cell(sql<Row>`select level from sys_city_technic where tid = 7 and cid = ${cid}`),
-    );
-    if (phpIntval(field.type) > 0 && teLevel) {
-      if (teLevel < 3) teLevel = 6;
-      else if (teLevel < 6) teLevel = 7;
-      else if (teLevel < 9) teLevel += 2;
-      else teLevel = 10;
+    let okcontent = this.reportTitle(cityname, targetcityname, task, state, 0);
+    let comm = '';
+    let tend = 0;
+    if (targetInfo && patrol > 0) {
+      content1 += this.reportRow('10');
+      tend = end === 0 ? 1 : end === 1 ? 0 : 2;
+      comm += sprintf(
+        this.reportStr('round'),
+        round,
+        this.langArray('battle', 'result')[tend] ?? '',
+      );
+      comm += sprintf(
+        this.reportStr('td_table_y'),
+        userInfo1.name,
+        mresult,
+        userInfo2.name,
+        yresult,
+      );
+      let rehero = hid > 0 ? await this.heroCard(hid) : '';
+      if (phpIntval(targetInfo.hid) > 0) rehero += await this.heroCard(phpIntval(targetInfo.hid));
+      comm += sprintf(this.reportStr('outside'), rehero);
+      okcontent += sprintf(
+        this.reportStr('b_titles'),
+        1,
+        myw,
+        userInfo1.name,
+        myw,
+        userInfo2.name,
+        youw,
+        rehero,
+      );
+    } else {
+      content1 += this.reportRow('9');
+      okcontent += this.reportRow('3');
     }
 
-    const binfouser = await this.buildIntel(teLevel, targetcid, field);
-
-    // the scout survives intact (no patrol losses); turn it home (state 1), hero back to state 2.
-    const soldiers = array2troop(soldierArray);
-    await sql`update sys_troops set soldiers = ${soldiers}, state = 1,
-      starttime = unix_timestamp(), endtime = pathtime + unix_timestamp() where id = ${id}`.execute(
-      db,
-    );
-    await sql`update sys_city_hero set state = 2 where hid = ${hid}`.execute(db);
-
-    // 对方未发觉 (3) — no patrol fought. ($okcontent in the legacy; it then sets $content=$okcontent.)
-    content += this.reportRow('3');
-    content += binfouser;
-
-    // the trailing 返回 line (a scout's $result is 0, so it always 军队正在返回).
-    content += this.reportStr('br');
-    content += `<br/>军队正在返回${cityname}。`;
-
-    // the target owner's alarm mirror ($content1, title 12): in the legacy $tend is only assigned
-    // inside the patrol block, so a no-patrol scout has $tend 0 and the alarm IS sent to a real
-    // player (field.uid > 1000). "我方未迎战" (title_2row 9) + the empty battle table.
-    content1 += this.reportRow('9');
-    content1 += sprintf(this.reportStr('table'), '');
-    content1 += this.reportStr('br');
-    content1 += `<br/>军队正在返回${cityname}。`;
+    if (targetInfo && patrol > 0) {
+      let rpsoinfo1 = '';
+      let rpsoinfo2 = '';
+      let rarmynums1 = '';
+      let rarmynums2 = '';
+      for (const [sid, cnt] of soldierArray) {
+        const sname = phpString(this.langArray('battle', 'patrol_report_soldier')[sid] ?? '');
+        const lost = sid === 3 ? attackdie : 0;
+        rpsoinfo1 += sprintf(this.reportStr('s_count'), sname, cnt, lost);
+        rarmynums1 += sprintf(this.reportStr('armynums'), sname, cnt, lost);
+      }
+      for (const [sid, cnt] of troop2array(targetInfo.soldiers)) {
+        const sname = phpString(this.langArray('battle', 'patrol_report_soldier')[sid] ?? '');
+        const lost = sid === 3 ? resistdie : 0;
+        rpsoinfo2 += sprintf(this.reportStr('s_count'), sname, cnt, lost);
+        rarmynums2 += sprintf(this.reportStr('armynums'), sname, cnt, lost);
+      }
+      if (end === 1 && round === 1) {
+        okcontent += sprintf(
+          this.reportStr('warming'),
+          '我方首轮交战既全军覆没，没有获得任何情报！',
+        );
+      } else {
+        if (end === 2) {
+          rpsoinfo2 = '';
+          rarmynums2 = '';
+        }
+        okcontent += sprintf(this.reportStr('b_adtroops'), '我方军情', rarmynums1);
+        okcontent += sprintf(this.reportStr('b_adtroops'), '敌方方军情', rarmynums2);
+      }
+      if (tend === 1 && round === 1) {
+        comm += sprintf(this.reportStr('warming'), '我方首轮交战既全军覆没，没有获得任何情报！');
+      } else {
+        comm += this.reportStr('s_title');
+        comm += sprintf(this.reportStr('soldier'), rpsoinfo1, rpsoinfo2);
+      }
+    }
+    content1 += sprintf(this.reportStr('table'), comm);
+    okcontent += binfouser;
+    let content = okcontent;
+    if (!patrol) {
+      content += this.reportStr('br');
+      content += `<br/>军队正在返回${cityname}。`;
+      content1 += sprintf(this.reportStr('table'), '');
+      content1 += this.reportStr('br');
+      content1 += `<br/>军队正在返回${cityname}。`;
+    }
 
     await this.report.sendReport(uid, this.reportTitleType(task, state), cid, happencid, content);
-
-    // The common HandleTroop tail. A scout's $result is 0 (it reports and turns home). For a real
-    // player target (field.uid > 1000) the alarm mirror ($content1, title 12) is filed when the
-    // scout was not wiped first-round: in the legacy $tend is assigned ONLY inside the patrol
-    // block, so a no-patrol scout has $tend 0 and the condition `$task==2 && $tend<>1` always holds.
-    //
-    // The legacy tail then runs `refreshFoodArmyUse($cid)` + `check_city_resource($uid,$cid)` for
-    // the scout and the target owner. `check_city_resource` is the full `getUsersCityProduct`
-    // economy recompute (caps / add rates / food upkeep), NOT ported — it belongs to the resource
-    // wave, and reproducing only half of it (the food-upkeep refresh) would write a value the
-    // legacy's full recompute does not. So the scout leaves the two cities' economy UNTOUCHED; the
-    // difftest cases scope `mem_city_resource` out, since none of it is scout intelligence.
-    if (phpNum(field.uid) > 1000) {
+    if (phpNum(field.uid) > 1000 && tend !== 1) {
       await this.report.sendReport(phpIntval(field.uid), 12, cid, happencid, content1);
     }
   }
@@ -382,34 +464,35 @@ export class ScoutService {
     };
   }
 
-  /**
-   * cfg_js.php::defcityadd / battleAdd with the patrol flag ($task=1): the defender's precomputed
-   * combat stats and the patrol (斥候) count. Both reach `take_dtactics` / `take_atactics` /
-   * `getAdd` / `soldierinfo` / `getshootadd` — the full tactic + attribute pipeline, none of which
-   * is ported. So this detects whether a patrol WOULD be fought and refuses in that case; it
-   * returns 0 (no patrol) for the common garrison with no 斥候-type defender, which is all the
-   * deterministic scout cases need.
-   */
+  /** Build the defender's real stats with the same patrol-only (task=1) path as ordinary battles. */
   private async buildPatrol(
     kind: 'city' | 'troop',
     source: Row,
     targetcid: number,
-  ): Promise<number> {
-    // A patrol is fought only when a defender of soldier-type 3 (斥候) is present. For a city that
-    // is a stationed garrison soldier sid whose type is 3; for a field it is a stationed troop
-    // carrying sid 3. Detect it cheaply; if present, the fight needs the unported stat pipeline.
+  ): Promise<SideInfo> {
     if (kind === 'city') {
-      const has = await this.one(sql<Row>`select 1 as x from sys_city_soldier s
-        join cfg_soldier c on c.sid = s.sid
-        where s.cid = ${targetcid} and s.count > 0 and c.type = 3 limit 1`);
-      if (has) throw new Error('PATROL_NOT_PORTED');
-    } else {
-      const soldArray = troop2array(phpString(source.soldiers));
-      for (const [sid] of soldArray) {
-        if (sid === 3) throw new Error('PATROL_NOT_PORTED');
-      }
+      return this.arrival.buildDefCityAdd(phpIntval(source.uid), targetcid, 0, 0, 1);
     }
-    return 0;
+    return this.arrival.buildBattleAdd(source, 0, 0, 1);
+  }
+
+  private async heroCard(hid: number): Promise<string> {
+    const hero = await this.one(
+      sql<Row>`select name, level, face, sex from sys_city_hero where hid = ${hid}`,
+    );
+    if (!hero) return this.reportStr('empty');
+    const sex = phpIntval(hero.sex) ? 'boy' : 'girl';
+    return sprintf(
+      this.reportStr('hero'),
+      `${sex}_${phpString(hero.face)}`,
+      phpString(hero.name),
+      phpString(hero.name),
+      phpNum(hero.level),
+    );
+  }
+
+  private async rows(query: ReturnType<typeof sql<Row>>): Promise<Row[]> {
+    return (await query.execute(this.scope.db)).rows;
   }
 
   // ─────────────────────────── helpers ───────────────────────────

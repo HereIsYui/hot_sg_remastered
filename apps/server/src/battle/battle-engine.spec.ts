@@ -82,9 +82,7 @@ describe('upManeuver early-outs', () => {
 });
 
 describe('upManeuver combat', () => {
-  it('a dominant attacker wipes the defender and takes no scout losses', () => {
-    // Attacker: 100 scouts (sid3), huge attack, reaches the defender in one move.
-    // Defender: 5 scouts, no offence (ap/dp/act/def 0) so they cannot hurt back.
+  it('preserves the legacy scalar-target quirk: even a dominant attacker draws without losses', () => {
     const row: ManeuverRow = {
       attacksoldiers: '1,3,100',
       resistsoldiers: '1,3,5',
@@ -111,11 +109,11 @@ describe('upManeuver combat', () => {
         hp: 10,
       }),
     };
-    // getTarget: preferred type 3 present on the other side, so no rand is consumed.
     const r = upManeuver(row, scriptedRand());
-    expect(r.end).toBe(0); // attacker win
-    expect(r.resistdie).toBe(5); // defender scouts all dead
-    expect(r.attackdie).toBe(0); // attacker took no losses
+    expect(r.end).toBe(2);
+    expect(r.round).toBe(40);
+    expect(r.resistdie).toBe(0);
+    expect(r.attackdie).toBe(0);
   });
 
   it('draws (end 2) when 40 rounds pass without a wipe', () => {
@@ -131,7 +129,7 @@ describe('upManeuver combat', () => {
     expect(r.round).toBe(40);
   });
 
-  it('serialises whole-army losses in attackLost / resistLost', () => {
+  it('serialises the zero whole-army losses left by the legacy loop', () => {
     const row: ManeuverRow = {
       attacksoldiers: '1,3,100',
       resistsoldiers: '1,3,5',
@@ -139,7 +137,7 @@ describe('upManeuver combat', () => {
       resistadd: add(3, { type: 3, shoot: 0, blood: 10, speed: 0, ap: 0, dp: 0, hp: 10 }),
     };
     const r = upManeuver(row, scriptedRand());
-    expect(r.resistLost.get(3)).toBe(5);
-    expect(r.attackLost.get(3) ?? 0).toBe(0);
+    expect(r.resistLost.size).toBe(0);
+    expect(r.attackLost.size).toBe(0);
   });
 });

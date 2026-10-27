@@ -135,6 +135,9 @@ export const cases: DiffCase[] = [
       const session = await s.login('difftest_new');
       await s.command(session, 'loadUserInfo', 1);
       await avoidCidWidTiles(s, 3);
+      // Free tiles can retain buildings from a deleted NPC city; remove those stale rows so a
+      // random choice cannot produce a one-sided deletion when the new role reuses the tile.
+      await s.query('delete from sys_building where cid not in (select cid from sys_city)');
       await s.command(session, 'createRole', '风云子', '新城', 3, '风', 1, 2, 0);
       await aliasNewCity(s, session.uid);
       await s.command(session, 'loadUserInfo', 1);
@@ -213,6 +216,9 @@ export const cases: DiffCase[] = [
     run: async (s) => {
       const session = await s.login('difftest_city');
       await avoidCidWidTiles(s, 5);
+      // A reused free tile can retain the deleted NPC city's schedule; remove that stale fixture
+      // so the random tile choice does not add a legacy-only deletion to the comparison.
+      await s.query('delete from mem_city_schedule where cid not in (select cid from sys_city)');
       await s.command(session, 'createRole', '城主', '新城', 5, '城', 0, 3, 0);
       await aliasNewCity(s, session.uid);
       const cid = await lastCity(s, session.uid);
@@ -1369,7 +1375,7 @@ export const cases: DiffCase[] = [
       const session = await s.login(EXISTING_PLAYER);
       const uid = session.uid;
       const cid = await lastCity(s, uid);
-      // Set lists and set attributes come without ORDER BY: MyISAM vs InnoDB row order.
+      // Equal-strength gear and its parallel attribute arrays have no deterministic secondary order.
       const GEAR_LISTS: Record<string, (string | number)[]> = {
         loadUserPartArmor: [4],
         getHeroArmor: [4],
@@ -1382,6 +1388,7 @@ export const cases: DiffCase[] = [
         const at = GEAR_LISTS[func];
         if (!at) return;
         const [ties, tieAttributes] = func === 'loadUserPartArmor' ? [3, 4] : [6, 7];
+        for (let i = 0; i < 8; i++) s.unordered(...at, i);
         s.unordered(...at, ties);
         s.unordered(...at, tieAttributes);
       };
@@ -2945,17 +2952,24 @@ export const cases: DiffCase[] = [
     },
   },
   {
-    // 演习 (startManeuver): its settlement is cfg_js.php::upManeuver (the battle engine, another
-    // agent's module), so startManeuver is refused here; getManeuverResult answers "still running"
-    // for an unknown id. Both sides must reject — the new server throws a not-ported error, the
-    // legacy queues a row no backend settles — so only the leading 0 is compared.
-    name: 'ground maneuver is not settled (battle engine unported)',
+    // Queue an opposed sand-table battle, settle it, then consume its result exactly as the client
+    // does. Legacy's scalar-target quirk makes this a 40-round draw with empty loss strings.
+    name: 'ground maneuver settles opposed armies and consumes the result',
     run: async (s) => {
       const session = await s.login(EXISTING_PLAYER);
       const cid = await lastCity(s, session.uid);
       const ground = (func: string, ...args: unknown[]) =>
         s.dialog(session, cid, 8, 40, func, ...args);
       await ground('getManeuverResult', 999999);
+      const started = (await ground('startManeuver', '2,3,100,1,10', '2,3,5,1,20')) as unknown[];
+      const mid = Number(started[0]);
+      if (!mid) throw new Error('startManeuver did not return an id');
+      await ground('getManeuverResult', mid);
+      s.rng([1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
+      await s.tick('HandleBattle');
+      s.stopRng();
+      await ground('getManeuverResult', mid);
+      await ground('getManeuverResult', mid);
     },
   },
   {
@@ -3422,18 +3436,33 @@ export const cases: DiffCase[] = [
     tables: SCOUT_RESOURCE_IGNORE,
   },
   {
+    // Legacy upManeuver reads getTarget's integer sid as an array, so even a superior force draws
+    // after 40 rounds. Verify the full reports, halved intel, goal, alarms and intact patrols.
+    name: 'troop tick scout draws a city patrol with a larger force',
+    tables: SCOUT_RESOURCE_IGNORE,
+    run: (s) => seedScoutPatrol(s, 30000, 5),
+  },
+  {
+    // The same scalar-target quirk leaves a lone scout alive: it returns with halved intelligence.
+    name: 'troop tick scout draws a city patrol with a smaller force',
+    tables: SCOUT_RESOURCE_IGNORE,
+    run: (s) => seedScoutPatrol(s, 1, 30000),
+  },
+  {
+    // Zero attack/defence also stays a 40-round draw rather than producing NaN casualties.
+    name: 'troop tick scout draws a city patrol with zero combat stats',
+    tables: SCOUT_RESOURCE_IGNORE,
+    run: (s) => seedScoutPatrol(s, 100, 100, true),
+  },
+  {
     // HandleBattle tick (cfg_js.php, TickOrder.Battle): the 演习 (upManeuver) instant simulator.
     // A 演习 row is queued by GroundFunc.php::startManeuver as `mem_maneuver(state=0, …)`; the
     // 易语言 backend ran `upManeuver($id, 0)` to settle it — no PHP cron does, so the difftest
     // harness's legacy `tick('HandleBattle')` calls upManeuver over every pending maneuver (see
     // tools/src/lib/difftest/side.ts), mirroring the new BattleTick.handleBattle.
     //
-    // IMPORTANT — only the EARLY-OUT is comparable in this environment. The shipped `mem_maneuver`
-    // dump has NO `attackadd` / `resistadd` / `wallhp` columns (the production 易语言 schema's
-    // extra columns were trimmed), so the moment a REAL battle runs, legacy upManeuver's
-    // `update mem_maneuver set attackadd=…` hits "no such field" and the PearDB handler EXITs the
-    // script — the result is never persisted on the legacy side at all. An opposed maneuver is
-    // therefore impossible to match here; it belongs to the wave that restores those columns.
+    // The harness restores the production attackadd/resistadd/wallhp columns omitted by the dump.
+    // Opposed engagements are covered by the patrol cases above; this case pins the early-out.
     //
     // The unopposed case (empty defender) early-outs to end 0 BEFORE any attackadd write: legacy
     // returns without persisting, so the row stays state=0, and the new side's upManeuver likewise
@@ -4220,75 +4249,64 @@ export const cases: DiffCase[] = [
     // schedule cooldowns reset and the occupier's soldiers moved in. The economy / tech
     // re-derive (check_city_resource / check_Technic) runs on the legacy side only and its
     // tables are scoped out, as is the settled report (its hero-card / defender-report sections
-    // are not ported); building levels take an unpinnable rand()*4 shaving on capture.
+    // are not ported). 官府 4 guarantees the below-10 teardown on both sides despite the
+    // rand()*4 shave; the random levels stay masked while the surviving building rows are exact.
     name: 'battle: 占城 and 抓将 settle a player-city capture',
     tables: {
       mem_city_resource: { skip: () => true },
       sys_city_res_add: { skip: () => true },
       sys_city_technic: { skip: () => true },
       sys_user_goal: { skip: () => true },
-      sys_report: { skip: () => true },
       mem_world_schedule: { skip: () => true },
       sys_building: { ignore: ['level'] },
       sys_hero_captive: { offsets: ['captivetime'] },
     },
-    run: async (s) => {
-      const session = await s.login(EXISTING_PLAYER);
-      const uid = session.uid;
-      const cid = await lastCity(s, uid);
-      const TARGET = 3005;
-      // check_nobility: nobility 1 (city_count 2) covers holding a second city.
-      await s.query('update sys_user set nobility = 1 where uid = ?', [uid]);
-      // The target: uid 1002's ordinary city on wid 35; a 13-level 官府 keeps the capture's
-      // rand()*4 level shaving at >= 10 so delBuildings' below-10 teardown never fires (the
-      // row sets then match with only the levels masked).
-      await s.query('update mem_world set type = 0, ownercid = ? where wid = 35', [TARGET]);
-      await s.query(
-        `insert into sys_city (cid, uid, name, type, state, province)
-         values (?, 1002, '被占城', 0, 0, 10)`,
-        [TARGET],
-      );
-      await s.query(
-        `insert into sys_building (cid, xy, bid, level) values (?, 120, 6, 13), (?, 121, 5, 15)`,
-        [TARGET, TARGET],
-      );
-      await s.query(
-        `insert into mem_city_resource (cid, people, food, wood, rock, iron, gold, morale, complaint, lastupdate)
-         values (?, 100, 2000, 3000, 4000, 5000, 6000, 0, 0, 0)`,
-        [TARGET],
-      );
-      // The defender chief (state 1, loyalty 0 — the catch roll always succeeds; level 10 sets
-      // the captured hero's exp from cfg_hero_level).
-      await s.query(
-        `insert into sys_city_hero (hid, uid, name, sex, face, cid, state, level, command_base,
-           affairs_base, bravery_base, wisdom_base, loyalty, herotype)
-         values (900101, 1002, '俘虏将', 0, 0, ?, 1, 10, 50, 60, 60, 60, 0, 0)`,
-        [TARGET],
-      );
-      await s.query('insert into sys_city_soldier (cid, sid, count) values (?, 3, 5)', [TARGET]);
-      // The occupier marches in (task 4).
-      await s.query(
-        `insert into sys_troops
-          (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
-         values (?, ?, 0, ?, 4, 0, unix_timestamp() - 600, 600, unix_timestamp() - 1, '1,1,30000', '0', 0, 0)`,
-        [uid, cid, TARGET],
-      );
-      s.rng([1, 1, 0, 0, 1, 2, 1, 1, 1, 1]);
-      await s.tick('HandleTroop');
-      // Breach the wall and make the round due: the garrison is wiped, the battle settles.
-      await s.query(
-        'update mem_battle set wallhp = 0, nexttime = unix_timestamp() - 1 where attackcid = ?',
-        [cid],
-      );
-      await s.tick('HandleBattle');
-      // The settled mem_battle row lingers until the NEXT due tick removes it (HandleBattle's
-      // sys_battle.state = 1 check) — force it due once more so both sides clean up.
-      await s.query('update mem_battle set nexttime = unix_timestamp() - 1 where attackcid = ?', [
-        cid,
-      ]);
-      await s.tick('HandleBattle');
-      s.stopRng();
+    run: (s) => seedPlayerCityCapture(s, 0, 4, false),
+  },
+  {
+    // 唯一普通城被占：troopsBack + moveGetCid + movecitys moves the defender to wid 499499.
+    // All other province-1 flatlands are unavailable, so both order-by-rand queries have one target.
+    name: 'battle: player last city relocates after capture',
+    tables: {
+      mem_city_resource: { skip: (row) => Number(row.cid) !== 499499 },
+      sys_city_res_add: { skip: () => true },
+      sys_city_technic: { skip: () => true },
+      sys_user_goal: { skip: () => true },
+      mem_world_schedule: { skip: () => true },
+      mem_world: { skip: (row) => ![35, 499499].includes(Number(row.wid)) },
+      sys_hero_captive: { offsets: ['captivetime'] },
+      log_move_city: { offsets: ['time'] },
     },
+    run: (s) => seedPlayerCityCapture(s, 0, 4, false, true),
+  },
+  {
+    // 郡城前置不足：同郡有 8 座县城而攻击方没有，check_city_type must reject the takeover.
+    // The failed capture falls back to resource robbery: compare the city's deduction and the
+    // returning troop's carry payload directly, including gold. Only time and report scopes remain.
+    name: 'battle: county capture rejects missing prerequisite cities',
+    tables: {
+      sys_city_res_add: { skip: () => true },
+      sys_city_technic: { skip: () => true },
+      sys_user_goal: { skip: () => true },
+      mem_world_schedule: { skip: () => true },
+      sys_hero_captive: { offsets: ['captivetime'] },
+      sys_troops: { offsets: ['starttime', 'endtime'] },
+    },
+    run: (s) => seedPlayerCityCapture(s, 2, 10, false),
+  },
+  {
+    // Four attacker-owned county towns also satisfy the current 11-town baseline's one-third gate.
+    name: 'battle: county capture passes prerequisite cities',
+    tables: {
+      mem_city_resource: { skip: () => true },
+      sys_city_res_add: { skip: () => true },
+      sys_city_technic: { skip: () => true },
+      sys_user_goal: { skip: () => true },
+      mem_world_schedule: { skip: () => true },
+      sys_building: { ignore: ['level'] },
+      sys_hero_captive: { offsets: ['captivetime'] },
+    },
+    run: (s) => seedPlayerCityCapture(s, 2, 4, true),
   },
   {
     // 好友/仇人 read side (FriendFunc.php): getUserRelation compares empty on both sides (the
@@ -4340,7 +4358,728 @@ export const cases: DiffCase[] = [
       await s.command(other, 'getUnionEvent', 0);
     },
   },
+  {
+    name: 'market: automatic transport scheduling commands',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const [target] = await s.query<{ cid: string }>(
+        'select lastcid as cid from sys_user where uid > 1000 and uid <> ? order by uid limit 1',
+        [uid],
+      );
+      const targetCid = Number(target?.cid ?? 0);
+      await s.query('delete from mem_city_autotrans where uid = ?', [uid]);
+      await s.query('delete from mem_user_buffer where uid = ? and buftype = 17', [uid]);
+      await s.query('delete from sys_goods where uid = ? and gid = 120', [uid]);
+      await s.query('update sys_building set level = 15 where cid = ? and bid = 13', [cid]);
+
+      await s.dialog(session, cid, 13, 0, 'hasAutoTrans');
+      const [now] = await s.query<{ now: string }>('select unix_timestamp() as now');
+      const start = (Number(now?.now ?? 0) + 600) * 1000;
+      await s.dialog(session, cid, 13, 0, 'addAutoTrans', cid, targetCid, 0, 100, 0, start - 10000);
+      await s.dialog(session, cid, 13, 0, 'addAutoTrans', cid, targetCid, 0, 100, 0, start);
+      await s.dialog(session, cid, 13, 0, 'addAutoTrans', cid, targetCid, 0, 1500001, 0, start);
+      await s.dialog(session, cid, 13, 0, 'addAutoTrans', cid, targetCid, 0, 100, 0, start);
+
+      await s.query('update sys_city set uid = ? where cid = ?', [uid, targetCid]);
+      await s.dialog(session, cid, 13, 0, 'addAutoTrans', cid, targetCid, 0, 100, 0, start);
+      await s.query('insert into sys_goods (uid, gid, count) values (?, 120, 2)', [uid]);
+      await s.dialog(session, cid, 13, 0, 'addAutoTrans', cid, targetCid, 0, 100, 0, start);
+      s.offset(6, '*', 'start_time');
+      await s.dialog(session, cid, 13, 0, 'hasAutoTrans');
+      await s.dialog(session, cid, 13, 0, 'getAutoTrans');
+      s.offset(6, '*', 'start_time');
+
+      await s.query(
+        `insert into mem_city_autotrans
+        (uid, fromcid, tocid, state, trans_type, start_time, distance, cost_time, res_type, count, end_time)
+        select ?, ?, ?, 0, 0, unix_timestamp() + 600, 0, 0, 0, 100, unix_timestamp() + 600
+        from sys_city limit 9`,
+        [uid, cid, targetCid],
+      );
+      await s.dialog(session, cid, 13, 0, 'hasAutoTrans');
+      const [scheduled] = await s.query<{ id: string }>(
+        'select id from mem_city_autotrans where uid = ? order by id limit 1',
+        [uid],
+      );
+      await s.dialog(session, cid, 13, 0, 'removeAutoTrans', Number(scheduled?.id ?? 0));
+      await s.dialog(session, cid, 13, 0, 'getAutoTrans');
+      s.offset(6, '*', 'start_time');
+    },
+  },
+  {
+    name: 'market: automatic transport settles a single delivery',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const [target] = await s.query<{ uid: string; cid: string }>(
+        'select uid, lastcid as cid from sys_user where uid > 1000 and uid <> ? order by uid limit 1',
+        [uid],
+      );
+      const targetUid = Number(target?.uid ?? 0);
+      const targetCid = Number(target?.cid ?? 0);
+      await s.query('delete from mem_city_autotrans where uid = ?', [uid]);
+      await s.query('delete from sys_city_trade where cid = ? and buycid = ?', [cid, targetCid]);
+      await s.query('delete from sys_report where uid in (?, ?)', [uid, targetUid]);
+      await s.query('delete from sys_user_goal where uid in (?, ?) and gid in (25, 26)', [
+        uid,
+        targetUid,
+      ]);
+      await s.query(
+        'insert into sys_alarm (uid, report) values (?, 1), (?, 1) on duplicate key update report = 1',
+        [uid, targetUid],
+      );
+      await s.query('update mem_city_resource set food = 1000, wood = 1000 where cid = ?', [cid]);
+      await s.query('update mem_city_resource set food = 50, rock = 60 where cid = ?', [targetCid]);
+      await s.query(
+        `insert into mem_city_autotrans
+          (uid, fromcid, tocid, state, trans_type, start_time, distance, cost_time, res_type, count, end_time)
+         values (?, ?, ?, 0, 0, unix_timestamp() - 120, 0, 0, 2, 100, unix_timestamp() - 1)`,
+        [uid, cid, targetCid],
+      );
+      await s.tick('HandleAutoTrans');
+      const [market] = await s.query<{ xy: string }>(
+        'select xy from sys_building where cid = ? and bid = 13',
+        [cid],
+      );
+      const xy = Number(market?.xy ?? 0);
+      const inner = Math.floor(xy / 100);
+      const cell = xy % 100;
+      await s.dialog(
+        session,
+        cid,
+        13,
+        (cell % 10) * 10 + Math.floor(cell / 10),
+        'getBuildingInfo',
+        inner,
+        Math.floor(cell / 10),
+        cell % 10,
+        13,
+      );
+      s.offset(6, 2, '*', 'endtime');
+      await s.tick('HandleTrade');
+    },
+    tables: {
+      mem_city_resource: {
+        ignore: ['gold_max', 'food_max', 'wood_max', 'rock_max', 'iron_max'],
+      },
+    },
+  },
+  {
+    name: 'market: daily automatic transport advances after delivery',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const [target] = await s.query<{ uid: string; cid: string }>(
+        'select uid, lastcid as cid from sys_user where uid > 1000 and uid <> ? order by uid limit 1',
+        [uid],
+      );
+      const targetUid = Number(target?.uid ?? 0);
+      const targetCid = Number(target?.cid ?? 0);
+      await s.query('delete from mem_city_autotrans where uid = ?', [uid]);
+      await s.query('delete from sys_city_trade where cid = ? and buycid = ?', [cid, targetCid]);
+      await s.query('delete from sys_report where uid in (?, ?)', [uid, targetUid]);
+      await s.query('delete from sys_user_goal where uid in (?, ?) and gid in (25, 26)', [
+        uid,
+        targetUid,
+      ]);
+      await s.query('update mem_city_resource set food = 1000 where cid = ?', [cid]);
+      await s.query('update mem_city_resource set gold = 60 where cid = ?', [targetCid]);
+      await s.query(
+        `insert into mem_city_autotrans
+          (uid, fromcid, tocid, state, trans_type, start_time, distance, cost_time, res_type, count, end_time)
+         values (?, ?, ?, 0, 1, unix_timestamp() - 120, 0, 0, 4, 100, unix_timestamp() - 1)`,
+        [uid, cid, targetCid],
+      );
+      await s.tick('HandleAutoTrans');
+      await s.tick('HandleTrade');
+    },
+    tables: {
+      mem_city_resource: {
+        ignore: ['gold_max', 'food_max', 'wood_max', 'rock_max', 'iron_max'],
+      },
+    },
+  },
+  {
+    name: 'market: automatic transport stops on insufficient food',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const [target] = await s.query<{ cid: string }>(
+        'select lastcid as cid from sys_user where uid > 1000 and uid <> ? order by uid limit 1',
+        [uid],
+      );
+      const targetCid = Number(target?.cid ?? 0);
+      await s.query('delete from mem_city_autotrans where uid = ?', [uid]);
+      await s.query('delete from sys_city_trade where cid = ? and buycid = ?', [cid, targetCid]);
+      await s.query('update mem_city_resource set food = 99, iron = 1000 where cid = ?', [cid]);
+      await s.query(
+        `insert into mem_city_autotrans
+          (uid, fromcid, tocid, state, trans_type, start_time, distance, cost_time, res_type, count, end_time)
+         values (?, ?, ?, 0, 0, unix_timestamp() - 120, 0, 0, 3, 100, unix_timestamp() - 1)`,
+        [uid, cid, targetCid],
+      );
+      await s.tick('HandleAutoTrans');
+      await s.tick('HandleTrade');
+    },
+    tables: {
+      mem_city_resource: {
+        ignore: ['gold_max', 'food_max', 'wood_max', 'rock_max', 'iron_max'],
+      },
+    },
+  },
+  {
+    name: 'market: merchant buys resources with money',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await s.query('update mem_city_resource set gold = 10000, food = 1000 where cid = ?', [cid]);
+      await s.query('update sys_user set money = 100, gift = 100 where uid = ?', [uid]);
+      for (const table of [
+        'log_money',
+        'log_gift',
+        'log_merchant',
+        'log_user_action',
+        'log_action_count',
+      ]) {
+        await s.query(`delete from ${table} where uid = ?`, [uid]);
+      }
+      await s.query('delete from log_day_money where money <> 0');
+      await s.query('delete from sys_user_goal where uid = ? and gid = 24', [uid]);
+      await s.dialog(session, cid, 13, 0, 'buyFromMerchant', 0, 0, 0, 0, 1, 2);
+      await s.dialog(session, cid, 13, 0, 'buyFromMerchant', 0, 0, 0, 0, 1, 0);
+      await s.dialog(session, cid, 13, 0, 'buyFromMerchant', 1000000, 0, 0, 0, 1, 0);
+      await s.dialog(session, cid, 13, 0, 'buyFromMerchant', 100, 0, 0, 0, 1, 0);
+    },
+  },
+  {
+    name: 'market: merchant buys resources with gift',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await s.query('update mem_city_resource set gold = 10000, wood = 1000 where cid = ?', [cid]);
+      await s.query('update sys_user set money = 100, gift = 100 where uid = ?', [uid]);
+      for (const table of [
+        'log_money',
+        'log_gift',
+        'log_merchant',
+        'log_user_action',
+        'log_action_count',
+      ]) {
+        await s.query(`delete from ${table} where uid = ?`, [uid]);
+      }
+      await s.query('delete from log_day_money where money <> 0');
+      await s.query('delete from sys_user_goal where uid = ? and gid = 24', [uid]);
+      await s.dialog(session, cid, 13, 0, 'buyFromMerchant', 0, 10, 0, 0, 2, 1);
+    },
+  },
+  {
+    name: 'market: merchant sells resources with money',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await s.query(
+        'update mem_city_resource set gold = 100, food = 1000, wood = 1000, rock = 1000, iron = 1000 where cid = ?',
+        [cid],
+      );
+      await s.query('update sys_user set money = 100, gift = 100 where uid = ?', [uid]);
+      for (const table of [
+        'log_money',
+        'log_gift',
+        'log_merchant',
+        'log_user_action',
+        'log_action_count',
+      ]) {
+        await s.query(`delete from ${table} where uid = ?`, [uid]);
+      }
+      await s.query('delete from log_day_money where money <> 0');
+      await s.query('delete from sys_user_goal where uid = ? and gid = 23', [uid]);
+      await s.dialog(session, cid, 13, 0, 'sellToMerchant', 10000, 0, 0, 0, 1, 0);
+      await s.dialog(session, cid, 13, 0, 'sellToMerchant', 100, 0, 0, 0, 1, 0);
+      await s.dialog(session, cid, 13, 0, 'sellToMerchant', 0, 0, 0, 0, 1, 1);
+    },
+  },
+  {
+    name: 'market: merchant sells resources with gift',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await s.query(
+        'update mem_city_resource set gold = 100, food = 1000, wood = 1000, rock = 1000, iron = 1000 where cid = ?',
+        [cid],
+      );
+      await s.query('update sys_user set money = 100, gift = 100 where uid = ?', [uid]);
+      for (const table of [
+        'log_money',
+        'log_gift',
+        'log_merchant',
+        'log_user_action',
+        'log_action_count',
+      ]) {
+        await s.query(`delete from ${table} where uid = ?`, [uid]);
+      }
+      await s.query('delete from log_day_money where money <> 0');
+      await s.query('delete from sys_user_goal where uid = ? and gid = 23', [uid]);
+      await s.dialog(session, cid, 13, 0, 'sellToMerchant', 0, 0, 10, 20, 2, 1);
+    },
+  },
+  {
+    name: 'market: player sale list, cancel and accelerate',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const other = await s.login('judingwan');
+      const otherCid = await lastCity(s, other.uid);
+      await s.query('delete from sys_city_trade');
+      await s.query('delete from mem_city_trade');
+      await s.query('delete from sys_goods where uid = ? and gid = 11', [uid]);
+      await s.query(
+        'update mem_city_resource set food = 1000, wood = 1000, gold = 100 where cid = ?',
+        [cid],
+      );
+      await s.query('update sys_building set level = 15 where cid in (?, ?) and bid = 13', [
+        cid,
+        otherCid,
+      ]);
+      await s.dialog(session, cid, 13, 0, 'getUserSellData');
+      await s.dialog(session, cid, 13, 0, 'sellToUser', 0, 0, 0, 0, 0);
+      await s.dialog(session, cid, 13, 0, 'sellToUser', 0, 100, 100, 200, 0);
+      await s.dialog(session, cid, 13, 0, 'sellToUser', 0, 100, 10, 200, 0);
+      await s.dialog(session, cid, 13, 0, 'sellToUser', 1, 50, 5, 200, 0);
+      const [seller] = await s.query<{ name: string }>('select name from sys_user where uid = ?', [
+        uid,
+      ]);
+      await s.dialog(other, otherCid, 13, 0, 'getUserBuyList', 0, 0, 0, '');
+      await s.dialog(other, otherCid, 13, 0, 'getUserBuyList', 0, 1, 0, seller?.name ?? '');
+      const [accelerated] = await s.query<{ id: string }>(
+        'select id from sys_city_trade where cid = ? and restype = 0 limit 1',
+        [cid],
+      );
+      const tradeId = Number(accelerated?.id ?? 0);
+      await s.dialog(session, cid, 13, 0, 'accelerateSell', tradeId);
+      await s.query('insert into sys_goods (uid, gid, count) values (?, 11, 1)', [uid]);
+      await s.query(
+        'update sys_city_trade set state = 1, buycid = ?, endtime = unix_timestamp() + 3600 where id = ?',
+        [otherCid, tradeId],
+      );
+      await s.query(
+        'replace into mem_city_trade (id, endtime) values (?, unix_timestamp() + 3600)',
+        [tradeId],
+      );
+      await s.dialog(session, cid, 13, 0, 'accelerateSell', tradeId);
+      s.offset(6, 2, '*', 'endtime');
+      const [cancelled] = await s.query<{ id: string }>(
+        'select id from sys_city_trade where cid = ? and restype = 1 limit 1',
+        [cid],
+      );
+      await s.dialog(session, cid, 13, 0, 'cancelSell', Number(cancelled?.id ?? 0));
+      s.offset(6, 2, '*', 'endtime');
+      await s.query(
+        'insert into sys_city_trade (cid, state, restype, count, price, gold) values (?, 2, 4, 10, 0, 0)',
+        [cid],
+      );
+      const [auto] = await s.query<{ id: string }>(
+        'select id from sys_city_trade where cid = ? and state = 2 limit 1',
+        [cid],
+      );
+      await s.dialog(session, cid, 13, 0, 'cancelAutoTrans', Number(auto?.id ?? 0));
+      s.offset(6, 2, '*', 'endtime');
+    },
+  },
+  {
+    name: 'market: player trade rejects distance and union errors',
+    run: async (s) => {
+      const seller = await s.login(EXISTING_PLAYER);
+      const sellerCid = await lastCity(s, seller.uid);
+      const buyer = await s.login('judingwan');
+      const buyerCid = await lastCity(s, buyer.uid);
+      await s.query('delete from sys_city_trade');
+      await s.query('update sys_user set union_id = 0 where uid = ?', [buyer.uid]);
+      await s.query('update mem_city_resource set gold = 100 where cid = ?', [buyerCid]);
+      await s.query('update sys_building set level = 15 where cid = ? and bid = 13', [buyerCid]);
+      await s.dialog(buyer, buyerCid, 13, 0, 'buyFromUser', 900999);
+      await s.query(
+        'insert into sys_city_trade (cid, state, restype, count, price, gold, distance, unionid) values (?, 0, 0, 100, 0.1, 10, 0, 0)',
+        [sellerCid],
+      );
+      const [far] = await s.query<{ id: string }>('select id from sys_city_trade limit 1');
+      await s.dialog(buyer, buyerCid, 13, 0, 'buyFromUser', Number(far?.id ?? 0));
+      await s.query('update sys_city_trade set distance = 1000000000, unionid = 900 where id = ?', [
+        far?.id,
+      ]);
+      await s.dialog(buyer, buyerCid, 13, 0, 'buyFromUser', Number(far?.id ?? 0));
+      await s.query('update sys_city_trade set cid = ?, unionid = 0 where id = ?', [
+        buyerCid,
+        far?.id,
+      ]);
+      await s.dialog(buyer, buyerCid, 13, 0, 'buyFromUser', Number(far?.id ?? 0));
+    },
+  },
+  {
+    name: 'market: player purchase settles delivery to both cities',
+    run: async (s) => {
+      const seller = await s.login(EXISTING_PLAYER);
+      const sellerCid = await lastCity(s, seller.uid);
+      const buyer = await s.login('judingwan');
+      const buyerCid = await lastCity(s, buyer.uid);
+      await s.query('delete from sys_city_trade');
+      await s.query('delete from mem_city_trade');
+      await s.query('delete from sys_report where uid in (?, ?)', [seller.uid, buyer.uid]);
+      await s.query('delete from sys_user_goal where uid in (?, ?) and gid in (25, 26)', [
+        seller.uid,
+        buyer.uid,
+      ]);
+      await s.query('delete from log_user_action where uid = ?', [buyer.uid]);
+      await s.query('delete from log_action_count where uid = ?', [buyer.uid]);
+      await s.query(
+        'insert into sys_alarm (uid, report) values (?, 1), (?, 1) on duplicate key update report = 1',
+        [seller.uid, buyer.uid],
+      );
+      await s.query('update mem_city_resource set food = 1000, gold = 50 where cid = ?', [
+        sellerCid,
+      ]);
+      await s.query('update mem_city_resource set food = 50, gold = 100 where cid = ?', [buyerCid]);
+      await s.query('update sys_building set level = 15 where cid = ? and bid = 13', [buyerCid]);
+      await s.query(
+        'insert into sys_city_trade (cid, state, restype, count, price, gold, distance, unionid, limittime) values (?, 0, 0, 100, 0.1, 10, 1000000000, 0, 720000)',
+        [sellerCid],
+      );
+      const [trade] = await s.query<{ id: string }>('select id from sys_city_trade limit 1');
+      const tradeId = Number(trade?.id ?? 0);
+      await s.dialog(buyer, buyerCid, 13, 0, 'buyFromUser', tradeId);
+      s.offset(6, 2, '*', 'endtime');
+      await s.dialog(buyer, buyerCid, 13, 0, 'buyFromUser', tradeId);
+      await s.query('update sys_city_trade set endtime = unix_timestamp() - 1 where id = ?', [
+        tradeId,
+      ]);
+      await s.query('update mem_city_trade set endtime = unix_timestamp() - 1 where id = ?', [
+        tradeId,
+      ]);
+      await s.tick('HandleTrade');
+    },
+    tables: {
+      mem_city_resource: {
+        ignore: ['gold_max', 'food_max', 'wood_max', 'rock_max', 'iron_max'],
+      },
+    },
+  },
+  {
+    name: 'union: applications, offices, invitations and leaving',
+    run: async (s) => {
+      const leader = await s.login(EXISTING_PLAYER);
+      const leaderCid = await lastCity(s, leader.uid);
+      await s.query('update mem_city_resource set gold = 100000 where cid = ?', [leaderCid]);
+      const created = (await s.command(leader, 'createUnion', '成员盟')) as unknown[];
+      const unionid = Number(created[0]);
+      s.alias(unionid, '<unionid>');
+      const other = await s.login('judingwan');
+      const otherName = String(
+        (await s.query<{ name: string }>('select name from sys_user where uid = ?', [other.uid]))[0]
+          ?.name ?? '',
+      );
+      await s.command(other, 'applyJoin', unionid);
+      await s.command(leader, 'getApplyList', 0);
+      await s.command(leader, 'acceptApply', 0, other.uid);
+      await s.command(leader, 'loadUnionMemberList');
+
+      await s.query('update sys_user set union_pos = 1 where uid = ?', [leader.uid]);
+      await s.command(leader, 'setUnionProvicy', other.uid, 2);
+      await s.command(other, 'demissionUnion');
+      await s.query(
+        'insert into sys_user_donate (uid, unionid, donate) values (?, ?, 500) on duplicate key update donate = 500',
+        [other.uid, unionid],
+      );
+      await s.command(other, 'upgradePosition', unionid);
+
+      await s.query('update sys_user set union_pos = 4 where uid = ?', [leader.uid]);
+      await s.command(leader, 'kickMember', otherName);
+      await s.command(leader, 'getKickLeavingTime');
+      s.mask(4, '*', 'lefttime');
+      await s.command(leader, 'cancelKickMember', other.uid);
+      await s.command(leader, 'getKickLeavingTime');
+      await s.command(other, 'leaveUnion');
+      await s.command(leader, 'leaveUnion');
+
+      await s.command(leader, 'inviteUser', otherName);
+      await s.command(leader, 'getInviteList');
+      await s.command(other, 'rejectInvite', unionid);
+      await s.command(leader, 'inviteUser', otherName);
+      await s.command(leader, 'cancelInvite', other.uid);
+      await s.command(other, 'applyJoin', unionid);
+      await s.command(other, 'cancelApply');
+    },
+  },
+  {
+    name: 'union: profile, external detail and military reports',
+    run: async (s) => {
+      const leader = await s.login(EXISTING_PLAYER);
+      const cid = await lastCity(s, leader.uid);
+      await s.query('update mem_city_resource set gold = 100000 where cid = ?', [cid]);
+      const created = (await s.command(leader, 'createUnion', '简介盟')) as unknown[];
+      const unionid = Number(created[0]);
+      s.alias(unionid, '<unionid>');
+      await s.command(leader, 'getUnionIntro');
+      await s.command(leader, 'modifyIntro', '新简介盟', '联盟简介', '联盟公告', 1);
+      await s.command(leader, 'getUnionIntro');
+      await s.command(leader, 'modifyIntro', '', '联盟简介', '联盟公告', 1);
+      await s.command(leader, 'loadUnionDetail', unionid);
+      await s.command(leader, 'loadUnionDetail', 900999);
+      await s.command(leader, 'getUnionReport', 0);
+      await s.query(
+        'insert into sys_union_report (unionid, type, enemy, time, description, origincid, origincity, happencid, happencity) values (?, 1, 0, unix_timestamp(), "军情详情", 1, "起源", 2, "目标")',
+        [unionid],
+      );
+      await s.command(leader, 'getUnionReport', 0);
+      const [report] = await s.query<{ id: string }>(
+        'select id from sys_union_report where unionid = ?',
+        [unionid],
+      );
+      await s.command(leader, 'getUnionReportDetail', Number(report?.id ?? 0));
+    },
+  },
+  {
+    name: 'union: diplomacy accept, reject and removal',
+    run: async (s) => {
+      const first = await s.login(EXISTING_PLAYER);
+      const firstCid = await lastCity(s, first.uid);
+      await s.query('update mem_city_resource set gold = 100000 where cid = ?', [firstCid]);
+      const firstUnion = Number(
+        ((await s.command(first, 'createUnion', '外交甲')) as unknown[])[0],
+      );
+      s.alias(firstUnion, '<unionid1>');
+      const second = await s.login('judingwan');
+      const secondCid = await lastCity(s, second.uid);
+      await s.query('update mem_city_resource set gold = 100000 where cid = ?', [secondCid]);
+      const secondUnion = Number(
+        ((await s.command(second, 'createUnion', '外交乙')) as unknown[])[0],
+      );
+      s.alias(secondUnion, '<unionid2>');
+
+      await s.command(first, 'addUnionRelationByName', 0, '外交乙');
+      await s.command(second, 'getRequestList');
+      await s.command(second, 'pendingFriendly', 1, firstUnion);
+      await s.command(first, 'getUnionRelation', 0);
+      await s.command(first, 'removeUnionRelation', 0, secondUnion);
+      await s.command(first, 'getUnionRelation', 1);
+
+      await s.command(first, 'addUnionRelationByName', 0, '外交乙');
+      await s.command(second, 'pendingFriendly', 0, firstUnion);
+      await s.command(first, 'addUnionRelationByName', 2, '外交乙');
+      await s.command(first, 'getUnionRelation', 2);
+      await s.command(first, 'removeUnionRelation', 2, secondUnion);
+      await s.command(first, 'getUnionRelation', 1);
+    },
+  },
+  {
+    name: 'union: city initialization, influence areas and store',
+    run: async (s) => {
+      const first = await s.login(EXISTING_PLAYER);
+      const firstCid = await lastCity(s, first.uid);
+      await s.query('update mem_city_resource set gold = 100000 where cid = ?', [firstCid]);
+      const firstUnion = Number(
+        ((await s.command(first, 'createUnion', '势力甲')) as unknown[])[0],
+      );
+      s.alias(firstUnion, '<unionid1>');
+      await s.command(first, 'loadUnionRewardData');
+      await s.query(
+        'insert into rank_union (uid, name, leader, member, famouscity, prestige) values (?, "势力甲", "长乐", 1, 0, 0)',
+        [firstUnion],
+      );
+      await s.query(
+        'insert into sys_union_reward (`rank`, unionid, uid, pos, time) values (1, ?, ?, 5, 0)',
+        [firstUnion, first.uid],
+      );
+      await s.command(first, 'getUnionReward', firstUnion);
+      s.offset(6, 0, 1, 'getrewardtime');
+      await s.command(first, 'getUnionReward', firstUnion);
+      await s.command(first, 'loadUnionRewardData');
+      s.offset(6, 1, 'getrewardtime');
+      await s.command(first, 'loadUnionChiefCityInfo');
+      await s.command(first, 'donateGoodsInitData');
+      await s.command(first, 'updatePositionInitData');
+      await s.command(first, 'getUnionStoreInfo');
+      await s.command(first, 'getSelfUnionArea');
+      await s.command(first, 'getFriendlyUnionArea');
+      await s.command(first, 'getHostileUnionArea');
+      await s.command(first, 'getOtherUnionArea', firstUnion);
+
+      await s.query(
+        'insert into sys_city (cid, uid, name, type) values (900001, ?, "测试郡城", 2)',
+        [first.uid],
+      );
+      const second = await s.login('judingwan');
+      const secondCid = await lastCity(s, second.uid);
+      await s.query('update mem_city_resource set gold = 100000 where cid = ?', [secondCid]);
+      await s.query('insert into sys_building (cid, xy, bid, level) values (?, 110, 12, 2)', [
+        secondCid,
+      ]);
+      const secondUnion = Number(
+        ((await s.command(second, 'createUnion', '势力乙')) as unknown[])[0],
+      );
+      s.alias(secondUnion, '<unionid2>');
+      await s.command(first, 'addUnionRelationByName', 0, '势力乙');
+      await s.command(second, 'pendingFriendly', 1, firstUnion);
+      await s.command(first, 'getFriendlyUnionArea');
+      await s.query('update sys_union_relation set type = 2, time = 1');
+      await s.command(first, 'getHostileUnionArea');
+      await s.command(first, 'getSelfUnionInfo');
+      await s.command(first, 'getSelfUnionInfo2');
+      await s.command(first, 'markCity', 900001);
+      await s.command(first, 'getOtherUnionArea', firstUnion);
+    },
+  },
 ];
+
+async function seedScoutPatrol(
+  s: Side,
+  attacker: number,
+  defender: number,
+  draw = false,
+): Promise<void> {
+  const session = await s.login(EXISTING_PLAYER);
+  const uid = session.uid;
+  const cid = await lastCity(s, uid);
+  const targetCid = 188128;
+  const victimUid = 1002;
+  await s.query('delete from sys_troops where uid = ?', [uid]);
+  await s.query('delete from sys_report where uid in (?, ?)', [uid, victimUid]);
+  await s.query(
+    'insert into sys_alarm (uid, report) values (?, 1), (?, 1) on duplicate key update report = 1',
+    [uid, victimUid],
+  );
+  await s.query('delete from sys_city_soldier where cid = ?', [targetCid]);
+  await s.query('insert into sys_city_soldier (cid, sid, count) values (?, 3, ?)', [
+    targetCid,
+    defender,
+  ]);
+  await s.query(
+    `insert into sys_city_technic (cid, tid, level) values (?, 7, 10)
+      on duplicate key update level = 10`,
+    [cid],
+  );
+  if (draw) await s.query('update cfg_soldier set ap = 0, dp = 0, hp = 1 where sid = 3');
+  await s.query(
+    `insert into sys_troops
+      (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
+     values (?, ?, 0, ?, 2, 0, unix_timestamp() - 600, 600, unix_timestamp() - 1, ?, '0', 0, 0)`,
+    [uid, cid, targetCid, `1,3,${attacker}`],
+  );
+  s.rng([1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
+  await s.tick('HandleTroop');
+  s.stopRng();
+  await s.query('delete from sys_troops where uid = ?', [uid]);
+  await s.query('delete from sys_report where uid in (?, ?)', [uid, victimUid]);
+}
+
+async function seedPlayerCityCapture(
+  s: Side,
+  targetType: number,
+  governmentLevel: number,
+  withPrerequisites: boolean,
+  relocate = false,
+): Promise<void> {
+  const session = await s.login(EXISTING_PLAYER);
+  const uid = session.uid;
+  const cid = await lastCity(s, uid);
+  const target = 3005;
+  await s.query('update sys_user set nobility = 1 where uid = ?', [uid]);
+  await s.query('update mem_world set type = 0, ownercid = ? where wid = 35', [target]);
+  await s.query(
+    `insert into sys_city (cid, uid, name, type, state, province)
+     values (?, 1002, '被占城', ?, 0, 10)`,
+    [target, targetType],
+  );
+  await s.query(
+    `insert into sys_building (cid, xy, bid, level)
+     values (?, 120, 6, ?), (?, 121, 5, 15), (?, 10, 1, 8), (?, 99, 1, 8)`,
+    [target, governmentLevel, target, target, target],
+  );
+  await s.query(
+    `insert into mem_city_resource (cid, people, food, wood, rock, iron, gold, morale, complaint, lastupdate)
+     values (?, 100, 2000, 3000, 4000, 5000, 6000, 0, 0, 0)`,
+    [target],
+  );
+  await s.query(
+    `insert into sys_city_hero (hid, uid, name, sex, face, cid, state, level, command_base,
+       affairs_base, bravery_base, wisdom_base, loyalty, herotype)
+     values (900101, 1002, '俘虏将', 0, 0, ?, 1, 10, 50, 60, 60, 60, 0, 0)`,
+    [target],
+  );
+  await s.query('insert into sys_city_soldier (cid, sid, count) values (?, 3, 5)', [target]);
+  if (withPrerequisites) {
+    for (let i = 0; i < 4; i++) {
+      const prerequisite = 900201 + i;
+      await s.query(
+        "insert into sys_city (cid, uid, name, type, state, province) values (?, ?, '前置县城', 1, 0, 10)",
+        [prerequisite, uid],
+      );
+      await s.query('update mem_world set type = 0, ownercid = ? where wid = ?', [
+        prerequisite,
+        36 + i,
+      ]);
+    }
+  }
+  if (relocate) {
+    await s.query('delete from sys_city where uid = 1002 and cid <> ?', [target]);
+    await s.query(
+      'update mem_world set state = 1 where province = 1 and type = 1 and wid <> 499499',
+    );
+    await s.query(
+      'insert into mem_world (wid, type, ownercid, state, level, maxlevel, province, jun) values (499499, 1, 0, 0, 1, 1, 1, 1)',
+    );
+    await s.query(
+      `insert into sys_city_hero (hid, uid, name, sex, face, cid, state, level, command_base,
+        affairs_base, bravery_base, wisdom_base, loyalty, herotype)
+       values (900102, 1002, '迁城君主', 0, 0, ?, 0, 1, 50, 1, 1, 1, 100, 1000)`,
+      [target],
+    );
+    const defenderTroop = `insert into sys_troops
+      (id, uid, cid, hid, targetcid, task, state, startcid, starttime, pathtime, endtime, soldiers, resource)
+      values (?, 1002, ?, 0, ?, 4, ?, ?, unix_timestamp() - 600, 600, unix_timestamp() + 600, '1,1,20', '0')`;
+    await s.query(defenderTroop, [900301, target, 188128, 0, 0]);
+    await s.query(defenderTroop, [900302, 188128, target, 3, target]);
+    await s.query(defenderTroop, [900303, 188128, target, 3, target]);
+    await s.query(
+      'insert into sys_gather (wid, troopid, fooduse, level, starttime) values (35, 900301, 0, 1, 0)',
+    );
+  }
+  await s.query(
+    `insert into sys_troops
+      (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
+     values (?, ?, 0, ?, 4, 0, unix_timestamp() - 600, 600, unix_timestamp() - 1, '1,1,30000', '0', 0, 0)`,
+    [uid, cid, target],
+  );
+  s.rng([1, 1, 0, 0, 1, 2, 1, 1, 1, 1]);
+  await s.tick('HandleTroop');
+  await s.query(
+    'update sys_battle set starttime = 0 where id = (select id from mem_battle where attackcid = ?)',
+    [cid],
+  );
+  await s.query(
+    'update mem_battle set wallhp = 0, nexttime = unix_timestamp() - 1 where attackcid = ?',
+    [cid],
+  );
+  await s.tick('HandleBattle');
+  // A zero starttime deterministically selects the >86400 robbery branch on both engines; using
+  // unix_timestamp() here made the outcome depend on whether the next tick crossed a second.
+  await s.query(
+    'update sys_battle set starttime = 0 where id = (select id from mem_battle where attackcid = ?)',
+    [cid],
+  );
+  await s.query('update mem_battle set nexttime = unix_timestamp() - 1 where attackcid = ?', [cid]);
+  await s.tick('HandleBattle');
+  s.stopRng();
+}
+
 function wid2cid(wid: number): number {
   const y = Math.floor(wid / 10000) * 10 + Math.floor((wid % 100) / 10);
   const x = Math.floor((wid % 10000) / 100) * 10 + (wid % 10);

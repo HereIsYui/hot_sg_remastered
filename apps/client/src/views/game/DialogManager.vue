@@ -8,6 +8,7 @@ import {
   BUILDING_GOVERNMENT,
   BUILDING_GROUND,
   BUILDING_HOTEL,
+  BUILDING_MARKET,
   BUILDING_STORE,
   BUILDING_WALL,
 } from '../../game/cityGrid';
@@ -34,6 +35,7 @@ import HotelDialog from '../hotel/HotelDialog.vue';
 import MailDialog from '../mail/MailDialog.vue';
 import MailDetailDialog from '../mail/MailDetailDialog.vue';
 import MailWriteDialog from '../mail/MailWriteDialog.vue';
+import MarketDialog from '../market/MarketDialog.vue';
 import ModifyPasswordDialog from '../system/ModifyPasswordDialog.vue';
 import OpenLockDialog from '../system/OpenLockDialog.vue';
 import BuyAndUseGoodsDialog from '../shop/BuyAndUseGoodsDialog.vue';
@@ -183,6 +185,14 @@ function choose(action: 'all' | 'level') {
     <BarnDialog
       v-else-if="dialog?.name === 'building' && ownDialog(dialog.building, BUILDING_BARN)"
       :key="`barn ${buildingKey}`"
+      :x="0"
+      :y="0"
+      :building="dialog.building"
+      @destroy-panel="destroy = $event"
+    />
+    <MarketDialog
+      v-else-if="dialog?.name === 'building' && ownDialog(dialog.building, BUILDING_MARKET)"
+      :key="`market ${buildingKey}`"
       :x="0"
       :y="0"
       :building="dialog.building"

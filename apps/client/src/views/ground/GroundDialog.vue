@@ -38,6 +38,7 @@ type Popup = { name: SubName; data: unknown } | { name: 'maneuver' };
 
 const game = useGame();
 const popup = shallowRef<Popup | null>(null);
+const maneuver = shallowRef<InstanceType<typeof ManeuverDialog> | null>(null);
 /** The sub-dialog awaiting its `get*` reply, and the ttype that reply must carry. */
 let pending: { name: SubName; ttype: number } | null = null;
 
@@ -48,6 +49,10 @@ function request(send: (cmd: string, args: CommandArg[], ttype?: number) => void
 }
 
 function onReplyTtype(data: unknown[], ttype: number) {
+  if (ttype === 1 || ttype === 2) {
+    maneuver.value?.onReply(data, ttype);
+    return;
+  }
   if (!pending || pending.ttype !== ttype) return;
   popup.value = { name: pending.name, data };
   pending = null;
@@ -106,7 +111,12 @@ function onReplyTtype(data: unknown[], ttype: number) {
         @send="(c, a) => (send(c, a, 0), (popup = null))"
         @close="popup = null"
       />
-      <ManeuverDialog v-else-if="popup?.name === 'maneuver'" @close="popup = null" />
+      <ManeuverDialog
+        v-else-if="popup?.name === 'maneuver'"
+        ref="maneuver"
+        @send="(c, a, t) => send(c, a, t)"
+        @close="popup = null"
+      />
     </template>
   </UpgradeBuildingDialog>
 </template>

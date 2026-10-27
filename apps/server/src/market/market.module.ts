@@ -1,8 +1,23 @@
 import { Module } from '@nestjs/common';
+import { CityModule } from '../city/city.module';
+import { TaskModule } from '../task/task.module';
+import { AutoTransTick } from './auto-trans.tick';
 import { MarketCommands } from './market.commands';
+import { MarketRules } from './market-rules.service';
+import { MerchantCommands } from './merchant.commands';
+import { PlayerTradeCommands } from './player-trade.commands';
+import { TradeTick } from './trade.tick';
 
-/** MarketFunc.php wave 4: the 自动运输 scheduling slice; the trade rows and merchants later. */
+/** MarketFunc.php: automatic transport, merchant and player trades, and their settlement. */
 @Module({
-  providers: [MarketCommands],
+  imports: [CityModule, TaskModule],
+  providers: [
+    MarketCommands,
+    MarketRules,
+    MerchantCommands,
+    PlayerTradeCommands,
+    AutoTransTick,
+    TradeTick,
+  ],
 })
 export class MarketModule {}

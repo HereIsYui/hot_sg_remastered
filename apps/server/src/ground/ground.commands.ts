@@ -594,8 +594,7 @@ export class GroundCommands {
 
   /**
    * getManeuverResult($mid): `[0]` while the 演习 is still running, else `[1, maneuver]` with the
-   * settled row (which is then deleted). Kept wired for when the battle engine settles maneuvers;
-   * with startManeuver refusing, no row is ever queued, so this only ever answers `[0]`.
+   * settled row (which is then deleted), including its generated combat stats and loss strings.
    */
   @DialogCommand()
   async getManeuverResult(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {

@@ -82,8 +82,10 @@ export class BattleEngineService {
     ).rows[0];
     if (!row) return null;
 
-    const attackadd = await this.buildAdd(String(row.attacksoldiers ?? ''));
-    const resistadd = await this.buildAdd(String(row.resistsoldiers ?? ''));
+    const attackadd =
+      String(row.attackadd ?? '') || (await this.buildAdd(String(row.attacksoldiers ?? '')));
+    const resistadd =
+      String(row.resistadd ?? '') || (await this.buildAdd(String(row.resistsoldiers ?? '')));
 
     const maneuver: ManeuverRow = {
       attacksoldiers: String(row.attacksoldiers ?? ''),
@@ -104,7 +106,8 @@ export class BattleEngineService {
     if (result.fought) {
       await sql`update mem_maneuver set state = 1, result = ${result.rawEnd}, round = ${result.rawRound},
         attackdie = ${array2troop(result.attackLost)},
-        resistdie = ${array2troop(result.resistLost)} where id = ${id}`.execute(db);
+        resistdie = ${array2troop(result.resistLost)}, attackadd = ${attackadd},
+        resistadd = ${resistadd} where id = ${id}`.execute(db);
     }
     return result;
   }
@@ -118,14 +121,11 @@ export class BattleEngineService {
   }
 
   /**
-   * battleInfo's "no precomputed add" branch: build a `sid,type,range,ap,dp,hp,speed,ap,dp,hp,uid`
+   * battleInfo's "no precomputed add" branch: build a `sid,type,range,ap,dp,hp,speed,ap,dp,hp`
    * stat string for a troop from `cfg_soldier`, exactly as the original composed `$info`.
    *
-   * Unlike the original it does NOT persist the string: this difftest environment's `mem_maneuver`
-   * has no `attackadd`/`resistadd`/`wallhp` columns (the 易语言 production schema's extra columns
-   * are not in the shipped dump), so the legacy `update mem_maneuver set attackadd=...` dies on a
-   * missing field and the new side's write would too — the 演习 stats are rebuilt from cfg_soldier
-   * on every settle instead. The attacker's sids are multiplied by 100 downstream (in battleInfo).
+   * Missing stat strings are rebuilt from cfg_soldier and persisted with the result; existing
+   * strings are retained. Attacker sids are multiplied by 100 downstream (in battleInfo).
    */
   private async buildAdd(soldiers: string): Promise<string> {
     const db = this.scope.db;
@@ -144,7 +144,7 @@ export class BattleEngineService {
       const s = bySid.get(sid);
       if (!s) continue;
       const sidtype = SID_TYPE[sid] ?? 0;
-      // sid,type,range,ap,dp,hp,speed,ap,dp,hp,uid(0) — the exact field order battleInfo wrote.
+      // battleInfo's persisted string omits uid; its in-memory combatant still defaults uid to 0.
       parts.push(
         [
           sid,
@@ -157,7 +157,6 @@ export class BattleEngineService {
           phpNum(s.ap),
           phpNum(s.dp),
           phpNum(s.hp),
-          0,
         ].join(','),
       );
     }

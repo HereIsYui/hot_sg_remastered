@@ -19,6 +19,7 @@ import { useChatStore } from '../stores/chat';
 import { cityPosition, parseCities, useUserStore } from '../stores/user';
 import { gameAlert, setAlertLabels, showAlert } from '../ui/alert';
 import { BUILDING_COLLEGE } from './cityGrid';
+import { chatReplyError } from './chat';
 import { UseGoodsType } from './goods';
 import { GuideManager } from './guide';
 import { loadLoginPrefs, saveLoginPrefs, type LoginPrefs } from './loginPrefs';
@@ -224,16 +225,57 @@ export class Game {
     );
     this.push.connect();
     const chat = useChatStore(this.pinia);
+    chat.$reset();
+    this.push.onReply(PushProc.CHAT_LOGIN, (data) => {
+      chat.setKeywords((data as Record<string, unknown> | null)?.keywords);
+    });
+    this.push.onReply(PushProc.CHAT_GET_KEY_WORDS, (data) => {
+      chat.setKeywords((data as Record<string, unknown> | null)?.keywords);
+    });
     this.push.onReply(PushProc.CHAT_PUBLIC_CHAT, (data) => {
       const row = (data ?? {}) as Record<string, unknown>;
-      if (row.ok)
-        chat.push({ fromuser: String(row.fromuser ?? ''), msg: String(row.msg ?? ''), self: true });
+      if (row.ok) chat.receive('world', row, true);
+      else chat.system(chatReplyError(row), 'world');
     });
-    this.push.on(PushProc.NOTIFY_PUBLIC_CHAT, (data) => {
+    this.push.onReply(PushProc.CHAT_UNION_CHAT, (data) => {
       const row = (data ?? {}) as Record<string, unknown>;
-      chat.push({ fromuser: String(row.fromuser ?? ''), msg: String(row.msg ?? '') });
+      if (row.ok) chat.receive('union', row, true);
+      else chat.system(chatReplyError(row), 'union');
+    });
+    this.push.onReply(PushProc.CHAT_PRIVATE_CHAT, (data) => {
+      const row = (data ?? {}) as Record<string, unknown>;
+      if (row.ok) chat.receive('private', row, true);
+      else chat.system(chatReplyError(row), 'private');
+    });
+    this.push.on(PushProc.NOTIFY_PUBLIC_CHAT, (data) => chat.receive('world', data));
+    this.push.on(PushProc.NOTIFY_UNION_CHAT, (data) => chat.receive('union', data));
+    this.push.on(PushProc.NOTIFY_PRIVATE_CHAT, (data) => chat.receive('private', data));
+    this.push.on(PushProc.NOTIFY_UNION_EVENT, (data) => chat.receive('union', data));
+    this.push.on(PushProc.NOTIFY_WAR_EVENT, (data) => {
+      const row = (data ?? {}) as Record<string, unknown>;
+      if (String(row.msg ?? '')) chat.receive('war', row);
+    });
+    this.push.onReply(PushProc.CHAT_CONTROL_CHANNEL, (data) => {
+      const row = (data ?? {}) as Record<string, unknown>;
+      if (!row.error) chat.setChannelEnabled(Number(row.channel), Boolean(row.enabled));
+      else chat.system(chatReplyError(row));
+    });
+    this.push.on(PushProc.NOTIFY_ADD_KEY_WORD, (data) => {
+      chat.addKeyword(String((data as Record<string, unknown> | null)?.word ?? ''));
+    });
+    this.push.on(PushProc.NOTIFY_DEL_KEY_WORD, (data) => {
+      chat.removeKeyword(String((data as Record<string, unknown> | null)?.word ?? ''));
+    });
+    this.push.onReply(PushProc.NOTIFY_ADD_KEY_WORD, (data) => {
+      chat.setKeywords((data as Record<string, unknown> | null)?.keywords);
+      chat.system(chatReplyError(data));
+    });
+    this.push.onReply(PushProc.NOTIFY_DEL_KEY_WORD, (data) => {
+      chat.setKeywords((data as Record<string, unknown> | null)?.keywords);
+      chat.system(chatReplyError(data));
     });
     this.push.request(PushProc.CHAT_LOGIN, {});
+    this.push.request(PushProc.CHAT_GET_KEY_WORDS, {});
   }
 
   loadUserInfo(): void {

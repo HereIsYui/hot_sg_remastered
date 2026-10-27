@@ -125,7 +125,10 @@ export function offsetOf(value: unknown, ctx: SideContext): unknown {
   // its own end time). Its value is the same on both sides; as minutes from each side's start
   // it would round differently when the sides started either side of a minute boundary.
   if (Number(canonical) < ctx.start - STALE_SECONDS) return canonical;
-  const minutes = Math.round((Number(canonical) - ctx.start) / 60);
+  const seconds = Number(canonical) - ctx.start;
+  // The two engines execute sequentially. Shift the rounding boundary by one second so identical
+  // durations do not differ merely because the second request began on the next second.
+  const minutes = Math.round((seconds + Math.sign(seconds)) / 60);
   return `<now${minutes >= 0 ? '+' : ''}${minutes}m>`;
 }
 

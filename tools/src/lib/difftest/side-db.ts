@@ -181,25 +181,93 @@ export class SideDb {
   async diff(table: string): Promise<TableDelta> {
     const live = q(table);
     const snap = q(SNAP_PREFIX + table);
-    const select = async (from: string, other: string) => {
+    const select = async (from: string, other: string, chunk?: number) => {
       const m = this.matchSql(table, 'a', 'b');
       if (!m.join) {
         return this.query(
           `select a.* from ${from} a where not exists (select 1 from ${other} b where ${m.same})`,
         );
       }
+      const key = q(this.info(table).primaryKey[0]!);
+      const range =
+        chunk === undefined
+          ? ''
+          : `and a.${key} > ${chunk * 10000} and a.${key} <= ${(chunk + 1) * 10000}`;
       return this.query(
-        `select a.* from ${from} a left join ${other} b on ${m.join} where ${m.missing} or not (${m.same})`,
+        `select a.* from ${from} a left join ${other} b on ${m.join}
+         where (${m.missing} or not (${m.same})) ${range}`,
       );
     };
+    const key = this.info(table).primaryKey;
+    if (key.length === 1) {
+      const [counts] = await this.query<{ live: string; snap: string }>(
+        `select (select count(*) from ${live}) as live, (select count(*) from ${snap}) as snap`,
+      );
+      if (Math.max(Number(counts?.live), Number(counts?.snap)) > 10000) {
+        const chunks = await this.changedChunks(table, key[0]!);
+        const added: Row[] = [];
+        const removed: Row[] = [];
+        for (const chunk of chunks) {
+          added.push(...(await select(live, snap, chunk)));
+          removed.push(...(await select(snap, live, chunk)));
+        }
+        return { added, removed };
+      }
+    }
     return { added: await select(live, snap), removed: await select(snap, live) };
+  }
+
+  /** Locate changed primary-key ranges with the same CRC32 row fingerprints used by snapshots. */
+  private async changedChunks(table: string, key: string): Promise<number[]> {
+    const columns = this.info(table).columns;
+    const values = columns.map((c) => `ifnull(${q(c)}, char(0))`).join(', ');
+    const fingerprint = (name: string) => `select floor((${q(key)} - 1) / 10000) as chunk,
+      count(*) as n, coalesce(sum(crc32(concat_ws(char(31), ${values}))), 0) as h
+      from ${q(name)} group by chunk`;
+    const live = await this.query<{ chunk: number; n: string; h: string }>(fingerprint(table));
+    const snap = await this.query<{ chunk: number; n: string; h: string }>(
+      fingerprint(SNAP_PREFIX + table),
+    );
+    const signatures = new Map<number, string>();
+    const chunks = new Set<number>();
+    for (const row of live) {
+      signatures.set(Number(row.chunk), `${row.n}:${row.h}`);
+      chunks.add(Number(row.chunk));
+    }
+    for (const row of snap) chunks.add(Number(row.chunk));
+    const snapSignatures = new Map(
+      snap.map((row) => [Number(row.chunk), `${row.n}:${row.h}`] as const),
+    );
+    return [...chunks]
+      .filter((chunk) => signatures.get(chunk) !== snapSignatures.get(chunk))
+      .sort((a, b) => a - b);
   }
 
   async restore(table: string, autoIncrement?: number | null): Promise<void> {
     const live = q(table);
     const snap = q(SNAP_PREFIX + table);
     const m = this.matchSql(table, 't', 's');
-    if (!m.join) {
+    const key = this.info(table).primaryKey;
+    let large = false;
+    if (key.length === 1) {
+      const [counts] = await this.query<{ live: string; snap: string }>(
+        `select (select count(*) from ${live}) as live, (select count(*) from ${snap}) as snap`,
+      );
+      large = Math.max(Number(counts?.live), Number(counts?.snap)) > 10000;
+    }
+    if (large) {
+      const id = q(key[0]!);
+      const chunks = await this.changedChunks(table, key[0]!);
+      const ranges = chunks.map(
+        (chunk) => `${id} > ${chunk * 10000} and ${id} <= ${(chunk + 1) * 10000}`,
+      );
+      // Delete every changed block before inserting any: a newly created row can hold a unique
+      // business key that belongs to an older snapshot id in another primary-key block.
+      for (const range of ranges) await this.conn.query(`delete from ${live} where ${range}`);
+      for (const range of ranges) {
+        await this.conn.query(`replace into ${live} select * from ${snap} where ${range}`);
+      }
+    } else if (!m.join) {
       await this.conn.query(`delete from ${live}`);
       await this.conn.query(`insert into ${live} select * from ${snap}`);
     } else {

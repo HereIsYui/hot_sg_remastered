@@ -15,7 +15,14 @@ import { RandomService } from '../core/random.service';
 import { ReportService } from '../core/report.service';
 import { TaskRules } from '../core/task-rules.service';
 import { DbScope } from '../db/database.module';
-import { type ArrivalArgs, type BattleArrivalDeps, handleBattleArrival } from './battle-arrival';
+import {
+  battleAdd,
+  defcityadd,
+  type ArrivalArgs,
+  type BattleArrivalDeps,
+  type SideInfo,
+  handleBattleArrival,
+} from './battle-arrival';
 
 type Row = Record<string, unknown>;
 
@@ -34,6 +41,20 @@ export class BattleArrivalService {
   /** cfg_js.php HandleTroop task-3/4/9 arrival for one due troop (state 0). */
   async handle(args: ArrivalArgs): Promise<void> {
     await handleBattleArrival(this.deps(), args);
+  }
+
+  async buildBattleAdd(troop: Row, type: number, battleid: number, task = 0): Promise<SideInfo> {
+    return battleAdd(this.deps(), troop, type, battleid, task);
+  }
+
+  async buildDefCityAdd(
+    uid: number,
+    cid: number,
+    type: number,
+    battleid: number,
+    task = 0,
+  ): Promise<SideInfo> {
+    return defcityadd(this.deps(), uid, cid, type, battleid, task);
   }
 
   private deps(): BattleArrivalDeps {

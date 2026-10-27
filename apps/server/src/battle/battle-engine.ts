@@ -17,10 +17,8 @@ import { phpIntval, phpNum } from '../core/php';
 import {
   type Combatant,
   type SoldierInfo,
-  SoBitSo,
   action,
   array2troop,
-  checkBattleEnd,
   checkPos,
   getArraySub,
   getTarget,
@@ -200,15 +198,7 @@ export function upManeuver(
           const maxpos = Math.max(...posArray[0]!.values());
           const state = self.state;
           const speed = self.speed;
-          const shoot = self.shoot;
-          const cnt = self.cnt;
           const type = self.type;
-          const ap = self.ap;
-          const hp = self.hp;
-          const dp = self.dp;
-          const act = self.act;
-          const def = self.def;
-          const blood = self.blood;
           const pos = self.pos;
 
           if (type < 13 || type === 15) {
@@ -218,59 +208,11 @@ export function upManeuver(
             self.pos = endpos;
             posArray[state]!.set(sid, endpos);
 
-            const targetSid = getTarget(order, self, type, rand);
-            const tInfo = targetSid ? order.get(targetSid) : undefined;
-            // NOTE (difftest): legacy `getTarget` returns a bare sid, yet upManeuver then reads
-            // `$tInfo['pos']` / `['cnt']` / `['blood']` as if it were the combatant. In PHP that
-            // indexes an int (NULL with a warning), which would divide by zero — so the LIVE game
-            // must be resolving the sid back to its `$soldierInfo[$sid]` entry. We do that here
-            // (`order.get(targetSid)`), the only interpretation that yields a working battle. If a
-            // difftest shows the legacy server genuinely degenerates, pin that behaviour instead.
-
-            // Attack: only if a target was found and it is within range.
-            const range = tInfo ? Math.abs(endpos - tInfo.pos) : Infinity;
-            if (tInfo && range <= shoot) {
-              let sinact =
-                (ap * ap) / (tInfo.ap + tInfo.dp) +
-                (act * act) /
-                  (tInfo.ap + tInfo.act + tInfo.def + tInfo.dp + tInfo.hp + tInfo.blood);
-              sinact *= SoBitSo(type, tInfo.type);
-              if (shoot > 600) {
-                if (range === 0) sinact /= 2;
-                else if (range <= shoot / 2) sinact *= 2;
-              }
-              let allact = sinact * cnt;
-              if (allact > tInfo.blood * tInfo.cnt) allact = (tInfo.blood + tInfo.hp) * tInfo.cnt;
-              const lost = Math.round(allact / (tInfo.blood + tInfo.hp));
-              tInfo.cnt -= lost;
-              if (tInfo.cnt <= 0) {
-                const deadState = state === 1 ? 0 : 1;
-                order.delete(targetSid);
-                posArray[deadState]!.delete(targetSid);
-                if (posArray[deadState]!.size === 0) end = checkBattleEnd(deadState);
-              }
-
-              // Counterattack (the target hits back, if still alive, in range, not the wall).
-              if (range <= tInfo.shoot && tInfo.cnt > 0 && self.cnt > 0 && tInfo.type !== 18) {
-                let backsinact =
-                  (tInfo.ap * tInfo.ap) / (ap + dp) +
-                  (tInfo.act * tInfo.act) / (ap + act + def + dp + hp + blood);
-                backsinact *= SoBitSo(tInfo.type, type);
-                if (tInfo.shoot > 600) {
-                  if (range === 0) backsinact /= 4;
-                  else if (range <= tInfo.shoot / 2) backsinact /= 2;
-                }
-                let backallact = backsinact * tInfo.cnt;
-                if (backallact > (blood + hp) * cnt) backallact = (blood + hp) * cnt;
-                const backlost = Math.round(backallact / (blood + hp));
-                self.cnt -= backlost;
-                if (self.cnt <= 0) {
-                  order.delete(sid);
-                  posArray[state]!.delete(sid);
-                  if (posArray[state]!.size === 0) end = checkBattleEnd(state);
-                }
-              }
-            }
+            getTarget(order, self, type, rand);
+            // Legacy assigns getTarget's bare sid to $tInfo, then reads that integer as an array.
+            // Its target position/stats therefore evaluate to null. Keep the movement and RNG but
+            // do not invent a combatant lookup: the PHP patrol loop cannot inflict casualties and
+            // an opposed engagement reaches the 40-round draw, as the differential test verifies.
           }
           if (end !== 3) break;
         }

@@ -14,6 +14,8 @@ export const TICK_SLOTS = {
   UpdateUsersTechnic: 50,
   UpdateUsersSoldier: 60,
   UpdateUsersDeinforce: 70,
+  HandleAutoTrans: 80,
+  HandleTrade: 90,
 } as const;
 
 export type TickFunction = keyof typeof TICK_SLOTS;

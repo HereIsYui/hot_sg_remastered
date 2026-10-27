@@ -39,7 +39,7 @@ const SERVER_PORT = Number(process.env.HOT_DIFFTEST_PORT ?? 3998);
 const MAX_REPORT_LINES = 40;
 
 const args = process.argv.slice(2);
-const resnapshot = args.includes('--resnapshot');
+let resnapshot = args.includes('--resnapshot');
 const dump = args.includes('--dump');
 const filter = args.find((a) => !a.startsWith('--'));
 const selected = cases.filter((c) => !filter || c.name.includes(filter));
@@ -93,7 +93,32 @@ try {
 }
 process.exitCode = failed ? 1 : 0;
 
+async function ensureManeuverCombatColumns(db: SideDb): Promise<boolean> {
+  const existing = await db.query<{ column: string }>(
+    `select column_name as \`column\` from information_schema.columns
+     where table_schema = database() and table_name = 'mem_maneuver'`,
+  );
+  const names = new Set(existing.map((row) => row.column));
+  if (names.has('attackadd') && names.has('resistadd') && names.has('wallhp')) return false;
+  if (names.has('attackadd') || names.has('resistadd') || names.has('wallhp')) {
+    throw new Error(`${db.label}: mem_maneuver has an incomplete combat-column set`);
+  }
+  await db.query(
+    `alter table mem_maneuver
+      add column attackadd char(255) character set ascii not null default '',
+      add column resistadd char(255) character set ascii not null default '',
+      add column wallhp bigint not null default 0`,
+  );
+  return true;
+}
+
 async function prepareSnapshots(): Promise<void> {
+  // The production 易语言 backend expects these columns, but the shipped PHP dump omitted them.
+  // Restore them on both test databases so legacy patrols actually fight instead of failing the
+  // mem_maneuver insert and silently returning its default victory.
+  for (const db of [legacyDb, newDb]) {
+    if (await ensureManeuverCombatColumns(db)) resnapshot = true;
+  }
   if (!resnapshot && (await legacyDb.hasSnapshot()) && (await newDb.hasSnapshot())) {
     for (const db of [legacyDb, newDb]) {
       const restored = await db.resetToSnapshot();

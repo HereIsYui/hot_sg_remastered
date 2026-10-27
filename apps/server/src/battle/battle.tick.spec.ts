@@ -62,6 +62,34 @@ describe('BattleTick.handleBattle', () => {
     expect(update).toBeUndefined();
   });
 
+  it('persists an opposed 演习 result and its generated stat strings', async () => {
+    const row = {
+      id: 1,
+      attacksoldiers: '1,3,100',
+      resistsoldiers: '1,3,5',
+      attackadd: '',
+      resistadd: '',
+      wallhp: 0,
+    };
+    const { tick, db } = build([
+      { match: /select \* from mem_maneuver where state = 0/i, rows: [row] },
+      { match: /select \* from mem_maneuver where id = /i, rows: [row] },
+      {
+        match: /select \* from cfg_soldier where sid in/i,
+        rows: [{ sid: 3, type: 3, range: 20, ap: 20, dp: 20, hp: 100, speed: 3000 }],
+      },
+      NO(/from mem_battle/i),
+    ]);
+
+    await tick.handleBattle();
+
+    const update = db.executed.find((q) => /update mem_maneuver set state = /i.test(q.sql));
+    expect(update).toBeDefined();
+    expect(update!.parameters).toContain('3,3,20,20,20,100,3000,20,20,100');
+    expect(update!.parameters).toContain(3);
+    expect(update!.parameters).toContain(40);
+  });
+
   it('deletes a due mem_battle whose sys_battle is already finished (state 1)', async () => {
     const { tick, db } = build([
       NO(/select \* from mem_maneuver where state = 0/i),

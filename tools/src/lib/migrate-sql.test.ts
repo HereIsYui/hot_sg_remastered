@@ -40,6 +40,8 @@ describe('migrateDump', () => {
     const out = migrateDump('/*!40101 SET NAMES utf8 */;');
     expect(out).toContain("SET SESSION sql_mode='';");
     expect(out).toContain('/*!40101 SET NAMES utf8mb4 */;');
+    expect(out).toContain('ADD COLUMN `attackadd`');
+    expect(out).toContain('ADD COLUMN `wallhp`');
     expect(out.trimEnd().endsWith('SET foreign_key_checks=1;')).toBe(true);
   });
 });

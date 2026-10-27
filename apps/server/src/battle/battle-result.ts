@@ -18,8 +18,9 @@
 
 import { Logger } from '@nestjs/common';
 import { sql } from 'kysely';
+import { GameError } from '../common/game-error';
 import { sprintf } from '../common/sprintf';
-import { cid2wid } from '../core/city-rules.service';
+import { cid2wid, wid2cid } from '../core/city-rules.service';
 import { phpIntval, phpNum, phpString } from '../core/php';
 import { countDescIndex, getArraySub, sol2people, troop2array } from './battle-math';
 import type { Database } from '../db/database.module';
@@ -33,6 +34,7 @@ export interface BattleResultDeps {
   cell(q: ReturnType<typeof sql<Row>>): Promise<unknown>;
   lang: {
     report(key: string): string;
+    reportArr(key: string, index: number): string;
     row(n: string): string;
     battle(key: string): string;
     /** `$GLOBALS['battle'][key][index]` — the array lang values (citytype, juewei, ...). */
@@ -75,6 +77,8 @@ export interface BattleResultDeps {
   mtRand(min: number, max: number): number;
   /** cfg usepeople table for sol2people, and fooduse/usepeople for the food recompute. */
   usepeople: Record<number, number>;
+  /** cfg_soldier carry table for the surviving army's resource capacity. */
+  carry: Record<number, number>;
 }
 
 const logger = new Logger('BattleResult');
@@ -353,6 +357,7 @@ export async function getBattleResult(
     dusepeople,
     nobility,
     userInfo1,
+    userInfo2,
     wid,
     bbid,
     outcome,
@@ -380,19 +385,16 @@ export async function getBattleResult(
   // ───────── reports ─────────
   const mcityname = await cityRules.getNamePosition(cid, type);
   const tcityname = await cityRules.getNamePosition(resistcid, type);
-  let con = reportTitle(
-    lang,
-    mcityname,
-    tcityname,
-    phpIntval(mtroop.task),
-    phpIntval(mtroop.state),
-  );
-  const battype = type === 0 ? (resistuid === 897 ? 1 : 2) : 0;
-  con += lang.row(String(battype));
+  let con = '';
 
   const myw = end === 0 ? '胜利' : end === 1 ? '失败' : '平局';
   if (phpIntval(userInfo2.uid) === 895) userInfo2.name = '山贼';
 
+  const myHero = hid > 0 ? await getContentBattleHero(deps, hid) : '';
+  const otherHero =
+    resisthid > 0
+      ? await getContentBattleHero(deps, resisthid, type === 4 && resistuid < 1000)
+      : '';
   let okcontent = con;
   okcontent += sprintf(
     lang.report('b_titles'),
@@ -402,13 +404,14 @@ export async function getBattleResult(
     myw,
     phpString(userInfo2.name),
     end === 0 ? '失败' : end === 1 ? '胜利' : '平局',
-    '',
+    myHero + otherHero,
   );
 
   // Army情 blocks.
   let mywArmy = '';
   let youwArmy = '';
   let rpsoinfo3 = '';
+  let rpsoinfo4 = '';
   for (const [sid, cnt] of actArray) {
     const sname = lang.soldierName(sid);
     const lost = aArray.get(sid) ?? 0;
@@ -419,6 +422,7 @@ export async function getBattleResult(
     const sname = lang.soldierName(sid);
     const lost = dArray.get(sid) ?? 0;
     youwArmy += sprintf(lang.report('armynumss'), sname, cnt, lost);
+    rpsoinfo4 = sprintf(lang.report('b_count'), sname, cnt - lost);
   }
   if (type === 1 && defence && overDefence) {
     for (const [did, v] of overDefence) {
@@ -440,6 +444,7 @@ export async function getBattleResult(
     okcontent += sprintf(lang.report('b_adtroopss'), '敌方军情', youwArmy);
   }
 
+  con = '';
   let con1 = sprintf(lang.report('get'), prestige3, exp1, aWoundedBase * 100);
   // 俘虏明细 (addCityCapture): type<>4 with a 50% roll.
   let captureCon = '';
@@ -484,7 +489,8 @@ export async function getBattleResult(
     if (outcome.enter) {
       con += `<br/>军队进入${tcityname}。`;
     } else {
-      con += sprintf(lang.report('troopback'), '部队返回', '', rpsoinfo3);
+      const returnHero = hid > 0 ? await getContentHero(deps, hid) : '';
+      con += sprintf(lang.report('troopback'), '部队返回', returnHero, rpsoinfo3);
       con += `<br/>军队正在返回${mcityname}。`;
     }
     okcontent += con;
@@ -499,9 +505,60 @@ export async function getBattleResult(
     resistcid,
     okcontent,
   );
+  if (!(end === 1 && round === 1)) {
+    await sql`update sys_report set battleid = ${id} where id = (select last_insert_id())`.execute(
+      deps.db,
+    );
+  }
 
-  if (uid > 1000) await cityRules.refreshFoodArmyUsers(phpIntval(mtroop.cid));
+  const tend = end === 0 ? 1 : end === 1 ? 0 : 2;
+  let con3 = '';
   if (resistuid > 1000) {
+    let con2 = reportTitle(
+      lang,
+      mcityname,
+      tcityname,
+      phpIntval(mtroop.task),
+      phpIntval(mtroop.state),
+    );
+    con2 += lang.row('10');
+    con2 += sprintf(lang.report('round'), round, lang.battleArr('result', tend));
+    const mresult = end === 2 ? '<td width="50" height="24" class="NormalText">平局</td>' : '';
+    const yresult = end === 2 ? '<td width="50" class="NormalText">平局</td>' : '';
+    con2 += sprintf(
+      lang.report('td_table_y'),
+      phpString(userInfo1.name),
+      mresult,
+      phpString(userInfo2.name),
+      yresult,
+    );
+    con2 += sprintf(lang.report('outside'), '');
+    if (tend === 1 && round === 1) {
+      con2 += sprintf(lang.report('warming'), '我方首轮交战既全军覆没，没有获得任何情报！');
+    } else {
+      con2 += lang.report('s_title');
+      con2 += sprintf(lang.report('soldier'), '', '');
+    }
+    if (outcome.catch) con2 += outcome.catch;
+    if (outcome.losthero) con2 += outcome.losthero;
+    con3 = sprintf(lang.report('table'), con2) + commn;
+    if (outcome.movecid) {
+      const newcity = await cityRules.getNamePosition(outcome.movecid, type);
+      con3 += `<br/>我方城池被迫迁移至${newcity}`;
+    }
+    con3 += lang.battle('youend');
+    if (dlostCount < dcount) {
+      const returnHero = hid > 0 ? await getContentHero(deps, hid) : '';
+      con3 += sprintf(lang.report('troopback'), '部队返回', returnHero, rpsoinfo4);
+    } else {
+      con3 += '<br/> 我军全军覆没，没有军队返回！';
+    }
+    await report.sendReport(resistuid, task + 10, cid, resistcid, con3);
+    if (!(tend === 1 && round === 1)) {
+      await sql`update sys_report set battleid = ${id} where id = (select last_insert_id())`.execute(
+        deps.db,
+      );
+    }
     await cityRules.refreshFoodArmyUsers(phpIntval(ytroop.cid));
     await sql`update sys_user set war_defence_prestige = war_defence_prestige + ${apeople}
       where uid = ${resistuid}`.execute(deps.db);
@@ -509,13 +566,59 @@ export async function getBattleResult(
       await sql`update sys_user set war_attack_prestige = war_attack_prestige + ${dpeople}
         where uid = ${uid}`.execute(deps.db);
     }
-    // The defender's own report + 联盟战报 — same shape; we file a defender report so the
-    // player is notified (the extensive 盟报 bookkeeping is a later wave).
-    stub('defender 联盟战报 (sys_union_report)');
-    const con3 =
-      reportTitle(lang, mcityname, tcityname, phpIntval(mtroop.task), phpIntval(mtroop.state)) +
-      lang.battle('youend');
-    await report.sendReport(resistuid, task + 10, cid, resistcid, con3);
+  }
+  if (uid > 1000) await cityRules.refreshFoodArmyUsers(phpIntval(mtroop.cid));
+  await writeUnionReports(
+    deps,
+    { uid, resistuid, cid, resistcid, task, end, userInfo1, userInfo2, sysBattle },
+    con,
+    con3,
+  );
+}
+
+/** The original's type-1/2 union reports for player defenders and every attacker loss. */
+async function writeUnionReports(
+  deps: BattleResultDeps,
+  a: Pick<
+    OutcomeArgs,
+    | 'uid'
+    | 'resistuid'
+    | 'cid'
+    | 'resistcid'
+    | 'task'
+    | 'end'
+    | 'userInfo1'
+    | 'userInfo2'
+    | 'sysBattle'
+  >,
+  con: string,
+  con3: string,
+): Promise<void> {
+  if (a.end !== 1 && a.resistuid <= 1000) return;
+  const users = await deps.query(sql<Row>`select u.id, u.name as unionname, s.uid
+    from sys_union u, sys_user s where u.id = s.union_id and (s.uid = ${a.uid} or s.uid = ${a.resistuid})`);
+  const attacker = users.find((row) => phpIntval(row.uid) === a.uid);
+  const defender = users.find((row) => phpIntval(row.uid) === a.resistuid);
+  if (!attacker && !defender) return;
+  const type = phpIntval(a.sysBattle.type);
+  const mcityname = (await deps.cityRules.getNamePosition(a.cid, type)).split('（')[0] ?? '';
+  const tcityname = (await deps.cityRules.getNamePosition(a.resistcid, type)).split('（')[0] ?? '';
+  const description = `${phpString(a.userInfo1.name)} ${deps.lang.reportArr('type', a.task)} ${phpString(a.userInfo2.name)}`;
+  if (attacker) {
+    await sql`insert into sys_union_report
+      (type, unionid, enemy, origincid, origincity, happencid, happencity, time, description, content)
+      values (1, ${phpIntval(attacker.id)}, ${phpString(defender?.unionname ?? '')}, ${a.cid},
+        ${mcityname}, ${a.resistcid}, ${tcityname}, unix_timestamp(), ${description}, ${con})`.execute(
+      deps.db,
+    );
+  }
+  if (defender) {
+    await sql`insert into sys_union_report
+      (type, unionid, enemy, origincid, origincity, happencid, happencity, time, description, content)
+      values (2, ${phpIntval(defender.id)}, ${phpString(attacker?.unionname ?? '')}, ${a.cid},
+        ${mcityname}, ${a.resistcid}, ${tcityname}, unix_timestamp(), ${description}, ${con3})`.execute(
+      deps.db,
+    );
   }
 }
 
@@ -562,6 +665,7 @@ interface OutcomeArgs {
   dusepeople: number;
   nobility: number;
   userInfo1: Row;
+  userInfo2: Row;
   wid: number;
   bbid: number;
   outcome: SettleOutcome;
@@ -631,10 +735,12 @@ async function applyOutcome(deps: BattleResultDeps, a: OutcomeArgs): Promise<voi
       // 掠夺城池
       o.mstate = '2';
       o.check = 1;
-      stub('城池掠夺资源结算 (get_city_resource + add_resource robArray)');
+      const robbed = await robCityResources(deps, a, false);
+      o.robArray = robbed.rob;
       await sql`update sys_troops set state = 1, starttime = unix_timestamp(),
         endtime = unix_timestamp() + pathtime, soldiers = ${a.attacksoldiers},
-        fooduse = ${a.afoodUse}, people = ${a.ausepeople} where id = ${a.troopid1}`.execute(db);
+        resource = ${robbed.resource}, fooduse = ${a.afoodUse}, people = ${a.ausepeople}
+        where id = ${a.troopid1}`.execute(db);
       if (a.resisthid)
         await sql`update sys_city_hero set state = ${a.state} where hid = ${a.resisthid}`.execute(
           db,
@@ -761,9 +867,16 @@ async function applyCityCapture(deps: BattleResultDeps, a: OutcomeArgs): Promise
       await deps.cell(sql<Row>`select count(cid) as c from sys_city where uid = ${a.resistuid}`),
     );
     if (a.resistuid > 1000 && phpIntval(cityInfo.type) === 0 && cityCnt <= 1) {
-      // The defender's last city: 秒回 and relocate it. Deep (movecitys/troopsBack/moveGetCid).
-      stub('占领 defender last-city relocation (troopsBack/movecitys/moveGetCid)');
-      await sql`delete from sys_troops where cid = ${a.resistcid}`.execute(db);
+      await troopsBack(deps, a.resistuid, a.resistcid);
+      const movecid = await moveGetCid(deps);
+      o.movecid = movecid;
+      await sql`update sys_troops set startcid = ${movecid} where startcid = ${a.resistcid}`.execute(
+        db,
+      );
+      await sql`update sys_troops set cid = ${movecid} where cid = ${a.resistcid} and state = 3`.execute(
+        db,
+      );
+      await moveCity(deps, a.resistuid, a.resistcid, movecid);
     } else {
       await sql`delete from sys_troops where cid = ${a.resistcid}`.execute(db);
       const heros = await deps.query(
@@ -821,10 +934,11 @@ async function applyCityCapture(deps: BattleResultDeps, a: OutcomeArgs): Promise
     await sql`delete from sys_troops where id = ${a.troopid1}`.execute(db);
   } else {
     // Occupation failed: 掠夺 resources instead, turn home.
-    stub('占领失败 → 掠夺资源结算 (get_city_resource robArray)');
+    const robbed = await robCityResources(deps, a, true);
+    o.robArray = robbed.rob;
     await sql`update sys_troops set state = 1, starttime = unix_timestamp(),
       endtime = unix_timestamp() + pathtime, soldiers = ${a.attacksoldiers},
-      resource = ${phpString(a.mtroop.resource)}, fooduse = ${a.afoodUse}, people = ${a.ausepeople}
+      resource = ${robbed.resource}, fooduse = ${a.afoodUse}, people = ${a.ausepeople}
       where id = ${a.troopid1}`.execute(db);
     o.mstate = '2';
     if (a.type === 1 && a.overDefenceArray.size)
@@ -838,6 +952,102 @@ async function applyCityCapture(deps: BattleResultDeps, a: OutcomeArgs): Promise
 }
 
 // ───────────────────────── small cfg_js.php helpers ─────────────────────────
+
+/** cfg_js.php::troopsBack: the defender's heroes and armies return before the city moves. */
+async function troopsBack(deps: BattleResultDeps, uid: number, cid: number): Promise<void> {
+  const troops = await deps.query(sql<Row>`select * from sys_troops where uid = ${uid}
+    and (cid = ${cid} or targetcid = ${cid}) and battlefieldid = 0 and state <> 3 and soldiers > 0`);
+  const ids: number[] = [];
+  for (const troop of troops) {
+    if (phpIntval(troop.cid) === cid) {
+      const hid = phpIntval(troop.hid);
+      if (hid > 0) {
+        await sql`update sys_city_hero set state = 0 where hid = ${hid}`.execute(deps.db);
+      }
+      await deps.cityRules.addCitySoldiers(cid, troop2array(phpString(troop.soldiers)), true);
+    }
+    ids.push(phpIntval(troop.id));
+  }
+  if (ids.length) {
+    await sql`delete from sys_gather where troopid in (${sql.join(ids)})`.execute(deps.db);
+    await sql`delete from sys_troops where uid = ${uid} and cid = ${cid}
+      and battlefieldid = 0 and state <> 3`.execute(deps.db);
+  }
+  const fields = await deps.query(sql<Row>`select wid from mem_world where ownercid = ${cid}`);
+  if (fields.length) {
+    const fieldcids = fields.map((field) => wid2cid(phpIntval(field.wid)));
+    await sql`update sys_troops set state = 1, starttime = unix_timestamp(),
+      endtime = unix_timestamp() + pathtime where targetcid in (${sql.join(fieldcids)}) and state = 4`.execute(
+      deps.db,
+    );
+  }
+}
+
+/** cfg_js.php::moveGetCid: choose a free flatland for the defender's replacement city. */
+async function moveGetCid(deps: BattleResultDeps): Promise<number> {
+  let province = 0;
+  for (let attempt = 0; attempt <= 10; attempt++) {
+    province = deps.mtRand(1, 13);
+    const count = phpNum(
+      await deps.cell(
+        sql<Row>`select count(*) as v from mem_world where type = 1 and ownercid = 0 and province = ${province}`,
+      ),
+    );
+    if (count > 0) break;
+    if (attempt === 10) throw GameError.lang('changeCityPosition.province_is_full');
+  }
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const targetwid = phpNum(
+      await deps.cell(sql<Row>`select wid as v from mem_world
+        where type = 1 and province = ${province} and ownercid = 0 and state = 0
+        order by rand() limit 1`),
+    );
+    if (targetwid) return wid2cid(targetwid);
+  }
+  throw GameError.lang('changeCityPosition.invalid_target_city');
+}
+
+/** cfg_js.php::movecitys: clone the lost city's persistent state onto the replacement flatland. */
+async function moveCity(
+  deps: BattleResultDeps,
+  uid: number,
+  cid: number,
+  targetcid: number,
+): Promise<void> {
+  const targetwid = cid2wid(targetcid);
+  const province = phpNum(
+    await deps.cell(sql<Row>`select province as v from mem_world where wid = ${targetwid}`),
+  );
+  await sql`insert into log_move_city (time, uid, fromcid, tocid)
+    values (unix_timestamp(), ${uid}, ${cid}, ${targetcid})`.execute(deps.db);
+  await sql`replace into sys_city (cid, uid, name, type, state, province)
+    select ${targetcid}, ${uid}, name, 0, 0, ${province} from sys_city where cid = ${cid}`.execute(
+    deps.db,
+  );
+  await sql`delete from sys_building where cid = ${targetcid}`.execute(deps.db);
+  await sql`replace into sys_building (cid, xy, bid, level)
+    select ${targetcid}, xy, bid,
+      case when state = 1 then state - 1 when state = 2 then state + 1 else level end
+    from sys_building where cid = ${cid}`.execute(deps.db);
+  await sql`replace into mem_city_resource
+    (cid, morale, morale_stable, complaint, tax, people, food, wood, rock, iron, gold,
+      hero_fee, people_working, lastupdate)
+    select ${targetcid}, morale, morale_stable, complaint, tax, people,
+      5000, 5000, 5000, 5000, 5000, hero_fee, people_working, unix_timestamp()
+    from mem_city_resource where cid = ${cid}`.execute(deps.db);
+  await sql`replace into sys_city_res_add (cid) values (${targetcid})`.execute(deps.db);
+  await sql`delete from mem_city_reinforce where cid = ${targetcid} or cid = ${cid}`.execute(
+    deps.db,
+  );
+  await sql`update sys_user set lastcid = ${targetcid} where uid = ${uid}`.execute(deps.db);
+  await sql`update sys_city_hero set cid = ${targetcid} where cid = ${cid} and uid = ${uid}`.execute(
+    deps.db,
+  );
+  await sql`update mem_world set ownercid = ${targetcid}, type = 0 where wid = ${targetwid}`.execute(
+    deps.db,
+  );
+  await resetCityGoodsAdd(deps, uid, targetcid);
+}
 
 /** cfg_js.php::addCityWounded. */
 async function addCityWounded(
@@ -1246,6 +1456,93 @@ async function choseHeroes(deps: BattleResultDeps, cid: number, hid: number): Pr
   return ret;
 }
 
+interface RobResource {
+  gold: number;
+  food: number;
+  wood: number;
+  rock: number;
+  iron: number;
+}
+
+/** UtilsExtend.php::add_resource: fill the surviving army's remaining carry capacity. */
+function addResource(
+  r1: string,
+  r2: string,
+  carry: number,
+): { resource: string; rob: RobResource } {
+  const empty: RobResource = { gold: 0, food: 0, wood: 0, rock: 0, iron: 0 };
+  const resource1 = checkResource(r1) || empty;
+  const resource2 = checkResource(r2) || empty;
+  const keys = ['gold', 'food', 'wood', 'rock', 'iron'] as const;
+  const all1 = keys.reduce((sum, key) => sum + resource1[key], 0);
+  const all2 = keys.reduce((sum, key) => sum + resource2[key], 0);
+  let x = 0;
+  if (all1 + all2 > carry) x = all2 === 0 ? 0 : (carry - all1) / all2;
+  else if (all2 > 0) x = 1;
+  if (carry === 0) x = 0;
+  const resources = { ...resource1 };
+  const rob = { ...empty };
+  for (const key of keys) {
+    const before = resource1[key];
+    resources[key] = Math.floor(before + resource2[key] * x);
+    rob[key] = resources[key] - before;
+  }
+  return { resource: keys.map((key) => resources[key]).join(','), rob };
+}
+
+async function getCarry(
+  deps: BattleResultDeps,
+  cid: number,
+  soldiers: Map<number, number>,
+): Promise<number> {
+  const tid = phpNum(
+    await deps.cell(
+      sql<Row>`select level as v from sys_city_technic where cid = ${cid} and tid = 11`,
+    ),
+  );
+  let carry = 0;
+  for (const [sid, count] of soldiers) {
+    carry += count * (deps.carry[sid] ?? 0) * (1 + tid / 10);
+  }
+  return carry;
+}
+
+async function robCityResources(
+  deps: BattleResultDeps,
+  a: OutcomeArgs,
+  includeGold: boolean,
+): Promise<{ resource: string; rob?: RobResource }> {
+  const original = phpString(a.mtroop.resource);
+  const lastwintime = phpNum(
+    await deps.cell(sql<Row>`select unix_timestamp() - ${phpNum(a.sysBattle.starttime)} as v`),
+  );
+  if (!(lastwintime > 86400 || (a.nobility >= 5 && a.resistuid < 1000) || lastwintime === 0)) {
+    return { resource: original };
+  }
+  const city =
+    (await deps.query(sql<Row>`select * from mem_city_resource where cid = ${a.resistcid}`))[0] ??
+    {};
+  if (!city.cid) return { resource: original };
+  const cityResource = [
+    includeGold ? phpNum(city.gold) : 0,
+    phpNum(city.food),
+    phpNum(city.wood),
+    phpNum(city.rock),
+    phpNum(city.iron),
+  ].join(',');
+  const carry = await getCarry(deps, a.cid, a.overActArray);
+  const result = addResource(original, cityResource, carry);
+  await deps.cityRules.addCityResources(
+    a.resistcid,
+    -result.rob.wood,
+    -result.rob.rock,
+    -result.rob.iron,
+    -result.rob.food,
+    -result.rob.gold,
+  );
+  return result;
+}
+
 /** UtilsExtend.php::check_resource. */
 function checkResource(
   resource: string,
@@ -1259,6 +1556,62 @@ function checkResource(
     rock: phpNum(p[3]),
     iron: phpNum(p[4]),
   };
+}
+
+/** UtilsExtend.php::getContentHero: the hero card used beside a returning army. */
+async function getContentHero(
+  deps: BattleResultDeps,
+  hid: number,
+  isBattle = false,
+): Promise<string> {
+  const hero = isBattle
+    ? (
+        await deps.query(
+          sql<Row>`select name, level, face, sex from cfg_battle_hero where hid = ${hid}`,
+        )
+      )[0]
+    : (
+        await deps.query(
+          sql<Row>`select name, level, face, sex from sys_city_hero where hid = ${hid}`,
+        )
+      )[0];
+  if (!hero) return deps.lang.report('empty');
+  const sex = phpIntval(hero.sex) ? 'boy' : 'girl';
+  return sprintf(
+    deps.lang.report('heroname'),
+    `${sex}_${phpString(hero.face)}`,
+    phpString(hero.name),
+    phpString(hero.name),
+    phpNum(hero.level),
+  );
+}
+
+/** UtilsExtend.php::getContentBattleHero: the hero card in the battle header. */
+async function getContentBattleHero(
+  deps: BattleResultDeps,
+  hid: number,
+  isBattle = false,
+): Promise<string> {
+  const hero = isBattle
+    ? (
+        await deps.query(
+          sql<Row>`select name, level, face, sex from cfg_battle_hero where hid = ${hid}`,
+        )
+      )[0]
+    : (
+        await deps.query(
+          sql<Row>`select name, level, face, sex from sys_city_hero where hid = ${hid}`,
+        )
+      )[0];
+  if (!hero) return deps.lang.report('empty');
+  const sex = phpIntval(hero.sex) ? 'boy' : 'girl';
+  return sprintf(
+    deps.lang.report('hero'),
+    `${sex}_${phpString(hero.face)}`,
+    phpString(hero.name),
+    phpString(hero.name),
+    phpNum(hero.level),
+  );
 }
 
 /** cfg_hero_level.upgrade_exp for the hero's current level (the min-exp cap). */
@@ -1275,9 +1628,9 @@ function reportTitle(
   task: number,
   state: number,
 ): string {
-  const statetype = state === 0 ? '已到达目标' : `已经返回${cityname}`;
-  void statetype;
-  return sprintf(lang.report('title'), tarname, task, state);
+  void cityname;
+  void state;
+  return sprintf(lang.report('title1'), tarname, lang.reportArr('type', task));
 }
 
 /** UtilsExtend.php::getReportTitleType. */
@@ -1293,6 +1646,9 @@ export {
   array2count,
   defence2array,
   checkResource,
+  addResource,
+  getContentHero,
+  getContentBattleHero,
   updateFieldResourceAdds,
   addCityDefences,
   addCityCapture,

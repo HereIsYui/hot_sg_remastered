@@ -742,7 +742,7 @@ async function defcityadd(
     garrison = await deps.query(
       sql<Row>`select s.sid, s.count, c.type from sys_city_soldier s, cfg_soldier c
         where s.sid = c.sid and s.count > 0 and s.cid = ${cid}
-        and s.sid in (${sql.raw(join)})`,
+        and (s.sid in (${sql.raw(join)}) ${task === 1 ? sql` or s.sid = 3` : sql``})`,
     );
   }
   let defences: Row[] = [];

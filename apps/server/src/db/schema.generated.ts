@@ -4703,12 +4703,14 @@ export interface MemLuoyangRecord {
 }
 
 export interface MemManeuver {
+  attackadd: Generated<string>;
   attackdie: Generated<string>;
   /**
    * num:sid,count,sid,count...
    */
   attacksoldiers: string;
   id: Generated<number>;
+  resistadd: Generated<string>;
   resistdie: Generated<string>;
   resistsoldiers: string;
   result: Generated<number>;
@@ -4719,6 +4721,7 @@ export interface MemManeuver {
    * 1：演习结束
    */
   state: number;
+  wallhp: Generated<number>;
 }
 
 export interface MemMarryDuring {

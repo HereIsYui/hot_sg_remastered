@@ -108,6 +108,12 @@ describe('offsetOf', () => {
     expect(offsetOf(0, ctx(1_700_000_000))).toBe('0');
   });
 
+  it('tolerates a one-second execution gap at a minute boundary, but not two seconds', () => {
+    expect(offsetOf(1_700_000_030, ctx(1_700_000_000))).toBe('<now+1m>');
+    expect(offsetOf(1_700_000_030, ctx(1_700_000_001))).toBe('<now+1m>');
+    expect(offsetOf(1_700_000_030, ctx(1_700_000_002))).toBe('<now+0m>');
+  });
+
   it('keeps long-past times absolute, whatever minute each side started in', () => {
     const stale = 1_300_000_000;
     expect(offsetOf(stale, ctx(1_700_000_029))).toBe(String(stale));

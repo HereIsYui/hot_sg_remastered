@@ -731,7 +731,8 @@ export class UnionCommands {
   private makeTimeLeft(seconds: number): string {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
-    return h > 0 ? `${h}小时${m}分` : `${m}分`;
+    const s = seconds % 60;
+    return h > 0 ? `${h}小时${m}分${s}秒` : `${m}分${s}秒`;
   }
 
   /** `[bid, count]`: donates 联盟捐献 items into a union building (donateGoods, 2127-2195). */
@@ -923,12 +924,17 @@ export class UnionCommands {
       await sql`update sys_user_donate set duihuan = duihuan + ${count}, time = unix_timestamp()
         where uid = ${uid} and unionid = ${unionid}`.execute(this.scope.db);
     }
-    const store = await this.getUnionStoreInfo(uid);
+    const store = await this.unionStoreInfo(uid);
     return [store, this.lang.t('unionreward.recieve_reward')];
   }
 
   /** UnionFunc.php:2434 getUnionStoreInfo: the market level, the remaining exchanges and rows. */
-  private async getUnionStoreInfo(uid: number): Promise<unknown[]> {
+  @GlobalCommand()
+  async getUnionStoreInfo(ctx: CommandContext): Promise<unknown[]> {
+    return this.unionStoreInfo(ctx.uid);
+  }
+
+  private async unionStoreInfo(uid: number): Promise<unknown[]> {
     const user = await this.row(
       sql<Row>`select union_id, union_pos from sys_user where uid = ${uid}`,
     );
@@ -1039,8 +1045,8 @@ export class UnionCommands {
   /** `[]`: the top-10 union ranks and the caller's reward stamp (loadUnionRewardData). */
   @GlobalCommand()
   async loadUnionRewardData(ctx: CommandContext): Promise<unknown[]> {
-    const rankInfo = await this.rows(sql<Row>`select rank, name from rank_union
-      order by rank asc limit 10`);
+    const rankInfo = await this.rows(sql<Row>`select \`rank\`, name from rank_union
+      order by \`rank\` asc limit 10`);
     const userInfo =
       (await this.row(sql<Row>`select r.rank, u.union_pos from rank_union r, sys_user u
         where r.uid = u.union_id and u.uid = ${ctx.uid} limit 1`)) ?? {};

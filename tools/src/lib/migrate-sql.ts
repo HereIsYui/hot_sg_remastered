@@ -1,7 +1,8 @@
 /**
  * Rewrites a MySQL 5.x mysqldump of the original database for MySQL 8.4:
  * every table becomes InnoDB (transactions, crash safety), utf8 becomes utf8mb4 and
- * options InnoDB rejects are dropped. Table and column definitions stay unchanged.
+ * options InnoDB rejects are dropped. The import epilogue also restores the maneuver combat
+ * columns required by the production backend but omitted from the shipped PHP dump.
  */
 export function migrateStatement(line: string): string {
   if (line.startsWith('INSERT INTO ')) return line;
@@ -33,6 +34,7 @@ export const IMPORT_PROLOGUE = [
 ].join('\n');
 
 export const IMPORT_EPILOGUE = [
+  "ALTER TABLE `mem_maneuver` ADD COLUMN `attackadd` char(255) CHARACTER SET ascii NOT NULL DEFAULT '', ADD COLUMN `resistadd` char(255) CHARACTER SET ascii NOT NULL DEFAULT '', ADD COLUMN `wallhp` bigint NOT NULL DEFAULT 0;",
   'COMMIT;',
   'SET unique_checks=1;',
   'SET foreign_key_checks=1;',

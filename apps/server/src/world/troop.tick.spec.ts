@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ScoutService } from '../battle/scout';
 import { BattleArrivalService } from '../battle/battle-arrival.service';
+import { BattleEngineService } from '../battle/battle-engine.service';
 import { CityRules } from '../core/city-rules.service';
 import { HeroRules } from '../core/hero-rules.service';
 import { LangService } from '../common/lang.service';
@@ -52,6 +53,8 @@ function build(rules: Respond[]) {
       new TaskRules(db.scope, new UserRules(db.scope)),
       new CityRules(db.scope),
       random,
+      arrival,
+      new BattleEngineService(db.scope, random),
     ),
     arrival,
   );
