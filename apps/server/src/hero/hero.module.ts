@@ -8,6 +8,7 @@ import { HeroCommands } from './hero.commands';
 import { HeroExprCommands } from './hero-expr.commands';
 import { HeroExprTick } from './hero-expr.tick';
 import { HotelCommands } from './hotel.commands';
+import { OfficeCommands } from './office.commands';
 import { SkillCommands } from './skill.commands';
 
 /** HotelFunc.php, HeroFunc.php, ArmorFunc.php, HeroSkillFunc.php, EquipmentFunc.php and the 将领历练 settlement. */
@@ -20,6 +21,7 @@ import { SkillCommands } from './skill.commands';
     HeroExprCommands,
     HeroExprTick,
     HotelCommands,
+    OfficeCommands,
     SkillCommands,
   ],
   exports: [BlackSmithCommands],

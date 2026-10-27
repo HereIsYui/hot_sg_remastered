@@ -2202,6 +2202,70 @@ export const cases: DiffCase[] = [
     },
   },
   {
+    name: 'office appoints city chiefs and rejects a busy replacement',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const cid = await lastCity(s, session.uid);
+      const lord = 80213;
+      const hid = 900201;
+      await s.query('delete from sys_troops where hid in (?, ?)', [lord, hid]);
+      await s.query(
+        'update sys_city set chiefhid = 0, generalid = 0, counsellorid = 0 where cid = ?',
+        [cid],
+      );
+      await s.query('update sys_city_hero set state = 0 where uid = ? and cid = ?', [
+        session.uid,
+        cid,
+      ]);
+      await s.query('delete from sys_city_hero where hid = ?', [hid]);
+      await s.query(
+        `insert into sys_city_hero (hid, uid, cid, name, sex, face, state, level,
+          command_base, affairs_base, bravery_base, wisdom_base, loyalty, herotype)
+         values (?, ?, ?, '新任城守', 0, 0, 0, 20, 50, 60, 60, 60, 0, 0)`,
+        [hid, session.uid, cid],
+      );
+      await s.query(
+        'insert into mem_hero_blood (hid, `force`, force_max, energy, energy_max) values (?, 100, 100, 100, 100)',
+        [hid],
+      );
+      const office = (func: string, ...args: unknown[]) =>
+        s.dialog(session, cid, 11, 34, func, ...args);
+      await office('setCityChief', [hid, 1], [lord, 7], [hid, 8]);
+      await s.query(
+        `insert into sys_troops (id, uid, cid, hid, targetcid, task, state, starttime, pathtime,
+          endtime, soldiers, resource) values (900202, ?, ?, ?, ?, 1, 4, unix_timestamp(), 600,
+          unix_timestamp() + 600, '1,1,20', '0')`,
+        [session.uid, cid, hid, cid],
+      );
+      await office('setCityChief', [0, 1]);
+      await s.query('delete from sys_troops where id = 900202');
+      await office('setCityChief', [0, 1]);
+      await s.query('delete from sys_city_hero where hid = ?', [hid]);
+    },
+  },
+  {
+    name: 'office recalls an exiled hero with position and gold checks',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const hid = 900202;
+      await s.query('delete from mem_hero_exile where hid = ?', [hid]);
+      await s.query('delete from sys_city_hero where hid = ?', [hid]);
+      await s.query(
+        `insert into sys_city_hero (hid, uid, cid, name, sex, face, state, level,
+          command_base, affairs_base, bravery_base, wisdom_base, loyalty, herotype)
+         values (?, 895, 0, '流亡旧部', 0, 0, 0, 20, 50, 60, 60, 60, 0, 0)`,
+        [hid],
+      );
+      await s.query('insert into mem_hero_exile (hid, uid, loyalty) values (?, ?, 50)', [hid, uid]);
+      await s.command(session, 'getExileHeros');
+      await s.dialog(session, cid, 11, 34, 'tryCallbackHero', cid, hid);
+      await s.dialog(session, cid, 11, 34, 'sureCallbackHero', cid, hid);
+      await s.query('delete from sys_city_hero where hid = ?', [hid]);
+    },
+  },
+  {
     // 将领历练 (HeroFunc.php + HeroExpr.php). The Office dialog (Define.ID_BUILDING_OFFICE = 11)
     // lists expr-eligible heroes, starts/cancels/speeds an expr; the settlement frees the hero.
     name: 'hero expr: list, start, cancel and speed',

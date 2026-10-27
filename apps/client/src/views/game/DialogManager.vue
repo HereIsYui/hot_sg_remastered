@@ -10,6 +10,7 @@ import {
   BUILDING_HONGLU,
   BUILDING_HOTEL,
   BUILDING_MARKET,
+  BUILDING_OFFICE,
   BUILDING_STORE,
   BUILDING_WALL,
 } from '../../game/cityGrid';
@@ -34,6 +35,7 @@ import ResourceProductDialog from '../government/ResourceProductDialog.vue';
 import GroundDialog from '../ground/GroundDialog.vue';
 import HongluDialog from '../honglu/HongluDialog.vue';
 import HotelDialog from '../hotel/HotelDialog.vue';
+import OfficeDialog from '../office/OfficeDialog.vue';
 import MailDialog from '../mail/MailDialog.vue';
 import MailDetailDialog from '../mail/MailDetailDialog.vue';
 import MailWriteDialog from '../mail/MailWriteDialog.vue';
@@ -147,6 +149,14 @@ function choose(action: 'all' | 'level') {
     <GroundDialog
       v-else-if="dialog?.name === 'building' && ownDialog(dialog.building, BUILDING_GROUND)"
       :key="`ground ${buildingKey}`"
+      :x="0"
+      :y="0"
+      :building="dialog.building"
+      @destroy-panel="destroy = $event"
+    />
+    <OfficeDialog
+      v-else-if="dialog?.name === 'building' && ownDialog(dialog.building, BUILDING_OFFICE)"
+      :key="`office ${buildingKey}`"
       :x="0"
       :y="0"
       :building="dialog.building"

@@ -6,6 +6,7 @@ import { phpIntval, phpNum } from '../core/php';
 import { UserRules } from '../core/user-rules.service';
 import { DbScope } from '../db/database.module';
 import { BuildingRules } from './building-rules.service';
+import { CityInfoService } from './city-info.service';
 import { DefenceRules } from './defence-rules.service';
 import { HotelRules } from './hotel-rules.service';
 import { SoldierRules } from './soldier-rules.service';
@@ -26,6 +27,7 @@ export class BuildingInfoService {
     private readonly hotel: HotelRules,
     private readonly users: UserRules,
     private readonly storeBarn: StoreBarnCommands,
+    private readonly cityInfo: CityInfoService,
   ) {}
 
   /**
@@ -70,6 +72,8 @@ export class BuildingInfoService {
       ret.push(await this.defences.cityAreaOccupied(cid));
     } else if (bid === Building.Store) {
       ret.push(await this.storeBarn.storeInfo(uid, cid));
+    } else if (bid === Building.Office) {
+      ret.push(await this.cityInfo.heroInfo(uid, cid, true));
     } else if (bid === Building.Market) {
       ret.push(
         (

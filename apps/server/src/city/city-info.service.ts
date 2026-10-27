@@ -82,7 +82,12 @@ export class CityInfoService {
     ];
   }
 
-  private heroRows(uid: number, cid: number): Promise<Row[]> {
+  private heroRows(uid: number, cid: number, preserveHeroId = false): Promise<Row[]> {
+    if (preserveHeroId) {
+      return this.rows(sql<Row>`select h.*, m.force, m.force_max, m.energy, m.energy_max
+        from sys_city_hero h left join mem_hero_blood m on m.hid = h.hid
+        where h.cid = ${cid} and h.uid = ${uid}`);
+    }
     return this
       .rows(sql<Row>`select * from sys_city_hero h left join mem_hero_blood m on m.hid = h.hid
       where h.cid = ${cid} and h.uid = ${uid}`);
@@ -221,9 +226,9 @@ export class CityInfoService {
   }
 
   /** global.php::getCityInfoHero (CityCommand type 1): heroes with buffs and carry bonuses. */
-  async heroInfo(uid: number, cid: number): Promise<Row[]> {
+  async heroInfo(uid: number, cid: number, preserveHeroId = false): Promise<Row[]> {
     const db = this.scope.db;
-    const heroes = await this.heroRows(uid, cid);
+    const heroes = await this.heroRows(uid, cid, preserveHeroId);
     const ret: Row[] = [];
     for (const hero of heroes) {
       const out: Row = { ...hero };
