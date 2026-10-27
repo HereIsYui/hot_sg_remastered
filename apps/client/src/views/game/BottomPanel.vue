@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import { parseChatInput, validChatMessage, type ChatChannel } from '../../game/chat';
 import { useGame } from '../../game/game';
 import { useChatStore } from '../../stores/chat';
+import { useSessionStore } from '../../stores/session';
 import { PushProc } from '@hot/shared';
 import { i18n } from '../../i18n';
 import ChatPanel from '../chat/ChatPanel.vue';
@@ -15,6 +16,7 @@ import FxTextInput from '../../ui/FxTextInput.vue';
 defineProps<{ x?: number; y?: number }>();
 
 const game = useGame();
+const session = useSessionStore();
 
 /** Right-anchored function buttons, 31px apart (friend ... shop). */
 const FUNCTIONS = [
@@ -49,6 +51,7 @@ function onClick(name: (typeof FUNCTIONS)[number]): void {
   if (name === 'ButtonMail') game.openMail();
   else if (name === 'ButtonReport') game.openReport();
   else if (name === 'ButtonFriend') game.openFriend();
+  else if (name === 'ButtonRank') session.dialog = { name: 'rank' };
 }
 
 const chatText = ref('');

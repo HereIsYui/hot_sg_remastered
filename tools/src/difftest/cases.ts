@@ -192,6 +192,9 @@ export const cases: DiffCase[] = [
   },
   {
     name: 'city load finishes due upgrades and demolitions',
+    // The 6-minute population tick can run on only one side when the sequential calls straddle
+    // its 16-second window. Keep every non-time-dependent resource assertion.
+    tables: { mem_city_resource: { ignore: ['people'] } },
     run: async (s) => {
       const session = await s.login(EXISTING_PLAYER);
       const cid = await lastCity(s, session.uid);
@@ -209,10 +212,12 @@ export const cases: DiffCase[] = [
       await s.command(session, 'getCityInfo', cid, 1);
       s.mask(4, 2, '*', 'state_timeleft');
       await s.cityCommand(session, cid, 0);
+      s.mask(2, 1, 'people');
     },
   },
   {
     name: 'new role opens its city',
+    tables: { mem_city_resource: { ignore: ['people'] } },
     run: async (s) => {
       const session = await s.login('difftest_city');
       await avoidCidWidTiles(s, 5);
@@ -226,6 +231,7 @@ export const cases: DiffCase[] = [
       s.mask(4, 2, '*', 'state_timeleft');
       s.mask(4, 4, 0, 'jun'); // random tile
       await s.cityCommand(session, cid, 0);
+      s.mask(2, 1, 'people');
       await s.command(session, 'getCityProduct', cid);
     },
   },
@@ -5033,6 +5039,156 @@ export const cases: DiffCase[] = [
       await s.command(first, 'getOtherUnionArea', firstUnion);
     },
   },
+  {
+    name: 'rank pages regular leaderboards and empty tables',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      await s.query('delete from rank_user_level');
+      for (let rank = 1; rank <= 12; rank++) {
+        await s.query('insert into rank_user_level (`rank`, uid, name) values (?, ?, ?)', [
+          rank,
+          session.uid,
+          rank === 12 ? '长乐' : `君主${rank}`,
+        ]);
+      }
+      await s.query('delete from rank_rich');
+      await s.query(
+        'insert into rank_rich (uid, name, total, month, day) values (?, "长乐", 100, 80, 20)',
+        [session.uid],
+      );
+      await s.query('delete from rank_rich_day');
+      await s.command(session, 'getPageRank', 0, 'KingRankTotal');
+      await s.command(session, 'getPageRank', 1, 'KingRankTotal');
+      await s.command(session, 'getRankRank', 12, 'KingRankTotal');
+      await s.command(session, 'getPageRank', 2, 'KingRankTotal');
+      for (const type of [
+        'user',
+        'union',
+        'hero_level',
+        'hero_affairs',
+        'hero_bravery',
+        'hero_wisdom',
+        'hero_command',
+        'military',
+        'military_attack',
+        'military_defence',
+        'rich',
+        'rich_month',
+        'battle_total',
+        'battle_week',
+        'battle_day',
+      ]) {
+        await s.command(session, 'getPageRank', 0, type);
+      }
+      await s.command(session, 'getPageRank', 0, 'rich_day');
+    },
+  },
+  {
+    name: 'rank searches names and finds own rank with task completion',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      await s.command(session, 'getNameRank', '长乐', 'user');
+      s.unordered(4);
+      await s.command(session, 'getNameRank', '不存在', 'user');
+      await s.command(session, 'getMyRank', '长乐', 'user');
+      await s.command(session, 'getMyRank', '长乐', 'military');
+      await s.command(session, 'getMyRank', '长乐', 'military_attack');
+      await s.command(session, 'getMyRank', '长乐', 'military_defence');
+      await s.command(session, 'getMyRank', '不存在', 'user');
+    },
+  },
+  {
+    name: 'rank rewards pays an ended activity once',
+    tables: {
+      cfg_activity_rank: { offsets: ['starttime', 'endtime', 'reward_endtime'] },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      await s.command(session, 'getRankReward', 'activity');
+      await s.query(
+        `insert into cfg_activity_rank (actid, starttime, endtime, reward_endtime, title, \`desc\`)
+         values (900001, unix_timestamp() - 259200, unix_timestamp() - 86400,
+           unix_timestamp() + 86400, '积分,声望,荣誉', '测试活动')`,
+      );
+      await s.query(
+        "insert into cfg_activity_rank_reward (actid, minrank, maxrank, reward) values (900001, 1, 1, '2,0,1,5,0,0,25')",
+      );
+      await s.query(
+        `insert into rank_activity (\`rank\`, uid, name, sort3, sort4, sort5)
+         values (1, ?, '长乐', '100', '200', '300')`,
+        [session.uid],
+      );
+      await s.query(
+        `insert into log_activity_rank (actid, \`rank\`, uid, name, sort3, sort4, sort5, reward, time)
+         values (900001, 1, ?, '长乐', '100', '200', '300', 0, 0)`,
+        [session.uid],
+      );
+      await s.command(session, 'getRankConfig', 'activity');
+      activityConfigTimes(s);
+      await s.command(session, 'getRankConfig', 'activity_today');
+      activityConfigTimes(s);
+      await s.command(session, 'getRankReward', 'activity');
+      await s.command(session, 'getRankConfig', 'activity');
+      activityConfigTimes(s);
+      await s.command(session, 'getRankReward', 'activity');
+      await s.command(session, 'getRankReward', 'invalid');
+    },
+  },
+  {
+    name: 'rank rewards pays yesterday once',
+    tables: {
+      cfg_activity_rank: { offsets: ['starttime', 'endtime', 'reward_endtime'] },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      await s.query(
+        `insert into cfg_activity_rank (actid, starttime, endtime, reward_endtime, title, \`desc\`)
+         values (900002, unix_timestamp() - 259200, unix_timestamp() - 86400,
+           unix_timestamp() + 86400, '杀敌,声望,荣誉', '昨日活动')`,
+      );
+      await s.query(
+        "insert into cfg_activity_rank_reward_day (actid, day, minrank, maxrank, reward) values (900002, 3, 1, 1, '1,0,1,5')",
+      );
+      await s.query(
+        `insert into rank_activity_yesterday (\`rank\`, uid, name, sort3, sort4, sort5)
+         values (1, ?, '长乐', '100', '200', '300')`,
+        [session.uid],
+      );
+      await s.query(
+        `insert into log_activity_rank_day (actid, day, \`rank\`, uid, name, sort3, sort4, sort5, reward, time)
+         values (900002, 3, 1, ?, '长乐', '100', '200', '300', 0, 0)`,
+        [session.uid],
+      );
+      await s.command(session, 'getRankConfig', 'activity_yesterday');
+      activityConfigTimes(s);
+      await s.command(session, 'getRankReward', 'activity_yesterday');
+      await s.command(session, 'getRankConfig', 'activity_yesterday');
+      activityConfigTimes(s);
+      await s.command(session, 'getRankReward', 'activity_yesterday');
+    },
+  },
+  {
+    name: 'rank rewards checks king eligibility and window',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      await s.query('delete from log_user_level where uid = ?', [session.uid]);
+      await s.query(
+        'insert into log_user_level (uid, `rank`, name, reward, time) values (?, 1, "长乐", 0, 0)',
+        [session.uid],
+      );
+      await s.command(session, 'getRankConfig', 'KingRankTotal');
+      await s.command(session, 'getRankReward', 'KingRankTotal');
+      await s.command(session, 'getRankConfig', 'KingRankTotal');
+      await s.command(session, 'getRankReward', 'KingRankTotal');
+      await s.query('update log_user_level set `rank` = 101, reward = 0 where uid = ?', [
+        session.uid,
+      ]);
+      await s.command(session, 'getRankReward', 'KingRankTotal');
+      await s.query('update mem_state set value = unix_timestamp() where state = 6');
+      await s.command(session, 'getRankConfig', 'KingRankTotal');
+      await s.command(session, 'getRankReward', 'KingRankTotal');
+    },
+  },
 ];
 
 async function seedScoutPatrol(
@@ -5213,6 +5369,13 @@ const FOREIGN_CITY = 1;
 function buildingTimes(s: Side): void {
   s.mask(4, '*', 'state_timeleft');
   s.offset(4, '*', 'state_endtime');
+}
+
+function activityConfigTimes(s: Side): void {
+  s.offset(4, 0, 'now');
+  s.offset(4, 0, 'starttime');
+  s.offset(4, 0, 'endtime');
+  s.offset(4, 0, 'reward_endtime');
 }
 
 async function lastCity(side: Side, uid: number): Promise<number> {

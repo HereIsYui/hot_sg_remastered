@@ -5,6 +5,7 @@ import { LangService } from '../common/lang.service';
 import { GoodsRules } from '../core/goods-rules.service';
 import { phpEmpty, phpIntval, phpNum, phpString } from '../core/php';
 import { RandomService } from '../core/random.service';
+import { RewardRules } from '../core/reward-rules.service';
 import { TaskRules } from '../core/task-rules.service';
 import { UserRules } from '../core/user-rules.service';
 import { DbScope } from '../db/database.module';
@@ -67,6 +68,7 @@ export class ShopCommands {
     private readonly lang: LangService,
     private readonly goods: GoodsRules,
     private readonly rewards: TaskRewards,
+    private readonly rewardRules: RewardRules,
     private readonly users: UserRules,
     private readonly tasks: TaskRules,
     private readonly defaultBox: DefaultBoxService,
@@ -803,47 +805,7 @@ export class ShopCommands {
    * 礼金, -100 元宝), 1 gear, 2 things. Returns the rows to show, granting each.
    */
   private async parseAndAddReward(uid: number, reward: string): Promise<unknown[]> {
-    const parts = reward.split(',');
-    const n = phpIntval(parts[0]);
-    const ret: unknown[] = [];
-    let money = 0;
-    let isYuanBao = false;
-    for (let i = 1; i < n * 3; i += 3) {
-      const type = phpIntval(parts[i]);
-      const gid = phpIntval(parts[i + 1]);
-      const cnt = phpIntval(parts[i + 2]);
-      if (type === 0) {
-        if (gid === 0) money += cnt;
-        else if (gid === -100) {
-          money += cnt;
-          isYuanBao = true;
-        } else {
-          await this.goods.addGoods(uid, gid, cnt, LIQUAN_LOG.goods);
-        }
-        const good = (await this.row(sql`select * from cfg_goods where gid = ${gid}`)) ?? {};
-        // The original selects `'0' as gype` (a typo for gtype) alongside gtype on the goods row.
-        ret.push({ ...good, count: cnt, gype: '0', gtype: 0 });
-      } else if (type === 1) {
-        const armor = (await this.row(sql`select * from cfg_armor where id = ${gid}`)) ?? {};
-        ret.push({
-          ...armor,
-          count: cnt,
-          gtype: 1,
-          hp: armor.ori_hp_max,
-          hp_max: armor.ori_hp_max,
-        });
-        await this.rewards.addArmor(uid, gid, cnt, LIQUAN_LOG.armor);
-      } else if (type === 2) {
-        const thing = (await this.row(sql`select * from cfg_things where tid = ${gid}`)) ?? {};
-        ret.push({ ...thing, count: cnt, gtype: 2 });
-        await this.goods.addThings(uid, gid, cnt, LIQUAN_LOG.things);
-      }
-    }
-    if (money > 0) {
-      if (isYuanBao) await this.rewards.addMoney(uid, money, LIQUAN_LOG.money);
-      else await this.rewards.addGift(uid, money, LIQUAN_LOG.money);
-    }
-    return ret;
+    return this.rewardRules.parseAndAddReward(uid, reward, LIQUAN_LOG);
   }
 
   private async rows(query: RawBuilder<unknown>): Promise<Row[]> {

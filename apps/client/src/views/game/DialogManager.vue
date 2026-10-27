@@ -57,6 +57,7 @@ import TroopDialog from '../troop/TroopDialog.vue';
 import TroopDetailDialog from '../troop/TroopDetailDialog.vue';
 import BattleDialog from '../troop/BattleDialog.vue';
 import ReportDialog from '../report/ReportDialog.vue';
+import RankDialog from '../rank/RankDialog.vue';
 
 /** DialogManager: the dialogs over the scene panels (only one shown at a time). */
 defineProps<{ x: number; y: number }>();
@@ -117,6 +118,7 @@ function choose(action: 'all' | 'level') {
     />
     <FriendDialog v-else-if="dialog?.name === 'friend'" />
     <UnionDialog v-else-if="dialog?.name === 'union'" />
+    <RankDialog v-else-if="dialog?.name === 'rank'" />
     <HeroDetailDialog
       v-else-if="dialog?.name === 'heroDetail'"
       :key="`hero ${dialog.hid}`"

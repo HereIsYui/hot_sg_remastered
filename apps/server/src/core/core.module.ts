@@ -1,4 +1,5 @@
 import { Global, type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
+import { TaskModule } from '../task/task.module';
 import { CityRules } from './city-rules.service';
 import { GameStateService } from './game-state.service';
 import { GoodsRules } from './goods-rules.service';
@@ -7,6 +8,7 @@ import { MailService } from './mail.service';
 import { OwnershipService } from './ownership.service';
 import { RandomService, ScriptedRandom } from './random.service';
 import { ReportService } from './report.service';
+import { RewardRules } from './reward-rules.service';
 import { ScriptedRandomMiddleware } from './scripted-random.middleware';
 import { TaskRules } from './task-rules.service';
 import { UserRules } from './user-rules.service';
@@ -21,6 +23,7 @@ const providers = [
   RandomService,
   ScriptedRandom,
   ReportService,
+  RewardRules,
   TaskRules,
   UserRules,
 ];
@@ -28,6 +31,7 @@ const providers = [
 /** Shared game rules ported from utils.php / UtilsExtend.php / global.php. */
 @Global()
 @Module({
+  imports: [TaskModule],
   providers: [...providers, ScriptedRandomMiddleware],
   exports: providers,
 })

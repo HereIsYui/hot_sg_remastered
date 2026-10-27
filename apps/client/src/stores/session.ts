@@ -17,7 +17,8 @@ export type PlainDialog =
   | 'myGoods'
   | 'favourites'
   | 'friend'
-  | 'union';
+  | 'union'
+  | 'rank';
 
 /**
  * `DialogManager.showCreateBuildingDialog(kind)` (0 fields, 1 inner, 2 wall), `showBuildingDialog`,
