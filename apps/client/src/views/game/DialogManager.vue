@@ -7,6 +7,7 @@ import {
   BUILDING_COLLEGE,
   BUILDING_GOVERNMENT,
   BUILDING_GROUND,
+  BUILDING_HONGLU,
   BUILDING_HOTEL,
   BUILDING_MARKET,
   BUILDING_STORE,
@@ -31,6 +32,7 @@ import UseGoodsDialog from '../goods/UseGoodsDialog.vue';
 import GovernmentDialog from '../government/GovernmentDialog.vue';
 import ResourceProductDialog from '../government/ResourceProductDialog.vue';
 import GroundDialog from '../ground/GroundDialog.vue';
+import HongluDialog from '../honglu/HongluDialog.vue';
 import HotelDialog from '../hotel/HotelDialog.vue';
 import MailDialog from '../mail/MailDialog.vue';
 import MailDetailDialog from '../mail/MailDetailDialog.vue';
@@ -145,6 +147,14 @@ function choose(action: 'all' | 'level') {
     <GroundDialog
       v-else-if="dialog?.name === 'building' && ownDialog(dialog.building, BUILDING_GROUND)"
       :key="`ground ${buildingKey}`"
+      :x="0"
+      :y="0"
+      :building="dialog.building"
+      @destroy-panel="destroy = $event"
+    />
+    <HongluDialog
+      v-else-if="dialog?.name === 'building' && ownDialog(dialog.building, BUILDING_HONGLU)"
+      :key="`honglu ${buildingKey}`"
       :x="0"
       :y="0"
       :building="dialog.building"

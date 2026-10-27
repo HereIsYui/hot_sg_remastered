@@ -78,6 +78,28 @@ export class BuildingInfoService {
           )
         ).rows,
       );
+    } else if (bid === Building.Honglu) {
+      const unionName = (
+        await sql<Row>`select n.name from sys_user u left join sys_union n on n.id = u.union_id
+          where u.uid = ${uid}`.execute(this.scope.db)
+      ).rows[0]?.name;
+      const troops = (
+        await sql<Row>`select t.*, t.uid as userid, u.name as username, h.name as hero,
+          h.level as herolevel from sys_user u, sys_troops t
+          left join sys_city_hero h on h.hid = t.hid
+          where u.uid = t.uid and t.targetcid = ${cid} and t.task = 1 and t.state = 4`.execute(
+          this.scope.db,
+        )
+      ).rows;
+      ret.push([unionName, troops]);
+      const flags = (
+        await sql<Row>`select * from sys_allow_union_troop where uid = ${uid}`.execute(
+          this.scope.db,
+        )
+      ).rows[0];
+      ret.push(phpIntval(flags?.allow));
+      ret.push(flags ? phpIntval(flags.anti_plunder) : 1);
+      ret.push(flags ? phpIntval(flags.anti_invade) : 1);
     }
     return ret;
   }

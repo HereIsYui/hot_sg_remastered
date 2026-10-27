@@ -253,6 +253,38 @@ export const cases: DiffCase[] = [
     },
   },
   {
+    name: 'building honglu shows stationed union troops and permission toggles',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const cid = await lastCity(s, session.uid);
+      const [building] = await s.query<{ xy: number }>(
+        'select xy from sys_building where cid = ? and bid = 12 limit 1',
+        [cid],
+      );
+      if (!building) throw new Error('missing 鸿胪寺 fixture');
+      const x = building.xy % 10;
+      const y = Math.floor(building.xy / 10);
+      await s.query('delete from sys_allow_union_troop where uid = ?', [session.uid]);
+      await s.query('delete from sys_troops where id = 900601');
+      await s.query(
+        `insert into sys_troops
+          (id, uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource)
+         values (900601, 1002, 188128, 0, ?, 1, 4, unix_timestamp() - 600, 600,
+           unix_timestamp() + 600, '1,1,20', '0')`,
+        [cid],
+      );
+      const honglu = (func: string, ...args: unknown[]) =>
+        s.dialog(session, cid, 12, building.xy, func, ...args);
+      await honglu('getBuildingInfo', 1, x, y, 12);
+      await honglu('allowUnionTroop', 1);
+      await honglu('allowAntiPlunder', 0);
+      await honglu('allowAntiInvade', 0);
+      await honglu('getBuildingInfo', 1, x, y, 12);
+      await s.query('delete from sys_troops where id = 900601');
+      await s.query('delete from sys_allow_union_troop where uid = ?', [session.uid]);
+    },
+  },
+  {
     name: 'building upgrades start and stop',
     run: async (s) => {
       const session = await s.login(EXISTING_PLAYER);
