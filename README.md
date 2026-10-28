@@ -89,7 +89,7 @@ legacy/          本地生成的原版文件（不提交）
 | 4 将领与道具（主体完成，剩余见下）                                                     | 完成       |
 | 5 世界与战斗（波 1–4 前后端完成并实测，占城/抓将已比对，MVP 串跑通过）                 | 完成       |
 | 6 社交与经济（好友/聊天/联盟/市场完成；既有差分与界面细化待做）                        | **进行中** |
-| 7 成长与荣誉（排行榜、领奖、幕僚统计完成；官职爵位/成就/计谋待做）                     | **进行中** |
+| 7 成长与荣誉（排行榜、领奖、统计、成就、计谋、抽奖、君主荣誉完成，客户端面板已接）     | **进行中** |
 | 8–11 活动、独立战场、GM、发布                                                          | 未开始     |
 
 ### 阶段 3 已完成
@@ -182,9 +182,13 @@ legacy/          本地生成的原版文件（不提交）
 - 排行榜主界面：底部“排行”入口开放君主将、玩家、联盟、将领、军事、财富、战场分类，支持排序切换、翻页、排名跳转、名称高亮、我的排名与本盟排名。浏览器实测完整浏览操作与无联盟提示通过。
 - 活动排行与领奖：`getRankConfig` / `getRankReward` 覆盖总榜、昨日榜与君主将，包含动态列名、活动说明、领奖资格、时限、重复领取和奖励弹窗。公共发奖规则由商城与排行共用；三组奖励差分通过，浏览器实测物品与礼金实际到账。
 - 幕僚统计（StatFunc.php）：`getStats` 五个只读页签——城池（升级/造兵/城防队列计数）、资源（向下取整的库存）、产量（含书院税率科技 tid 25 与将领俸禄扣减）、将领（计算属性 + 状态名）、军队（按兵种拼音键，超过 10 万显示「万」）、城防（防御数量与剩余城墙面积）；每行坐标渲染为 `(x,y)`。军队/城防页签保留原版的 `group_concat` 原始列以便逐字比对。单测 7 个，五页签差分通过。
-- 待做：黄金起义／董卓进度、活动排行定时生成，以及官职爵位、成就、计谋、抽奖、君主信息等其余成长功能与对应客户端面板。
+- 幕僚统计客户端：StatDialog 六页签与底部「统计」入口接入。
+- 成就（AchivementFunc.php）：成就点数总览、分组分页（open_time 三种解锁组合的怪癖）、详情的库内 SQL 模板逐字执行（cfg_achivement.sql_current_value / cfg_achivement_goal.sql_check_goal，`rank` 保留字已反引号）；写路径此前已随任务系统移植。客户端成就面板接入。
+- 计谋（TrickFunc.php + BufferFunc::getTrickBuffer）：`useTrick` 分派 cfg_trick 全部 24 行（前置校验/冷却/精力/锦囊/城守智谋 roll/24 个效果/任务 88），`getTrickList` / `getTrickBuffer`。共享抽取：TaskRules.completeTaskGoalBySortandType、TroopCommands.recallTroop、HeroExprCommands.cancelExpr。怪癖：原版 `mt_srand(time())` 重播种使中计随机不可差分固定（已实测 uopz 覆盖 mt_rand 本体，序列每次请求重置）；挑拨离间 `order by rand()` 保留字面。客户端 TrickDialog 五件套接入，锦囊不足复用购买框链路。
+- 抽奖（LotteryFunc.php）：白名单 8 命令（爵位/开关/时段三闸门、免费+续抽链、randWin 保底表、发奖与公告、任务 293）。实测更正：`useMoney` 在原版必然扣 6 元宝（`array()>1` 恒真）、`getWin` 原版直接 PHP fatal（已原样复现）。原版单机抽奖整体关闭（mem_state 150=1，两库一致），成功路径无原版对照。客户端抽奖轮盘接入。
+- 君主荣誉：`loadUserDetail` / `loadUserDetailInfo`（auto-vivify 语义保留）、`changeUserDesignation` 称号、`medalChange` / `getMedalRecord` 勋章、`praiseHero`（新旧两套称赞分支 + enhanceHero 助手）。客户端君主信息与称号对话框接入。
 
-本轮完整回归：700 项单元测试（服务端 341、客户端 298、tools 60、shared 1）、137/137 组差分测试通过；格式检查、Lint、类型检查和构建通过。
+本轮完整回归：服务端 420 项、客户端 333 项、tools 60 项单元测试全过，差分 149/149 组通过；格式检查、Lint、类型检查和构建通过。已知波动：rank_hero 并列排名（904-906 名）在 MySQL 5.7 与 8.4 间的行序 rotates，差分偶发 1 组失败（两边引擎均逐行忠实于 ReportCron.php:412）。
 
 ## 开发流程
 
