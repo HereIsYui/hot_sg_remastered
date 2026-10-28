@@ -26,6 +26,13 @@ export interface TableRule {
   map?: Record<string, (value: unknown) => unknown>;
   /** Rows left out of the comparison entirely. */
   skip?: (row: Row) => boolean;
+  /**
+   * Ranking tables: `column` holds a 1-based position assigned by walking an ORDER BY over
+   * `keys`. Rows whose keys are all equal may permute between the engines (MySQL 5.7 and 8.4
+   * break such ties differently), so each tied row is compared at its group's lowest rank;
+   * rows with distinct keys keep their exact position.
+   */
+  tieRank?: { column: string; keys: string[] };
 }
 
 const NUMERIC = /^-?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
@@ -147,6 +154,26 @@ export function normalizeRow(row: Row, rule: TableRule, ctx: SideContext): strin
     out[column] = map ? map(value) : value;
   }
   return JSON.stringify(out);
+}
+
+/**
+ * Collapses every tied rank group to its lowest rank (in place of each member's own), so two
+ * engines that order equal sort keys differently still compare equal. Call before normalizeRow.
+ */
+export function rewriteTieRanks(rows: Row[], rule: TableRule): Row[] {
+  const tie = rule.tieRank;
+  if (!tie) return rows;
+  const keyOf = (row: Row): string => JSON.stringify(tie.keys.map((k) => canonicalScalar(row[k])));
+  const lowest = new Map<string, number>();
+  for (const row of rows) {
+    const rank = Number(row[tie.column]);
+    const key = keyOf(row);
+    const seen = lowest.get(key);
+    if (Number.isFinite(rank) && (seen === undefined || rank < seen)) {
+      lowest.set(key, rank);
+    }
+  }
+  return rows.map((row) => ({ ...row, [tie.column]: String(lowest.get(keyOf(row))) }));
 }
 
 /** Multiset difference of two lists of canonical strings. */

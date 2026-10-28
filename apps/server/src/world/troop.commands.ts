@@ -122,13 +122,22 @@ export class TroopCommands {
   /** TroopFunc.php::callBackTroop: recall a troop, matching the per-state behaviour exactly. */
   @GlobalCommand()
   async callBackTroop(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    await this.recallTroop(ctx.uid, phpIntval(param[0]));
+    return [];
+  }
+
+  /**
+   * TroopFunc.php::callBackTroop body, callable from other modules — TrickFunc.php::
+   * trickHuDiChouXin (釜底抽薪) calls it for the TARGET city's owner, one recalled troop at a
+   * time. Same per-state behaviour and the same thrown errors as the command.
+   */
+  async recallTroop(uid: number, troopid: number): Promise<void> {
     const db = this.scope.db;
-    const troopid = phpIntval(param[0]);
     if (await this.one(sql<Row>`select * from sys_gather where troopid = ${troopid}`)) {
       throw GameError.lang('callBackTroop.gather');
     }
     const troop = await this.one(
-      sql<Row>`select * from sys_troops where id = ${troopid} and uid = ${ctx.uid}`,
+      sql<Row>`select * from sys_troops where id = ${troopid} and uid = ${uid}`,
     );
     if (!troop) throw GameError.lang('callBackTroop.invalid_army');
 
@@ -154,7 +163,6 @@ export class TroopCommands {
     } else if (state === 1) {
       throw GameError.lang('callBackTroop.army_on_way_back');
     }
-    return [];
   }
 
   // ─────────────────────────── troop lists ───────────────────────────

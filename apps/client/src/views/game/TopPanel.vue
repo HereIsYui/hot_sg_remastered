@@ -11,6 +11,7 @@ defineProps<{ x?: number; y?: number }>();
 
 const game = useGame();
 const session = useSessionStore();
+const user = game.user;
 </script>
 
 <template>
@@ -61,7 +62,14 @@ const session = useSessionStore();
       @click="game.toggleShowLevel()"
     />
     <FxButton :x="345" :y="10" style-name="TopButtonCraft" :tip="i18n('Bar_TopPanel_3_1')" />
-    <FxButton :x="369" :y="10" style-name="TopButtonTrick" :tip="i18n('Bar_TopPanel_4_1')" />
+    <!-- 计谋状态 (`onTrickClick`, TopPanel.as:1545): the trick buffer pop-up -->
+    <FxButton
+      :x="369"
+      :y="10"
+      style-name="TopButtonTrick"
+      :tip="i18n('Bar_TopPanel_4_1')"
+      @click="game.openTrickBuffer()"
+    />
     <FxButton :x="436" :y="4" style-name="TopButtonHero" @click="game.showHeroDetail()" />
     <FxButton
       :x="500"
@@ -72,6 +80,12 @@ const session = useSessionStore();
     />
     <FxButton :x="565" :y="4" style-name="TopButtonUnion" @click="game.openUnion()" />
     <FxButton :x="630" :y="4" style-name="TopButtonMission" @click="game.showDialog('task')" />
-    <FxButton :x="692" :y="4" style-name="LotteryBoxBtn" />
+    <FxButton
+      :x="692"
+      :y="4"
+      style-name="LotteryBoxBtn"
+      :enabled="user.openLottery === 0"
+      @click="game.openLottery()"
+    />
   </FxCanvas>
 </template>

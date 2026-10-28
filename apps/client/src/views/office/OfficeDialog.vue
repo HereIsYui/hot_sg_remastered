@@ -5,7 +5,6 @@ import { useGame } from '../../game/game';
 import { officeHeroRows, parseRestHeroes } from '../../game/office';
 import { i18n } from '../../i18n';
 import type { BuildingState } from '../../stores/city';
-import { showAlert } from '../../ui/alert';
 import FxButton from '../../ui/FxButton.vue';
 import FxCanvas from '../../ui/FxCanvas.vue';
 import FxDataGrid from '../../ui/FxDataGrid.vue';
@@ -93,7 +92,7 @@ onUnmounted(unregister);
           :h="36"
           style-name="ButtonYellow"
           :label="i18n('Office_OfficeHeroPanel_1_1') || '计谋'"
-          @click="showAlert(i18n('Basic_not_open') || '暂未开放')"
+          @click="game.showTrickDialog(0)"
         />
         <FxButton
           :x="89"

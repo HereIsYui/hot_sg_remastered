@@ -208,8 +208,14 @@ export class HeroExprCommands {
    */
   @DialogCommand()
   async cancelHeroExpr(ctx: CommandContext, param: unknown[]): Promise<void> {
-    const { uid } = ctx;
-    const hid = phpIntval(param[0]);
+    return this.cancelExpr(ctx.uid, phpIntval(param[0]));
+  }
+
+  /**
+   * HeroFunc.php::cancelHeroExpr body, callable from other modules — TrickFunc.php::
+   * trickHuDiChouXin (釜底抽薪) cancels the target city's running exprs the same way.
+   */
+  cancelExpr(uid: number, hid: number): Promise<void> {
     return this.scope.transaction(async () => {
       const db = this.scope.db;
       const item = await this.row(sql`select b.hour_expr * (unix_timestamp() - starttime) / 3600

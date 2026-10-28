@@ -23,6 +23,7 @@ import {
   normalizeRow,
   normalizeTree,
   offsetOf,
+  rewriteTieRanks,
   sortAt,
   type SideContext,
   type TableRule,
@@ -231,7 +232,9 @@ async function runSide(
     await db.restore(table, saved.get(table));
     const rule = tableOverrides[table] ?? tableRules[table] ?? {};
     const norm = (rows: TableDelta['added']) =>
-      rows.map((r) => normalizeRow(r, rule, ctx)).filter((r): r is string => r !== null);
+      rewriteTieRanks(rows, rule)
+        .map((r) => normalizeRow(r, rule, ctx))
+        .filter((r): r is string => r !== null);
     const added = norm(delta.added);
     const removed = norm(delta.removed);
     if (added.length || removed.length) deltas.set(table, { added, removed });

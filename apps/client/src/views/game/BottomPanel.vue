@@ -52,6 +52,10 @@ function onClick(name: (typeof FUNCTIONS)[number]): void {
   else if (name === 'ButtonReport') game.openReport();
   else if (name === 'ButtonFriend') game.openFriend();
   else if (name === 'ButtonRank') session.dialog = { name: 'rank' };
+  // `onStatClick` (BottomPanel.as:826): the 幕僚统计 dialog.
+  else if (name === 'ButtonStat') game.openStat();
+  // `showUserAchivement` (BottomPanel.as:1181-1190): open 个人成就 and fetch getOverviewStat.
+  else if (name === 'ButtonAchievement') game.openUserAchievement();
 }
 
 const chatText = ref('');

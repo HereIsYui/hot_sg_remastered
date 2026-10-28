@@ -24,6 +24,6 @@ import { SkillCommands } from './skill.commands';
     OfficeCommands,
     SkillCommands,
   ],
-  exports: [BlackSmithCommands],
+  exports: [BlackSmithCommands, HeroExprCommands],
 })
 export class HeroModule {}

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AchivementModule } from './achivement/achivement.module';
 import { AuthModule } from './auth/auth.module';
 import { BattleModule } from './battle/battle.module';
 import { BufferModule } from './buffer/buffer.module';
@@ -7,6 +8,9 @@ import { CommonModule } from './common/common.module';
 import { ConfigModule } from './config/config.module';
 import { CoreModule } from './core/core.module';
 import { FriendModule } from './friend/friend.module';
+import { HonorModule } from './honor/honor.module';
+import { LotteryModule } from './lottery/lottery.module';
+import { TrickModule } from './trick/trick.module';
 import { UnionModule } from './union/union.module';
 import { MarketModule } from './market/market.module';
 import { TaskModule } from './task/task.module';
@@ -53,6 +57,10 @@ import { WorldModule } from './world/world.module';
     FriendModule,
     UnionModule,
     MarketModule,
+    TrickModule,
+    AchivementModule,
+    LotteryModule,
+    HonorModule,
   ],
   controllers: [HealthController],
 })

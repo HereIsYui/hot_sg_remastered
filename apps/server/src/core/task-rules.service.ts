@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { sql } from 'kysely';
 import { DbScope } from '../db/database.module';
 import { cellOf } from '../db/sql-fragments';
+import { phpEmpty, phpIntval } from './php';
 import { UserRules } from './user-rules.service';
 
 /** Task helpers from utils.php. */
@@ -54,6 +55,38 @@ export class TaskRules {
       await sql`replace into sys_user_goal (uid, gid) values (${uid}, ${goal.id})`.execute(
         this.scope.db,
       );
+    }
+  }
+
+  /**
+   * utils.php::completeTaskGoalBySortandType: marks every goal of one `sort`/`type` reached — but
+   * only those whose task is open (state 0). TrickFunc.php drives it with sort 53 (计谋).
+   */
+  async completeTaskGoalBySortandType(uid: number, sort: number, type: number): Promise<void> {
+    const goals = await this.scope.db
+      .selectFrom('cfg_task_goal')
+      .select('id')
+      .where('sort', '=', sort)
+      .where('type', '=', type)
+      .execute();
+    for (const goal of goals) {
+      const row = await this.scope.db
+        .selectFrom('cfg_task_goal')
+        .select('tid')
+        .where('id', '=', goal.id)
+        .executeTakeFirst();
+      const tid = cellOf(row, 'tid');
+      if (phpEmpty(tid)) continue;
+      const task = await this.scope.db
+        .selectFrom('sys_user_task')
+        .selectAll()
+        .where('uid', '=', uid)
+        .where('tid', '=', phpIntval(tid))
+        .where('state', '=', 0)
+        .limit(1)
+        .executeTakeFirst();
+      if (phpEmpty(task)) continue;
+      await this.completeTask(uid, goal.id);
     }
   }
 

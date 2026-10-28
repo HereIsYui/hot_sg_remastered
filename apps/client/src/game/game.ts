@@ -384,6 +384,12 @@ export class Game {
       this.user.username = String((data as unknown[])[0] ?? '');
       this.loadUserInfo();
       gameAlert(i18n('_BloodWarSrc_15'));
+    } else if (command === 'changeUserDesignation' && Array.isArray(data)) {
+      // BloodWar.as:5060-5065: the reply is the new designation name + id.
+      const d = [...(data as unknown[])];
+      this.user.curDesigName = String(d.shift() ?? '');
+      this.user.curDesigId = int(d.shift());
+      gameAlert(i18n('_BloodWarSrc_26'));
     }
   }
 
@@ -530,6 +536,7 @@ export class Game {
     this.session.mailWrite = null;
     this.session.report = null;
     this.session.battle = null;
+    this.session.trickBuffer = false;
   }
 
   /** `TopPanel.onLevelClick`. */
@@ -701,6 +708,46 @@ export class Game {
   showBuildingExchangePanel(building?: BuildingState): void {
     if (building) this.session.exchange = building;
     if (this.session.exchange) this.session.exchangeOpen = true;
+  }
+
+  /** `DialogManager.showTrickDialog(type, params)` (OfficeHeroPanel/WorldActionDialog/TroopDetailDialog). */
+  showTrickDialog(trickType: number, params: (number | string)[] = []): void {
+    this.session.dialog = { name: 'trick', trickType, params };
+  }
+
+  /** `DialogManager.showTrickBufferDialog` (TopPanel 计谋状态): the trick buffer pop-up. */
+  openTrickBuffer(): void {
+    this.session.trickBuffer = true;
+  }
+
+  closeTrickBuffer(): void {
+    this.session.trickBuffer = false;
+  }
+
+  /**
+   * `BottomPanel.showUserAchivement` / `AchivementDialog.onViewUserDetail`: open the 个人成就
+   * dialog for a lord and fetch its overview (`achivement/getOverviewStat [uid]`).
+   */
+  openUserAchievement(userid = this.user.uid, username = this.user.username): void {
+    this.session.dialog = { name: 'userAchievement', userid, username };
+    void this.cmd.sendGlobalCommand('achivement', 'getOverviewStat', [userid]);
+  }
+
+  /** `DialogManager.showStatDialog` (BottomPanel 统计): the 幕僚统计 dialog. */
+  openStat(): void {
+    this.session.dialog = { name: 'stat' };
+  }
+
+  /** `DialogManager.showUserInfoDialog` (InfoPanel portrait): the 君主信息 dialog + its detail. */
+  openUserInfo(): void {
+    this.session.dialog = { name: 'userInfo' };
+    void this.cmd.sendGlobalCommand('user', 'loadUserDetailInfo');
+  }
+
+  /** `TopPanel.__lotteryBtn_click`: the original called the undefined showNewLotteryDialog —
+   *  the remade entry opens the ported LotteryDialog. */
+  openLottery(): void {
+    this.session.dialog = { name: 'lottery' };
   }
 
   // ---- main screen timer (InfoPanel.startTimer / onTimer) ----

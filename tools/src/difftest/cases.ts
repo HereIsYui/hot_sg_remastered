@@ -5203,6 +5203,633 @@ export const cases: DiffCase[] = [
       await s.command(session, 'getStats', 5);
     },
   },
+  {
+    // 计谋只读命令 (TrickFunc.php getTrickList + BufferFunc.php getTrickBuffer): the 锦囊 sum
+    // drives getTrickList's second slot; the buffer panel returns [now, live mem_city_buffer rows].
+    name: 'trick: trick list and city buffer panel',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await s.command(session, 'getTrickList');
+      await s.query('update sys_goods set count = 5 where uid = ? and gid = 13', [uid]);
+      await s.command(session, 'getTrickList');
+      // A foreign city is rejected.
+      await s.command(session, 'getTrickBuffer', FOREIGN_CITY);
+      // No live buffers yet.
+      await s.command(session, 'getTrickBuffer', cid);
+      // Live rows of the trick buffer types (an expired row stays out).
+      await s.query(
+        `insert into mem_city_buffer (cid, buftype, bufparam, endtime) values
+          (?, 1, 6, unix_timestamp() + 600), (?, 8, 0, unix_timestamp() + 1200),
+          (?, 27, 0, unix_timestamp() + 1800), (?, 2, 7, unix_timestamp() - 600)`,
+        [cid, cid, cid, cid],
+      );
+      await s.command(session, 'getTrickBuffer', cid);
+      s.mask(4, 1, '*', 'endtime'); // inserted per side, a second apart
+    },
+  },
+  {
+    // useTrick 的全部前置校验 (TrickFunc.php:692-818): every branch throws before any write, so
+    // the comparison is the [0, message] replies only — no RNG, no jinnang or energy changes.
+    name: 'trick: useTrick validation errors',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const hid = 900401;
+      await s.query(
+        `insert into sys_city_hero (hid, uid, name, sex, face, cid, state, level, command_base,
+           affairs_base, bravery_base, wisdom_base, loyalty, herotype)
+         values (?, ?, '谋士', 0, 0, ?, 0, 1, 50, 1, 1, 60, 100, 1000)`,
+        [hid, uid, cid],
+      );
+      await s.query(
+        'insert into mem_hero_blood (hid, `force`, force_max, energy, energy_max) values (?, 100, 100, 100, 100)',
+        [hid],
+      );
+      // No jinnang yet: the raw not_enough_goods13#N string (client buy dialog).
+      await s.command(session, 'useTrick', hid, 6, 1, FOREIGN_CITY);
+      await s.query('update sys_goods set count = 100 where uid = ? and gid = 13', [uid]);
+      // Unknown trick and a usetype mismatch.
+      await s.command(session, 'useTrick', hid, 999, 0, 0);
+      await s.command(session, 'useTrick', hid, 1, 1, FOREIGN_CITY);
+      // Unknown hero.
+      await s.command(session, 'useTrick', 99999, 1, 0, 0);
+      // A hero away from the city cannot cast own-city tricks (tricktype 2 is exempt).
+      await s.query('update sys_city_hero set state = 2 where hid = ?', [hid]);
+      await s.command(session, 'useTrick', hid, 1, 0, 0);
+      await s.command(session, 'useTrick', hid, 10, 2, 900401);
+      await s.query('update sys_city_hero set state = 0 where hid = ?', [hid]);
+      // Enemy-city prechecks.
+      await s.command(session, 'useTrick', hid, 6, 1, cid);
+      await s.query('update sys_user set union_id = 77 where uid in (1001, 1002)');
+      await s.command(session, 'useTrick', hid, 6, 1, FOREIGN_CITY);
+      await s.query('update sys_user set union_id = 0 where uid in (1001, 1002)');
+      await s.query(
+        'insert into sys_user_state (uid, vacend, reason) values (1002, unix_timestamp() + 600, "")',
+      );
+      await s.command(session, 'useTrick', hid, 6, 1, FOREIGN_CITY);
+      await s.query(
+        'update sys_user_state set vacend = 0, forbiend = unix_timestamp() + 600 where uid = 1002',
+      );
+      await s.command(session, 'useTrick', hid, 6, 1, FOREIGN_CITY);
+      await s.query('delete from sys_user_state where uid = 1002');
+      // Own-troop prechecks: no such troop, no leading hero, wrong state, just ran.
+      await s.command(session, 'useTrick', hid, 10, 2, 99999);
+      await s.query(
+        `insert into sys_troops (id, uid, cid, hid, targetcid, task, state, starttime, pathtime,
+           endtime, soldiers, resource)
+         values (900401, ?, ?, 0, ?, 2, 0, unix_timestamp() - 600, 1200,
+           unix_timestamp() + 600, '1,3,100', '0')`,
+        [uid, cid, FOREIGN_CITY],
+      );
+      await s.command(session, 'useTrick', hid, 10, 2, 900401);
+      await s.query('update sys_troops set state = 4 where id = 900401');
+      await s.command(session, 'useTrick', hid, 10, 2, 900401);
+      await s.query(
+        'update sys_troops set state = 1, lastrun = unix_timestamp() where id = 900401',
+      );
+      await s.command(session, 'useTrick', hid, 10, 2, 900401);
+      s.mask(1); // the wait counts down
+      // Incoming-enemy prechecks (tricktype 3): empty target and a non-arriving troop.
+      await s.command(session, 'useTrick', hid, 11, 3, 99999);
+      await s.query('update sys_troops set state = 1 where id = 900401');
+      await s.command(session, 'useTrick', hid, 11, 3, 900401);
+      await s.command(session, 'useTrick', hid, 12, 3, 99999);
+      // cfg_trick 5 rides usetype 2 (an original data quirk): its 暗度陈仓 gate reads $targetcid,
+      // which tricktype 2 never sets — the 十面埋伏 buffer lookup misses and the trick fails.
+      await s.query('update sys_troops set state = 0 where id = 900401');
+      await s.command(session, 'useTrick', hid, 5, 2, 900401);
+      // Energy drain blocks the cast.
+      await s.query('update mem_hero_blood set energy = 0 where hid = ?', [hid]);
+      await s.command(session, 'useTrick', hid, 1, 0, 0);
+    },
+  },
+  {
+    // 本城四计 (TrickFunc.php trickCaoMuJieBin/KongCheng/PaoZhuangYingYu/JinBiQingYe): the
+    // scripted RNG pins each rate (5+draw%6 / 10+draw%11); the success texts embed MakeEndTime,
+    // which runs a second apart on the two engines — the buffers carry the real assertion.
+    name: 'trick: own-city tricks spend jinnang and energy',
+    tables: { mem_troops_buffer: { offsets: ['endtime'] } },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const hid = 900401;
+      await s.query(
+        `insert into sys_city_hero (hid, uid, name, sex, face, cid, state, level, command_base,
+           affairs_base, bravery_base, wisdom_base, loyalty, herotype)
+         values (?, ?, '谋士', 0, 0, ?, 0, 1, 50, 1, 1, 60, 100, 1000)`,
+        [hid, uid, cid],
+      );
+      await s.query(
+        'insert into mem_hero_blood (hid, `force`, force_max, energy, energy_max) values (?, 100, 100, 100, 100)',
+        [hid],
+      );
+      await s.query('update sys_goods set count = 100 where uid = ? and gid = 13', [uid]);
+      // The scripted sequence restarts on every request, so each cast arms its own draw:
+      // 草木皆兵 rate 5+1%6=6, 空城计 10+13%11=12, 抛砖引玉 5, 坚壁清野 10+25%11=13.
+      for (const [trickid, draw] of [
+        [1, 1],
+        [2, 13],
+        [3, 0],
+        [4, 25],
+      ] as const) {
+        s.rng([draw]);
+        await s.command(session, 'useTrick', hid, trickid, 0, 0);
+        s.mask(4, 0); // "…,持续时间至<MakeEndTime>"
+      }
+      s.stopRng();
+      // The buffers landed with the pinned bufparams and running end times.
+      await s.command(session, 'getTrickBuffer', cid);
+      s.mask(4, 1, '*', 'endtime'); // the trick endtimes ran one request apart
+      // An empty energy pool blocks the cast.
+      await s.query('update mem_hero_blood set energy = 0 where hid = ?', [hid]);
+      await s.command(session, 'useTrick', hid, 1, 0, 0);
+    },
+  },
+  {
+    // 敌城三计 (trickYaoYinHuoZhong/ChenHuoDaJie/FenShaoLiangCao): first cast succeeds and writes
+    // the 24h/6h city cooldown, the immediate second cast answers the fail text — every reply and
+    // report text is deterministic (no MakeEndTime), so they compare verbatim.
+    name: 'trick: enemy-city tricks drain morale, food and protection',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const hid = 900401;
+      const target = 188128; // uid 1002's 州城: morale 90, food 9100, cooldown stamps 0
+      await s.query(
+        `insert into sys_city_hero (hid, uid, name, sex, face, cid, state, level, command_base,
+           affairs_base, bravery_base, wisdom_base, loyalty, herotype)
+         values (?, ?, '谋士', 0, 0, ?, 0, 1, 50, 1, 1, 60, 100, 1000)`,
+        [hid, uid, cid],
+      );
+      await s.query(
+        'insert into mem_hero_blood (hid, `force`, force_max, energy, energy_max) values (?, 100, 100, 100, 100)',
+        [hid],
+      );
+      await s.query('update sys_goods set count = 100 where uid = ? and gid = 13', [uid]);
+      for (const trickid of [6, 15, 20]) {
+        await s.command(session, 'useTrick', hid, trickid, 1, target);
+        await s.command(session, 'useTrick', hid, trickid, 1, target);
+      }
+    },
+  },
+  {
+    // 挑拨离间 (trickTiaoBoLiJian) plus the chief-wisdom roll, on a purpose-built target city so
+    // the original's `order by rand()` always has exactly one candidate per pick; 围魏救赵/
+    // 调虎离山 recall the target's marches.
+    name: 'trick: instigate defenders, chief roll and recall tricks',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const hid = 900401;
+      const target = 300005; // a fresh uid-1002 city: no defenders beyond the two inserted below
+      await s.query(
+        `insert into sys_city_hero (hid, uid, name, sex, face, cid, state, level, command_base,
+           affairs_base, bravery_base, wisdom_base, loyalty, herotype)
+         values (?, ?, '谋士', 0, 0, ?, 0, 1, 50, 1, 1, 60, 100, 1000)`,
+        [hid, uid, cid],
+      );
+      await s.query(
+        'insert into mem_hero_blood (hid, `force`, force_max, energy, energy_max) values (?, 100, 100, 100, 100)',
+        [hid],
+      );
+      await s.query('update sys_goods set count = 100 where uid = ? and gid = 13', [uid]);
+      await s.query(
+        "insert into sys_city (cid, uid, name, type, state, province) values (?, 1002, '计谋靶城', 0, 0, 10)",
+        [target],
+      );
+      await s.query('insert into mem_city_schedule (cid) values (?)', [target]);
+      await s.query(
+        `insert into sys_city_hero (hid, uid, name, sex, face, cid, state, level, wisdom_base,
+           loyalty, herotype)
+         values (900501, 1002, '守将甲', 0, 0, ?, 0, 1, 30, 100, 1000),
+                (900502, 1002, '军师乙', 0, 0, ?, 0, 1, 200, 100, 1000)`,
+        [target, target],
+      );
+      // The target city keeps marches for 围魏救赵 (900505) and a 以逸待劳 one for 调虎离山 (900506).
+      const troop = `insert into sys_troops
+          (id, uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource)
+        values (?, 1002, ?, 60, ?, 2, 0, unix_timestamp() - 600, 1200,
+          unix_timestamp() + 600, '1,3,100', '0')`;
+      await s.query(troop, [900505, target, cid]);
+      await s.query(troop, [900506, target, cid]);
+      await s.query(
+        `insert into mem_troops_buffer (troopid, buftype, bufparam, endtime)
+         values (900506, 26, '', 2000000000)`,
+      );
+      // Chief roll lost: 城守 军师乙 (智谋 200) out-rolls the caster — 1+199%200 = 200 > 60.
+      await s.query('update sys_city set chiefhid = 900502 where cid = ?', [target]);
+      s.rng([199]);
+      await s.command(session, 'useTrick', hid, 15, 1, target);
+      // 挑拨离间 skips the chief roll (TrickFunc.php:827) — restore the empty chiefship.
+      await s.query('update sys_city set chiefhid = 0 where cid = ?', [target]);
+      s.rng([0]); // every request draws seq[0]: the roll 1+0%90 answers 1 ≤ 60
+      // No in-city hero to catch the slander.
+      await s.query('update sys_city_hero set state = 2 where hid in (900501, 900502)');
+      await s.command(session, 'useTrick', hid, 7, 1, target);
+      await s.query('update sys_city_hero set state = 0 where hid = 900501');
+      // 守将甲 loses ceil(60/10)=6 loyalty, the 24h hero cooldown starts.
+      await s.command(session, 'useTrick', hid, 7, 1, target);
+      // Same hero inside the cooldown window (the cooldown answers before any roll).
+      await s.command(session, 'useTrick', hid, 7, 1, target);
+      // 军师乙 out-rolls the caster: 1+259%260 = 260 > 60 (900501 leaves the candidacy first).
+      s.rng([259]);
+      await s.query('update sys_city_hero set state = 2 where hid = 900501');
+      await s.query('update sys_city_hero set state = 0 where hid = 900502');
+      await s.command(session, 'useTrick', hid, 7, 1, target);
+      s.stopRng();
+      // 调虎离山 recalls only the 以逸待劳 troops; 围魏救赵 recalls whatever still marches.
+      await s.command(session, 'useTrick', hid, 27, 1, target);
+      await s.command(session, 'useTrick', hid, 19, 1, target);
+      // A second 围魏 inside the 24h city cooldown fails.
+      await s.command(session, 'useTrick', hid, 19, 1, target);
+    },
+  },
+  {
+    // 十面埋伏/上屋抽梯 (trickShiMianMaiFu/ShangWuChouTi) and the mem_city_buffer gates the rest
+    // of the game reads: 出征 blocked by 十面埋伏 (buftype 8), released by 暗度陈仓 (5), allied
+    // reinforcements blocked by 上屋抽梯 (28). Their reports embed MakeEndTime — masked; the
+    // replies carry only MakeTimeLeft durations and compare verbatim.
+    name: 'trick: blockade tricks and the startTroop buffer gates',
+    tables: {
+      sys_report: { map: { content: () => '<masked>' } },
+      mem_troops_buffer: { offsets: ['endtime'] },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const hid = 900401;
+      const target = 188128; // uid 1002's city: schedule cooldown stamps 0, so first casts run
+      const marchTarget = 188128; // a real world tile for the 出征 gate probes
+      await s.query(
+        `insert into sys_city_hero (hid, uid, name, sex, face, cid, state, level, command_base,
+           affairs_base, bravery_base, wisdom_base, loyalty, herotype)
+         values (?, ?, '谋士', 0, 0, ?, 0, 1, 50, 1, 1, 60, 100, 1000)`,
+        [hid, uid, cid],
+      );
+      await s.query(
+        'insert into mem_hero_blood (hid, `force`, force_max, energy, energy_max) values (?, 100, 100, 100, 100)',
+        [hid],
+      );
+      await s.query('update sys_goods set count = 100 where uid = ? and gid = 13', [uid]);
+      await s.command(session, 'useTrick', hid, 8, 1, target);
+      await s.command(session, 'useTrick', hid, 8, 1, target); // 24h city cooldown
+      await s.command(session, 'useTrick', hid, 28, 1, target);
+      // The 5h cooldown only answers cleanly one second after the cast (a same-second delta=0
+      // trips the original's `0 == false` re-insert, which dies with the PearDB error).
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+      await s.command(session, 'useTrick', hid, 28, 1, target); // 5h city cooldown
+      // With the schedule row gone the cast re-seeds last_trick_shangwuchouti=0 and succeeds.
+      await s.query('delete from mem_city_schedule where cid = ?', [target]);
+      await s.command(session, 'useTrick', hid, 28, 1, target);
+      // 出征 with the blockade live: the gate error text counts down the remaining seconds.
+      await s.query('delete from sys_troops where uid = ? and cid = ?', [uid, cid]);
+      await s.query(
+        `insert into mem_city_buffer (cid, buftype, bufparam, endtime)
+         values (?, 8, 0, unix_timestamp() + 600)`,
+        [cid],
+      );
+      const march = (task: number) =>
+        s.dialog(session, cid, 8, 40, 'StartTroop', 0, marchTarget, task, 0, '0', '0,0,0,0,0,');
+      await march(3);
+      s.mask(1); // the blockade error counts down the remaining seconds
+      // 暗度陈仓 opens the gate; the 掠夺 cast then fails on the missing hero instead.
+      await s.query(
+        `insert into mem_city_buffer (cid, buftype, bufparam, endtime)
+         values (?, 5, 0, unix_timestamp() + 600)
+         on duplicate key update endtime = unix_timestamp() + 600`,
+        [cid],
+      );
+      await march(3);
+      // 上屋抽梯 (the cast above left its live buftype-28 row) blocks even a plain 运输 while
+      // both unions match.
+      await s.query('delete from mem_city_buffer where cid = ? and buftype in (5, 8)', [cid]);
+      await s.query('update sys_user set union_id = 88 where uid in (1001, 1002)');
+      await march(0);
+      // With the trick buffer gone the cast reaches the 运输 validation instead.
+      await s.query('delete from mem_city_buffer where cid = ? and buftype = 28', [target]);
+      await march(0);
+      await s.query('update sys_user set union_id = 0 where uid in (1001, 1002)');
+    },
+  },
+  {
+    // 军队五计 (金蝉脱壳/以逸待劳/千里奔袭 on the own march; 八门金锁/关门打狗/诱敌深入 on the
+    // enemy march) plus 虚张声势/偃旗息鼓 troops buffers. The scripted sequence restarts per
+    // request, so draw 0 pins every win and the final 259 loses the 900502 roll.
+    name: 'trick: troop tricks on own and enemy marches',
+    tables: { mem_troops_buffer: { offsets: ['endtime'] } },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const hid = 900401;
+      const target = 188128; // uid 1002's city
+      await s.query(
+        `insert into sys_city_hero (hid, uid, name, sex, face, cid, state, level, command_base,
+           affairs_base, bravery_base, wisdom_base, loyalty, herotype)
+         values (?, ?, '谋士', 0, 0, ?, 0, 1, 50, 1, 1, 60, 100, 1000)`,
+        [hid, uid, cid],
+      );
+      await s.query(
+        'insert into mem_hero_blood (hid, `force`, force_max, energy, energy_max) values (?, 100, 100, 100, 100)',
+        [hid],
+      );
+      await s.query('update sys_goods set count = 100 where uid = ? and gid = 13', [uid]);
+      const march = `insert into sys_troops
+          (id, uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource)
+        values (?, ?, ?, ?, ?, 2, 0, unix_timestamp() - 600, 12000,
+          unix_timestamp() + 11400, '1,3,100', '0')`;
+      await s.query(march, [900401, uid, cid, hid, target]);
+      await s.query(march, [900501, 1002, target, 900501, cid]);
+      await s.query(march, [900502, 1002, target, 900502, cid]);
+      // The marching heroes: 900501 智谋 30 loses the rolls, 900502 智谋 200 wins them.
+      await s.query(
+        `insert into sys_city_hero (hid, uid, name, sex, face, cid, state, level, wisdom_base,
+           loyalty, herotype)
+         values (900501, 1002, '守将甲', 0, 0, ?, 2, 1, 30, 100, 1000),
+                (900502, 1002, '军师乙', 0, 0, ?, 2, 1, 200, 100, 1000)`,
+        [target, target],
+      );
+      // 以逸待劳 queues the marching troop until 2033 (it needs state 0; 金蝉脱壳 turns it back).
+      await s.command(session, 'useTrick', hid, 26, 2, 900401);
+      // 金蝉脱壳: a marching troop turns back first, then the return shortens; the 1h lastrun
+      // cooldown makes the immediate second cast fail with a counting-down wait (masked).
+      await s.command(session, 'useTrick', hid, 10, 2, 900401);
+      await s.command(session, 'useTrick', hid, 10, 2, 900401);
+      s.mask(1); // the wait counts down
+      // 千里奔袭 accelerates the returning troop, then hits its own cooldown.
+      await s.command(session, 'useTrick', hid, 13, 2, 900401);
+      await s.command(session, 'useTrick', hid, 13, 2, 900401);
+      s.rng([0]); // every request draws seq[0]=0: rates 5/10, rolls answer 1 ≤ 60
+      // 虚张声势 5×, 偃旗息鼓 10% — replies masked (MakeEndTime), buffers carry the rate.
+      await s.command(session, 'useTrick', hid, 21, 2, 900401);
+      s.mask(4, 0);
+      await s.command(session, 'useTrick', hid, 22, 2, 900401);
+      s.mask(4, 0);
+      // Enemy marches: 八门金锁 succeeds then cools down; 关门打狗 pins noback; 诱敌深入 speeds
+      // the enemy up then cools down.
+      await s.command(session, 'useTrick', hid, 11, 3, 900501);
+      await s.command(session, 'useTrick', hid, 11, 3, 900501);
+      await s.command(session, 'useTrick', hid, 12, 3, 900501);
+      await s.command(session, 'useTrick', hid, 23, 3, 900501);
+      await s.command(session, 'useTrick', hid, 23, 3, 900501);
+      s.stopRng();
+      // The fresh 900502 troop out-rolls the caster: 1+259%260 = 260 > 60.
+      s.rng([259]);
+      await s.command(session, 'useTrick', hid, 11, 3, 900502);
+      s.stopRng();
+    },
+  },
+  {
+    // 釜底抽薪 (trickHuDiChouXin): recalls the target's famous-hero marches state-by-state via
+    // the extracted recallTroop, drops their 采集 rows and cancels a running 历练 through the
+    // extracted cancelExpr; the 24h city cooldown answers the second cast.
+    name: 'trick: famous-hero recall pulls troops and cancels exprs',
+    tables: { sys_hero_expr: { offsets: ['starttime', 'endtime'] } },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const hid = 900401;
+      const target = 188128; // uid 1002's city, schedule cooldown stamps 0
+      await s.query(
+        `insert into sys_city_hero (hid, uid, name, sex, face, cid, state, level, command_base,
+           affairs_base, bravery_base, wisdom_base, loyalty, herotype)
+         values (?, ?, '谋士', 0, 0, ?, 0, 1, 50, 1, 1, 60, 100, 1000)`,
+        [hid, uid, cid],
+      );
+      await s.query(
+        'insert into mem_hero_blood (hid, `force`, force_max, energy, energy_max) values (?, 100, 100, 100, 100)',
+        [hid],
+      );
+      await s.query('update sys_goods set count = 100 where uid = ? and gid = 13', [uid]);
+      // Two famous marches (hid < 2000): one marching (state 0), one garrisoned (state 4, 采集).
+      const march = `insert into sys_troops
+          (id, uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource)
+        values (?, 1002, ?, ?, ?, 2, ?, unix_timestamp() - 600, 12000,
+          unix_timestamp() + 11400, '1,3,100', '0')`;
+      await s.query(march, [900601, target, 60, cid, 0]);
+      await s.query(march, [900602, target, 61, 209355, 4]);
+      await s.query(
+        'insert into sys_gather (wid, troopid, fooduse, level, starttime) values (35, 900602, 0, 1, 0)',
+      );
+      // A hero out on 历练 (state 10) with a running expr booking.
+      await s.query(
+        `insert into sys_city_hero (hid, uid, name, sex, face, cid, state, level, wisdom_base,
+           loyalty, herotype)
+         values (1999, 1002, '历练将', 0, 0, ?, 10, 1, 40, 100, 1000)`,
+        [target],
+      );
+      await s.query(
+        `insert into sys_hero_expr (uid, cid, hid, type, starttime, endtime, hours, carrymoney,
+           accTimes, state)
+         values (1002, ?, 1999, 1, unix_timestamp() - 3600, unix_timestamp() + 3600, 2, 0, 0, 0)`,
+        [target],
+      );
+      await s.command(session, 'useTrick', hid, 25, 1, target);
+      await s.command(session, 'useTrick', hid, 25, 1, target); // 24h city cooldown
+    },
+  },
+  {
+    // 成就列表 (AchivementFunc.php getOverviewStat/getAchivementsByGroup): the finished/unfinished
+    // pages, 5-per-page pagination and the two unlock gates (sys_user.state 新手保护, mem_state 5
+    // 黄巾之乱) over the shipped config.
+    name: 'achievements: overview, group pages and unlock gates',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      await s.command(session, 'getOverviewStat', uid);
+      await s.command(session, 'getOverviewStat', 1002); // the uid rides the param, not the session
+      await s.query(
+        'insert into sys_user_achivement (uid, achivement_id, time) values (?, 1, 1), (?, 12, 2), (?, 20019, 100)',
+        [uid, uid, uid],
+      );
+      await s.command(session, 'getOverviewStat', uid);
+      // Unlocked set {0} only (state 1 is neither 0 nor 2): 全部/已完成/未完成 pages of group 1.
+      await s.command(session, 'getAchivementsByGroup', uid, 1, 0, 0, 0);
+      await s.command(session, 'getAchivementsByGroup', uid, 1, 0, 0, 1);
+      await s.command(session, 'getAchivementsByGroup', uid, 1, 0, 1, 0);
+      await s.command(session, 'getAchivementsByGroup', uid, 1, 0, 2, 0);
+      // 脱离新手保护 unlocks open_time 1.
+      await s.query('update sys_user set state = 0 where uid = ?', [uid]);
+      await s.command(session, 'getAchivementsByGroup', uid, 1, 0, 0, 0);
+      await s.command(session, 'getAchivementsByGroup', uid, 3, 0, 0, 0);
+      // 黄巾之乱 finished unlocks open_time 2.
+      await s.query('update mem_state set value = 1 where state = 5');
+      await s.command(session, 'getAchivementsByGroup', uid, 1, 0, 0, 0);
+      await s.command(session, 'getAchivementsByGroup', uid, 1, 0, 0, 2);
+      await s.command(session, 'getOverviewStat', uid);
+      await s.query('update sys_user set state = 1 where uid = ?', [uid]);
+      await s.query('update mem_state set value = 0 where state = 5');
+      // An unknown type returns the bare empty list, like the original's fall-through.
+      await s.command(session, 'getAchivementsByGroup', uid, 1, 0, 9, 0);
+    },
+  },
+  {
+    // 成就详情 (getAchivementDetail): type 2 progress runs the cfg_achivement.sql_current_value
+    // template (sprintf'd with the uid) as raw SQL; type 3 runs each cfg_achivement_goal.
+    // sql_check_goal; completed rows answer the canned progress; a missing row auto-vivifies.
+    name: 'achievements: detail progress templates',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      // Type 2 template with %s: no log row yet → the cell reads false.
+      await s.command(session, 'getAchivementDetail', uid, 1);
+      await s.query('insert into log_action_count (uid, aid, count) values (?, 17, 7)', [uid]);
+      await s.command(session, 'getAchivementDetail', uid, 1);
+      // A template without a placeholder (id 22 hardcodes uid 26999) and one with a trailing
+      // semicolon (id 30) are executed as-is, like the original sprintf.
+      await s.command(session, 'getAchivementDetail', uid, 22);
+      await s.command(session, 'getAchivementDetail', uid, 30);
+      // Completed type 2: userValue echoes targetValue.
+      await s.query('insert into sys_user_achivement (uid, achivement_id, time) values (?, 1, 5)', [
+        uid,
+      ]);
+      await s.command(session, 'getAchivementDetail', uid, 1);
+      // Type 3: the rank-table goals answer isDone 0/1, completed rows answer isDone 1.
+      await s.command(session, 'getAchivementDetail', uid, 20019);
+      await s.query(
+        'insert into sys_user_achivement (uid, achivement_id, time) values (?, 20019, 6)',
+        [uid],
+      );
+      await s.command(session, 'getAchivementDetail', uid, 20019);
+      // A missing achievement row auto-vivifies {sql_current_value: ""}, as PHP's false did.
+      await s.command(session, 'getAchivementDetail', uid, 99999);
+    },
+  },
+  {
+    // 幸运宝盒 (LotteryFunc.php): the shipped mem_state 150=1 keeps every gate command on
+    // not_available; the plain reads (getTodayCount, useMoney) and the getWin fatal compare
+    // verbatim. The 11/19点 window cannot be pinned — inside it the 150=0 assertions expect the
+    // next error instead, so the case stays correct whichever hour it runs in. The seeded
+    // log_lottery datetimes land a second apart per side, so the delta compares without them.
+    name: 'lottery: gate errors, side rooms and the hour window',
+    tables: { log_lottery: { map: { time: () => '<masked>' } } },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      await s.command(session, 'getTodayCount');
+      await s.query(
+        'insert into log_lottery (uid, time, gid, type) values (?, now(), 13, 0), (?, now(), 13, 0)',
+        [uid, uid],
+      );
+      await s.query(
+        'insert into log_lottery (uid, time, gid, type) values (?, now() - interval 2 hour, 13, 0)',
+        [uid],
+      );
+      await s.command(session, 'getTodayCount');
+      // The whitelisted useMoney: the param array outranks 1 in PHP, so 6 元宝 always go.
+      const [money] = await s.query<{ money: string }>('select money from sys_user where uid = ?', [
+        uid,
+      ]);
+      await s.command(session, 'useMoney');
+      await s.command(session, 'useMoney');
+      await s.query('update sys_user set money = 5 where uid = ?', [uid]);
+      await s.command(session, 'useMoney');
+      await s.query('update sys_user set money = ? where uid = ?', [money?.money ?? 0, uid]);
+      // getWin as a command dies on the original's missing argument 3 — verbatim fatal text.
+      await s.command(session, 'getWin');
+      // Gates, in their original order: nobility first, then the 150 switch, then the hour.
+      await s.command(session, 'startLottery');
+      await s.query('update sys_user set nobility = 1 where uid = ?', [uid]);
+      await s.command(session, 'startLottery');
+      await s.command(session, 'getLotteryReward');
+      await s.command(session, 'autoGetReward');
+      await s.command(session, 'addCount');
+      await s.command(session, 'restart', 5, 0, '');
+      const [clock] = await s.query<{ h: string }>('select date_format(now(), "%H") as h');
+      const lottoHour = clock?.h === '11' || clock?.h === '19';
+      await s.query('update mem_state set value = 0 where state = 150');
+      if (lottoHour) {
+        // The window is open: startLottery reaches the paid-chain dry-out (the free draw was
+        // spent above), the round commands reach the missing-round check instead.
+        await s.command(session, 'startLottery');
+        await s.command(session, 'getLotteryReward');
+        await s.command(session, 'restart', 5, 0, '');
+      } else {
+        await s.command(session, 'startLottery');
+        await s.command(session, 'getLotteryReward');
+        await s.command(session, 'autoGetReward');
+        await s.command(session, 'addCount');
+        await s.command(session, 'restart', 5, 0, '');
+      }
+      await s.query('update mem_state set value = 1 where state = 150');
+      await s.query('update sys_user set nobility = 0 where uid = ?', [uid]);
+    },
+  },
+  {
+    // 联盟外交写侧 (UnionFunc.php addUnionRelation/pendingFriendly/removeUnionRelation): the
+    // neutral setting, the 900s frequency window, the repeated-relation rejections and every
+    // byName/context error — the messages with a live countdown are masked.
+    name: 'union: diplomacy write errors, neutral and hostility',
+    run: async (s) => {
+      const first = await s.login(EXISTING_PLAYER);
+      const firstCid = await lastCity(s, first.uid);
+      await s.query('update mem_city_resource set gold = 100000 where cid = ?', [firstCid]);
+      const firstUnion = Number(
+        ((await s.command(first, 'createUnion', '外写甲')) as unknown[])[0],
+      );
+      s.alias(firstUnion, '<wunion1>');
+      const second = await s.login('judingwan');
+      const secondCid = await lastCity(s, second.uid);
+      await s.query('update mem_city_resource set gold = 100000 where cid = ?', [secondCid]);
+      const secondUnion = Number(
+        ((await s.command(second, 'createUnion', '外写乙')) as unknown[])[0],
+      );
+      s.alias(secondUnion, '<wunion2>');
+      // Context and byName validation.
+      await s.command(first, 'addUnionRelationByName', 0, '');
+      await s.command(first, 'addUnionRelationByName', 0, '一二三四五六七八九');
+      await s.command(first, 'addUnionRelationByName', 0, '不存在盟');
+      await s.command(first, 'addUnionRelation', 5, secondUnion);
+      const outsider = await s.login('difftest_invalid');
+      await s.command(outsider, 'addUnionRelationByName', 0, '外写乙');
+      await s.command(first, 'addUnionRelationByName', 1, '外写甲');
+      // Neutral applies immediately; repeating it answers have_done (中立).
+      await s.command(first, 'addUnionRelationByName', 1, '外写乙');
+      await s.command(first, 'addUnionRelationByName', 1, '外写乙');
+      // The 900s window guards a change of relation.
+      await s.command(first, 'addUnionRelationByName', 2, '外写乙');
+      s.mask(1); // the frequency error counts down the remaining wait
+      // Past the window: both hostile rows take one timestamp; a re-declare answers hostile_have_done.
+      await s.query(
+        'update sys_union_relation set time = unix_timestamp() - 1000 where unionid = ? and target = ?',
+        [firstUnion, secondUnion],
+      );
+      await s.command(first, 'addUnionRelationByName', 2, '外写乙');
+      // The target's own declare reuses the original timestamp (no 8-hour reset).
+      await s.command(second, 'addUnionRelationByName', 2, '外写甲');
+      await s.command(first, 'addUnionRelationByName', 2, '外写乙');
+      // Hostile removal; an immediate second removal hits removeUnionRelation.too_frequency.
+      await s.command(first, 'removeUnionRelation', 2, secondUnion);
+      await s.command(first, 'removeUnionRelation', 2, secondUnion);
+      s.mask(1); // the frequency error counts down the remaining wait
+      await s.command(first, 'removeUnionRelation', 9, secondUnion);
+      await s.command(first, 'removeUnionRelation', 1, secondUnion);
+      // Friendly: an unanswered attempt, a duplicate, the accept and its lists.
+      await s.command(second, 'pendingFriendly', 1, firstUnion);
+      await s.query(
+        'update sys_union_relation set time = unix_timestamp() - 1000 where unionid = ? and target = ?',
+        [firstUnion, secondUnion],
+      );
+      await s.command(first, 'addUnionRelationByName', 0, '外写乙');
+      await s.command(second, 'getRequestList');
+      s.mask(4, 1, '*', 'time'); // from_unixtime stamps a per-second clock
+      await s.command(first, 'addUnionRelationByName', 0, '外写乙');
+      await s.command(second, 'getRequestList');
+      s.mask(4, 1, '*', 'time');
+      await s.command(second, 'pendingFriendly', 1, firstUnion);
+      s.mask(4, 1, '*', 'time');
+      await s.command(first, 'getUnionRelation', 0);
+      await s.command(second, 'pendingFriendly', 0, firstUnion);
+    },
+  },
 ];
 
 async function seedScoutPatrol(

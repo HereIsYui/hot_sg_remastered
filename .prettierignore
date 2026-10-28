@@ -6,3 +6,4 @@ apps/server/src/db/schema.generated.ts
 apps/client/public/assets/
 design/
 docs/
+.zcode/

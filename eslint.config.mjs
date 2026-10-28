@@ -12,6 +12,8 @@ export default tseslint.config(
       'legacy/**',
       'apps/client/public/assets/**',
       'apps/server/src/db/schema.generated.ts',
+      // ZCode dynamic-workflow drafts and run transcripts: machine-managed tooling state.
+      '.zcode/**',
     ],
   },
   js.configs.recommended,

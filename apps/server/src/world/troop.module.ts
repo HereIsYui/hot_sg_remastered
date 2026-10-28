@@ -29,5 +29,6 @@ import { TroopTick } from './troop.tick';
     ReportCommands,
     BattleReadCommands,
   ],
+  exports: [TroopCommands],
 })
 export class TroopModule {}

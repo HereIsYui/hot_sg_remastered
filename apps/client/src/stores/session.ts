@@ -18,7 +18,10 @@ export type PlainDialog =
   | 'favourites'
   | 'friend'
   | 'union'
-  | 'rank';
+  | 'rank'
+  | 'stat'
+  | 'userInfo'
+  | 'lottery';
 
 /**
  * `DialogManager.showCreateBuildingDialog(kind)` (0 fields, 1 inner, 2 wall), `showBuildingDialog`,
@@ -33,6 +36,9 @@ export type DialogState =
   | { name: 'worldAction'; cid: number }
   | { name: 'cityField'; wid: number }
   | { name: 'cityMerge'; selectCid: number }
+  | { name: 'trick'; trickType: number; params: (number | string)[] }
+  | { name: 'userAchievement'; userid: number; username: string }
+  | { name: 'achievementRank' }
   | { name: PlainDialog };
 
 /**
@@ -118,5 +124,7 @@ export const useSessionStore = defineStore('session', {
     report: null as { open: boolean } | null,
     /** BattleDialog (战斗 view): the battle being watched, opened from a report or a troop. */
     battle: null as { battleid: number; userIsAttack: boolean } | null,
+    /** TrickBufferDialog (计谋状态, TopPanel trick button) stacked over the scene. */
+    trickBuffer: false,
   }),
 });

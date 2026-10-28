@@ -188,6 +188,19 @@ function onSendMessage(): void {
   game.showMailWrite(null, lordName.value);
 }
 
+/** `onStrategyMyCity` (AS3 2297-2300): 本城计谋 opens the TrickDialog on the current city. */
+function onStrategyMyCity(): void {
+  game.showTrickDialog(0);
+}
+
+/**
+ * `onStrategyOtherCity` (AS3 2323-2329): 敌城计谋 with the clicked city as the target (the
+ * TrickDialog composes the 使用目标 line from [cid, cityname]).
+ */
+function onStrategyOtherCity(): void {
+  game.showTrickDialog(1, [props.cid, title.value]);
+}
+
 const unregister = game.addGlobalReceiver('world', (command, data) => {
   if (command === 'getWorldFieldInfo') field.value = parseWorldFieldInfo(data);
   else if (command === 'getGovernInfo') onGetGovernInfo(data);
@@ -297,7 +310,7 @@ onUnmounted(unregister);
         @click="onCampaign(1)"
       />
     </div>
-    <!-- army-action buttons: campaign targets wired, 管辖 opens GovernPanel -->
+    <!-- army-action buttons: campaign targets wired, 管辖 opens GovernPanel, 计谋 the TrickDialog -->
     <div v-else-if="!isSelf" class="actions">
       <FxButton
         v-for="(a, i) in CAMPAIGN_ACTIONS"
@@ -321,17 +334,38 @@ onUnmounted(unregister);
         :label="i18n('World_WorldActionDialog_45_1') || '政令'"
         @click="onGovern"
       />
+      <!-- 计谋 (`onStrategyOtherCity`, AS3 2323): city cells only -->
+      <FxButton
+        v-if="isCity"
+        :x="20 + ((CAMPAIGN_ACTIONS.length + (canGovern ? 1 : 0)) % 4) * 90"
+        :y="256 + Math.floor((CAMPAIGN_ACTIONS.length + (canGovern ? 1 : 0)) / 4) * 34"
+        :w="80"
+        :h="28"
+        style-name="ButtonYellow"
+        :label="i18n('World_WorldActionDialog_16_1') || '计谋'"
+        @click="onStrategyOtherCity"
+      />
     </div>
     <!-- own city: 合城 (`showMergeCityDialog`, AS3 2249-2253) preselects it as the 分城 -->
     <div v-else-if="isCity" class="actions">
       <FxButton
-        :x="150"
+        :x="60"
         :y="256"
         :w="80"
         :h="28"
         style-name="ButtonGreen"
         :label="i18n('World_WorldActionDialog_47_1') || '合城'"
         @click="game.showCityMergeDialog(cid)"
+      />
+      <!-- 计谋 (`onStrategyMyCity`, AS3 2297) -->
+      <FxButton
+        :x="150"
+        :y="256"
+        :w="80"
+        :h="28"
+        style-name="ButtonYellow"
+        :label="i18n('World_WorldActionDialog_2_1') || '计谋'"
+        @click="onStrategyMyCity"
       />
     </div>
   </FxCanvas>

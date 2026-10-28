@@ -82,4 +82,14 @@ export const tableRules: Record<string, TableRule> = {
   // A filed report (HandleTroop scout, battle settlements) stamps `time` with unix_timestamp();
   // the two sides run a second or two apart, so compare it relative to the case start.
   sys_report: { offsets: ['time'] },
+  // HandleUsersRank fills these by walking an ORDER BY; rows with equal sort keys may permute
+  // between the engines (legacy MySQL 5.7 and the dev MySQL 8.4 break such ties differently),
+  // so tied rows compare at their group's lowest rank and every other position stays exact.
+  // rank_hero sorts by (level, command_base+add_on), and command carries base+add_on+level,
+  // so two rows tie there exactly when level and command are both equal.
+  rank_hero: { tieRank: { column: 'rank', keys: ['level', 'command'] } },
+  rank_hero_bravery: { tieRank: { column: 'rank', keys: ['bravery'] } },
+  rank_hero_wisdom: { tieRank: { column: 'rank', keys: ['wisdom'] } },
+  rank_hero_affairs: { tieRank: { column: 'rank', keys: ['affairs'] } },
+  rank_hero_command: { tieRank: { column: 'rank', keys: ['command'] } },
 };

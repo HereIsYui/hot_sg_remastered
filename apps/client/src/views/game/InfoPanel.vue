@@ -148,7 +148,10 @@ const cityIndex = computed({
     <FxImage :x="1" :y="0" source="images/leftboard_new.jpg" />
     <FxCanvas :left="2" :right="8" :top="2" :h="210">
       <FxCanvas :x="11" :y="13" :w="68" :h="84" style-name="FramePicture">
-        <FxImage :x="2" :y="2" :w="64" :h="80" :source="user.faceImage" hand />
+        <!-- `onClickUserInfoBtn` (InfoPanel.as:2802/3445): the portrait opens 君主信息 -->
+        <div class="portrait" @click="game.openUserInfo()">
+          <FxImage :x="2" :y="2" :w="64" :h="80" :source="user.faceImage" hand />
+        </div>
         <FxLabel
           class="glow"
           :x="0"
@@ -398,6 +401,11 @@ const cityIndex = computed({
 </template>
 
 <style scoped>
+.portrait {
+  position: absolute;
+  inset: 0;
+}
+
 .glow {
   text-shadow:
     0 0 2px #000,

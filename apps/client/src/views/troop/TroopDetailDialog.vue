@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useGame } from '../../game/game';
-import { parseTroopDetail, type TroopDetail, type TroopRow } from '../../game/troop';
+import { parseTroopDetail, taskName, type TroopDetail, type TroopRow } from '../../game/troop';
 import { cid2wid, makeCid } from '../../game/world';
 import { i18n } from '../../i18n';
 import { useGlobalStore } from '../../stores/global';
@@ -37,6 +37,12 @@ const kickVisible = computed(() => props.armyType === 'union');
 const mailVisible = computed(() => props.armyType === 'enemy' || props.armyType === 'union');
 const gatherStartVisible = computed(() => props.armyType === 'self' && state.value === 4);
 const gatherEndVisible = computed(() => props.armyType === 'self' && state.value === 5);
+/** `mJimouVisible`: own marching/returning troops and enemy troops on their way (state 0). */
+const jimouVisible = computed(
+  () =>
+    (props.armyType === 'self' && (state.value === 0 || state.value === 1)) ||
+    (props.armyType === 'enemy' && state.value === 0),
+);
 
 const title = computed(() => i18n('Troop_TroopDetailDialog_1_1') || '军队详情');
 const soldierColumns = [
@@ -92,6 +98,26 @@ async function onGatherEnd(): Promise<void> {
   ) {
     game.sendGlobalCommand('troop', 'gatherFieldEnd', [cid2wid(props.troop.targetcid)]);
     emit('close');
+  }
+}
+
+/**
+ * `TroopDetailDialog.onJimou` (AS3 1733-1753): the 计谋 dialog on this troop — tricktype 2 for an
+ * own troop `[troopid, hid, 目标城, 任务名, targetcid]`, tricktype 3 for an enemy troop
+ * `[troopid, 目标城]`.
+ */
+function onJimou(): void {
+  const targetCity = `${props.troop.targetcityName}${makeCid(props.troop.targetcid)}`;
+  if (props.armyType === 'self') {
+    game.showTrickDialog(2, [
+      props.troop.id,
+      props.troop.hid,
+      targetCity,
+      taskName(props.troop.task),
+      props.troop.targetcid,
+    ]);
+  } else if (props.armyType === 'enemy') {
+    game.showTrickDialog(3, [props.troop.id, targetCity]);
   }
 }
 
@@ -217,6 +243,15 @@ onUnmounted(unregister);
         style-name="ButtonGreen"
         :label="i18n('Troop_TroopDetailDialog_12_1') || '召回'"
         @click="onRecall"
+      />
+      <FxButton
+        v-if="jimouVisible"
+        :x="75"
+        :y="398"
+        :h="36"
+        style-name="ButtonGreen"
+        :label="i18n('Troop_TroopDetailDialog_14_1') || '计谋'"
+        @click="onJimou"
       />
       <FxButton
         v-if="kickVisible"

@@ -15,6 +15,7 @@ import {
   BUILDING_WALL,
 } from '../../game/cityGrid';
 import type { BuildingState } from '../../stores/city';
+import { useGame } from '../../game/game';
 import { useSessionStore } from '../../stores/session';
 import ArmyDialog from '../army/ArmyDialog.vue';
 import BarnDialog from '../barn/BarnDialog.vue';
@@ -58,11 +59,19 @@ import TroopDetailDialog from '../troop/TroopDetailDialog.vue';
 import BattleDialog from '../troop/BattleDialog.vue';
 import ReportDialog from '../report/ReportDialog.vue';
 import RankDialog from '../rank/RankDialog.vue';
+import TrickDialog from '../trick/TrickDialog.vue';
+import TrickBufferDialog from '../trick/TrickBufferDialog.vue';
+import UserAchivement from '../achivement/UserAchivement.vue';
+import AchivementDialog from '../achivement/AchivementDialog.vue';
+import StatDialog from '../stat/StatDialog.vue';
+import UserInfoDialog from '../user/UserInfoDialog.vue';
+import LotteryDialog from '../lottery/MainDialog.vue';
 
 /** DialogManager: the dialogs over the scene panels (only one shown at a time). */
 defineProps<{ x: number; y: number }>();
 
 const session = useSessionStore();
+const game = useGame();
 
 const dialog = computed(() => session.dialog);
 const buildingKey = computed(() => {
@@ -119,6 +128,22 @@ function choose(action: 'all' | 'level') {
     <FriendDialog v-else-if="dialog?.name === 'friend'" />
     <UnionDialog v-else-if="dialog?.name === 'union'" />
     <RankDialog v-else-if="dialog?.name === 'rank'" />
+    <TrickDialog
+      v-else-if="dialog?.name === 'trick'"
+      :key="`trick ${dialog.trickType} ${dialog.params.join(',')}`"
+      :trick-type="dialog.trickType"
+      :params="dialog.params"
+    />
+    <UserAchivement
+      v-else-if="dialog?.name === 'userAchievement'"
+      :key="`userAchievement ${dialog.userid}`"
+      :userid="dialog.userid"
+      :username="dialog.username"
+    />
+    <AchivementDialog v-else-if="dialog?.name === 'achievementRank'" />
+    <StatDialog v-else-if="dialog?.name === 'stat'" />
+    <UserInfoDialog v-else-if="dialog?.name === 'userInfo'" />
+    <LotteryDialog v-else-if="dialog?.name === 'lottery'" />
     <HeroDetailDialog
       v-else-if="dialog?.name === 'heroDetail'"
       :key="`hero ${dialog.hid}`"
@@ -266,6 +291,8 @@ function choose(action: 'all' | 'level') {
       @close="session.campaign = null"
     />
     <TroopDialog v-if="session.troopDialog" />
+    <!-- 计谋状态 (TopPanel trick button): a pop-up that does not close the dialogs under it. -->
+    <TrickBufferDialog v-if="session.trickBuffer" @close="game.closeTrickBuffer()" />
     <TroopDetailDialog
       v-if="session.troopDetail"
       :key="`troopDetail ${session.troopDetail.troop.id}`"

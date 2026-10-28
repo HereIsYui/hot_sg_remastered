@@ -7,6 +7,7 @@ import {
   normalizeRow,
   normalizeTree,
   offsetOf,
+  rewriteTieRanks,
   sortAt,
   type SideContext,
 } from './normalize.ts';
@@ -70,6 +71,48 @@ describe('normalizeRow', () => {
     );
     expect(normalizeRow(row, { skip: (r) => r.gid === 50187 }, ctx())).toBeNull();
     expect(normalizeRow(row, { only: ['id'] }, ctx())).toBe('{"id":"7"}');
+  });
+});
+
+describe('rewriteTieRanks', () => {
+  const rule = { tieRank: { column: 'rank', keys: ['level', 'command'] } };
+
+  it("collapses tied rows to their group's lowest rank and leaves the rest exact", () => {
+    const rows = [
+      { hid: 61, level: 50, command: 133, rank: 906 },
+      { hid: 693, level: 50, command: 133, rank: 904 },
+      { hid: 769, level: 50, command: 133, rank: 905 },
+      { hid: 750, level: 50, command: 132, rank: 907 },
+    ];
+    expect(rewriteTieRanks(rows, rule)).toEqual([
+      { hid: 61, level: 50, command: 133, rank: '904' },
+      { hid: 693, level: 50, command: 133, rank: '904' },
+      { hid: 769, level: 50, command: 133, rank: '904' },
+      { hid: 750, level: 50, command: 132, rank: '907' },
+    ]);
+  });
+
+  it('treats numeric strings and numbers as the same key and passes rows through without a rule', () => {
+    // Same tie group on both sides: the PHP side returns strings, the node side numbers.
+    const legacy = [
+      { hid: 61, level: '50', command: '133', rank: 3 },
+      { hid: 693, level: '50', command: '133', rank: 5 },
+    ];
+    const fresh = [
+      { hid: 693, level: 50, command: 133, rank: 4 },
+      { hid: 61, level: 50, command: 133, rank: 3 },
+    ];
+    expect(
+      rewriteTieRanks(legacy, rule)
+        .map((r) => normalizeRow(r, rule, ctx()))
+        .sort(),
+    ).toEqual(
+      rewriteTieRanks(fresh, rule)
+        .map((r) => normalizeRow(r, rule, ctx()))
+        .sort(),
+    );
+    const rows = [{ level: 50, command: 133, rank: 2 }];
+    expect(rewriteTieRanks(rows, {})).toBe(rows);
   });
 });
 
