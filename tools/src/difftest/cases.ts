@@ -5189,6 +5189,20 @@ export const cases: DiffCase[] = [
       await s.command(session, 'getRankReward', 'KingRankTotal');
     },
   },
+  {
+    // 幕僚统计 (StatFunc.php): the five read-only tabs (0 城池/1 资源/2 产量/3 将领/4 军队/
+    // 5 城防) compare verbatim — no writes anywhere.
+    name: 'stat: getStats reads the five tabs',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      await s.command(session, 'getStats', 0);
+      await s.command(session, 'getStats', 1);
+      await s.command(session, 'getStats', 2);
+      await s.command(session, 'getStats', 3);
+      await s.command(session, 'getStats', 4);
+      await s.command(session, 'getStats', 5);
+    },
+  },
 ];
 
 async function seedScoutPatrol(
