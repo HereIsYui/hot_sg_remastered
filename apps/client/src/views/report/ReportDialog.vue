@@ -21,7 +21,8 @@ import KingRewardPanel from './KingRewardPanel.vue';
  * double-click opens the detail panel (ReportDetailPanel) showing the report body — a battle
  * report (`battleid > 0`) fetches its rounds via `getReportDetail` and offers 查看战报 to open the
  * live 战斗 view, a plain report shows its HTML `content`. 领取奖励 (KingRewardPanel) sits on the
- * list. finishCommonExpr / finishMeetWife belong to the 历练 / 婚姻 modules (not ported) → 暂未开放.
+ * list. finishMeetWife claims a 情缘 report's reward through the `yes,<id>` body link (the 婚姻
+ * module); finishCommonExpr (历练 rewards) is not ported server-side yet.
  */
 const game = useGame();
 const d = (n: number) => i18n(`Report_ReportDialog_${n}_1`);
@@ -110,6 +111,19 @@ function backToList(): void {
 function viewBattle(): void {
   if (detail.value && detail.value.battleid > 0) {
     game.showBattle(detail.value.battleid);
+  }
+}
+
+/**
+ * `ReportDetailPanel.clickReport` (AS3:748): the report body's `event:` links — `yes,<id>` is a
+ * 情缘战报 claiming its reward through `MarrySystem/finishMeetWife` (the reply surfaces as the
+ * thrown marry.become_girlfriend message on the failure path); other links (the 历练
+ * finishCommonExpr rewards) are not ported server-side yet and stay inert.
+ */
+function onReportLink(text: string): void {
+  const parts = text.split(',');
+  if (parts.length === 2 && parts[0] === 'yes') {
+    game.sendGlobalCommand('MarrySystem', 'finishMeetWife', [Number(parts[1])]);
   }
 }
 
@@ -334,6 +348,7 @@ onUnmounted(unregister);
             scroll
             :html="detailHtml"
             :fx="{ color: 15983262 }"
+            @link="onReportLink"
           />
         </FxCanvas>
       </FxCanvas>

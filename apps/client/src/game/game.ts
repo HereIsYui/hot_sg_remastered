@@ -356,6 +356,10 @@ export class Game {
       if (this.session.dialog?.name === 'cityMerge') this.session.dialog = null;
       gameAlert(i18n('City_Merge_Dialog_2'));
       void this.cmd.sendGlobalCommand('city', 'getUserCities');
+    } else if (action === 'LuoYangInitBattle' && command === 'getLuoyangGovernCount') {
+      // LuoYangBelongPanel.luoyangGovern: the reply opens the mode-2 GovernPanel.
+      const count = parseInt(String((data as unknown[] | undefined)?.[0]), 10) || 0;
+      this.session.luoyangGovern = { count };
     }
     for (const receiver of [...(this.globalReceivers.get(action) ?? [])]) receiver(command, data);
   }
@@ -537,6 +541,8 @@ export class Game {
     this.session.report = null;
     this.session.battle = null;
     this.session.trickBuffer = false;
+    this.session.funcButtons = false;
+    this.session.luoyangGovern = null;
   }
 
   /** `TopPanel.onLevelClick`. */
@@ -748,6 +754,42 @@ export class Game {
    *  the remade entry opens the ported LotteryDialog. */
   openLottery(): void {
     this.session.dialog = { name: 'lottery' };
+  }
+
+  /** `BloodWar.showTogetherBtn` / `__openBtn_click`: the 功能按钮区 (FuncBtnPanel). */
+  toggleFuncButtons(): void {
+    this.session.funcButtons = !this.session.funcButtons;
+  }
+
+  /** `NewDialogManager.showZhanjiangDialog` (FuncBtnPanel 过关斩将): the campaign ladder. */
+  openZhanjiang(): void {
+    this.session.dialog = { name: 'zhanjiang' };
+  }
+
+  /** `NewDialogManager.showArenaDialog` (FuncBtnPanel 竞技场): the arena. */
+  openArena(): void {
+    this.session.dialog = { name: 'arena' };
+  }
+
+  /** `NewDialogManager.showLuoYangBelongPanel` (FuncBtnPanel 洛阳): the belong overview. */
+  openLuoyangBelong(): void {
+    this.session.dialog = { name: 'luoyangBelong' };
+  }
+
+  /** `NewDialogManager.showLuoYangBattlePanel` (LuoYangBelongPanel 进攻洛阳): the battlefield. */
+  openLuoyangBattle(): void {
+    this.session.dialog = { name: 'luoyangBattle' };
+  }
+
+  /** `DialogManager.showMarrayMainPanel` (FuncBtnPanel 喜结良缘): the marry dialog. */
+  openMarry(): void {
+    this.session.dialog = { name: 'marry' };
+  }
+
+  /** `LuoYangBelongPanel.luoyangGovern`: fetch the daily used count, then open the mode-2
+   *  GovernPanel (`getLuoyangGovernCount` answers `[hasGovernCount]`). */
+  showLuoyangGovern(): void {
+    void this.cmd.sendGlobalCommand('LuoYangInitBattle', 'getLuoyangGovernCount');
   }
 
   // ---- main screen timer (InfoPanel.startTimer / onTimer) ----
@@ -972,19 +1014,22 @@ export class Game {
    * `GroundDialog` 出征 / `WorldActionDialog` army actions / `CampaignFavouritesDialog` 出征:
    * open the CampaignDialog preset with a target cid and a task combo index (per the AS3
    * `setTarget` / `setTask`). The 校场 (Ground) building hosts it, so its bid/param route the
-   * StartTroop / scheme dialog commands.
+   * StartTroop / scheme dialog commands. The LuoYangBattlePanel dispatch passes `fromLuoyang`
+   * (`CampaignDialog.mIsFromLuoYang`) so the 洛阳 target sends luoyangTroopStart.
    */
   showCampaign(
     groundBid: number,
     groundParam: number,
     targetCid?: number,
     taskIndex?: number,
+    fromLuoyang = false,
   ): void {
     this.session.campaign = {
       groundBid,
       groundParam,
       targetCid: targetCid ?? this.city.cid,
       taskIndex: taskIndex ?? 0,
+      fromLuoyang,
     };
   }
 

@@ -1,5 +1,10 @@
 import { Module } from '@nestjs/common';
 import { AchivementModule } from './achivement/achivement.module';
+import { ArenaModule } from './activity/arena.module';
+import { LuoyangBelongModule } from './activity/luoyang-belong.module';
+import { LuoyangModule } from './activity/luoyang.module';
+import { MarryModule } from './activity/marry.module';
+import { PkModule } from './activity/pk.module';
 import { AuthModule } from './auth/auth.module';
 import { BattleModule } from './battle/battle.module';
 import { BufferModule } from './buffer/buffer.module';
@@ -61,6 +66,11 @@ import { WorldModule } from './world/world.module';
     AchivementModule,
     LotteryModule,
     HonorModule,
+    PkModule,
+    ArenaModule,
+    LuoyangModule,
+    LuoyangBelongModule,
+    MarryModule,
   ],
   controllers: [HealthController],
 })

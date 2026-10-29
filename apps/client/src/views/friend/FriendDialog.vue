@@ -161,7 +161,7 @@ onUnmounted(unregister);
       :text="i18n('friend_FriendDialogSrc_6')"
     />
     <FxCanvas v-if="op === 0" :x="190" :y="443" :w="142" :h="26" style-name="BoardListDown">
-      <FxTextInput :x="2" :y="2" :w="138" :max-chars="32" v-model="nameInput" />
+      <FxTextInput v-model="nameInput" :x="2" :y="2" :w="138" :max-chars="32" />
     </FxCanvas>
     <FxButton
       v-if="op === 1"

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useSessionStore } from '../stores/session';
 import ColorFilters from '../ui/ColorFilters.vue';
+import FxButton from '../ui/FxButton.vue';
 import BottomPanel from './game/BottomPanel.vue';
 import CityInnerPanel from './game/CityInnerPanel.vue';
 import CityPanel from './game/CityPanel.vue';
@@ -25,6 +26,15 @@ const session = useSessionStore();
     <TopPanel :x="264" :y="0" />
     <DialogManager :x="289" :y="54" />
     <BottomPanel :x="263" :y="555" />
+    <!-- `openBtn` (BloodWar.mxml 1108, combineFuncBtn at 925,476): the 功能按钮区 opener -->
+    <FxButton
+      :x="925"
+      :y="476"
+      :w="64"
+      :h="64"
+      style-name="combineFuncBtn"
+      @click="session.funcButtons = !session.funcButtons"
+    />
   </div>
 </template>
 

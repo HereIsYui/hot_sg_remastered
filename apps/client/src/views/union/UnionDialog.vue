@@ -13,6 +13,7 @@ import UnionDiplomacyPanel from './UnionDiplomacyPanel.vue';
 import UnionMembersPanel from './UnionMembersPanel.vue';
 import UnionOverviewPanel from './UnionOverviewPanel.vue';
 import UnionReportsPanel from './UnionReportsPanel.vue';
+import AssignLuoYangPanel from '../luoyang/AssignLuoYangPanel.vue';
 
 /** Union/UnionDialog: founding, pending applications and the complete union tabs. */
 const game = useGame();
@@ -23,6 +24,7 @@ const pending = ref('');
 const invitations = ref<Record<string, unknown>[]>([]);
 const nameInput = ref('');
 const applyName = ref('');
+const showAssign = ref(false);
 const tab = ref<
   'overview' | 'members' | 'applications' | 'diplomacy' | 'reports' | 'city' | 'area'
 >('overview');
@@ -109,6 +111,20 @@ onUnmounted(unregister);
       <UnionReportsPanel v-else-if="tab === 'reports'" :key="tab" />
       <UnionCityPanel v-else-if="tab === 'city'" :key="tab" :union-id="unionId" />
       <UnionAreaPanel v-else :key="tab" />
+      <!-- 分配洛阳 (`NewUnionDialog.assignLuoYangBtn`, AS3:1884): the 盟主 (union_pos 5) hands the
+           city to a member; the server rejects non-leaders with luoyang.not_union_leader. -->
+      <FxButton
+        v-if="unionPos === 5"
+        :x="470"
+        :y="45"
+        :w="90"
+        :h="26"
+        style-name="ButtonYellow"
+        :fx="{ fontSize: 12 }"
+        :label="i18n('Union_UnionManagePanel_16_1')"
+        @click="showAssign = true"
+      />
+      <AssignLuoYangPanel v-if="showAssign" @close="showAssign = false" />
     </template>
     <template v-else>
       <FxCanvas :x="23" :y="83" :w="635" :h="180" style-name="BoardListDown">

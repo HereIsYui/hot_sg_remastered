@@ -66,6 +66,13 @@ import AchivementDialog from '../achivement/AchivementDialog.vue';
 import StatDialog from '../stat/StatDialog.vue';
 import UserInfoDialog from '../user/UserInfoDialog.vue';
 import LotteryDialog from '../lottery/MainDialog.vue';
+import ArenaDialog from '../arena/ArenaDialog.vue';
+import GuoGuanZhanJiangDialog from '../guoguanzhuanjiang/GuoGuanZhanJiangDialog.vue';
+import LuoYangBattlePanel from '../luoyang/LuoYangBattlePanel.vue';
+import LuoYangBelongPanel from '../luoyang/LuoYangBelongPanel.vue';
+import MarryMainPanel from '../marry/MarryMainPanel.vue';
+import FuncBtnPanel from './FuncBtnPanel.vue';
+import GovernPanel from '../world/GovernPanel.vue';
 
 /** DialogManager: the dialogs over the scene panels (only one shown at a time). */
 defineProps<{ x: number; y: number }>();
@@ -144,6 +151,15 @@ function choose(action: 'all' | 'level') {
     <StatDialog v-else-if="dialog?.name === 'stat'" />
     <UserInfoDialog v-else-if="dialog?.name === 'userInfo'" />
     <LotteryDialog v-else-if="dialog?.name === 'lottery'" />
+    <GuoGuanZhanJiangDialog v-else-if="dialog?.name === 'zhanjiang'" />
+    <ArenaDialog v-else-if="dialog?.name === 'arena'" />
+    <LuoYangBattlePanel v-else-if="dialog?.name === 'luoyangBattle'" />
+    <LuoYangBelongPanel
+      v-else-if="dialog?.name === 'luoyangBelong'"
+      @battle="game.openLuoyangBattle()"
+      @close="game.closeDialog()"
+    />
+    <MarryMainPanel v-else-if="dialog?.name === 'marry'" />
     <HeroDetailDialog
       v-else-if="dialog?.name === 'heroDetail'"
       :key="`hero ${dialog.hid}`"
@@ -288,11 +304,21 @@ function choose(action: 'all' | 'level') {
       :ground-param="session.campaign.groundParam"
       :target-cid="session.campaign.targetCid"
       :task-index="session.campaign.taskIndex"
+      :from-luoyang="session.campaign.fromLuoyang ?? false"
       @close="session.campaign = null"
     />
     <TroopDialog v-if="session.troopDialog" />
     <!-- 计谋状态 (TopPanel trick button): a pop-up that does not close the dialogs under it. -->
     <TrickBufferDialog v-if="session.trickBuffer" @close="game.closeTrickBuffer()" />
+    <!-- 功能按钮区 (BloodWar openBtn): the combined function buttons pop-up. -->
+    <FuncBtnPanel v-if="session.funcButtons" @close="game.toggleFuncButtons()" />
+    <!-- 洛阳政令 (LuoYangBelongPanel characterThree): the mode-2 GovernPanel over the scene. -->
+    <GovernPanel
+      v-if="session.luoyangGovern"
+      :from-flag="2"
+      :luoyang-count="session.luoyangGovern.count"
+      @close="session.luoyangGovern = null"
+    />
     <TroopDetailDialog
       v-if="session.troopDetail"
       :key="`troopDetail ${session.troopDetail.troop.id}`"

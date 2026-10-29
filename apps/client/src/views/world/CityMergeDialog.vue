@@ -125,8 +125,8 @@ function onClose(): void {
           :fx="{ textAlign: 'center' }"
           :text="i18n('CityMergeDialog_tile_5')"
         />
-        <FxTextInput :x="42" :y="43" :w="45" :editable="false" v-model="main.x" />
-        <FxTextInput :x="95" :y="44" :w="45" :editable="false" v-model="main.y" />
+        <FxTextInput v-model="main.x" :x="42" :y="43" :w="45" :editable="false" />
+        <FxTextInput v-model="main.y" :x="95" :y="44" :w="45" :editable="false" />
         <FxLabel
           :x="0"
           :y="73"
@@ -136,12 +136,12 @@ function onClose(): void {
           :text="i18n('CityMergeDialog_tile_6')"
         />
         <FxTextInput
+          v-model="main.level"
           :x="43"
           :y="75"
           :w="97"
           :editable="false"
           :fx="{ textAlign: 'center' }"
-          v-model="main.level"
         />
       </FxCanvas>
       <!-- 分城 -->
@@ -170,8 +170,8 @@ function onClose(): void {
           :fx="{ textAlign: 'center' }"
           :text="i18n('CityMergeDialog_tile_2')"
         />
-        <FxTextInput :x="50" :y="42" :w="45" :editable="false" v-model="sub.x" />
-        <FxTextInput :x="103" :y="42" :w="45" :editable="false" v-model="sub.y" />
+        <FxTextInput v-model="sub.x" :x="50" :y="42" :w="45" :editable="false" />
+        <FxTextInput v-model="sub.y" :x="103" :y="42" :w="45" :editable="false" />
         <FxLabel
           :x="0"
           :y="75"
@@ -181,12 +181,12 @@ function onClose(): void {
           :text="i18n('CityMergeDialog_tile_3')"
         />
         <FxTextInput
+          v-model="sub.level"
           :x="50"
           :y="78"
           :w="98"
           :editable="false"
           :fx="{ textAlign: 'center' }"
-          v-model="sub.level"
         />
       </FxCanvas>
     </FxCanvas>

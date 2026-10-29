@@ -42,7 +42,13 @@ export class LangService {
   }
 
   messageOf(err: unknown): string {
-    if (err instanceof GameError) return err.key ? this.t(err.key, ...err.args) : err.message;
+    if (err instanceof GameError) {
+      if (!err.key) return err.message;
+      // A missing entry reads as PHP's `Exception($GLOBALS[g][k])` with an unset index: notice +
+      // null message, which Command.php's catch pushes as an empty string. Existing entries keep
+      // their sprintf arguments.
+      return this.t(err.key, ...err.args) === err.key ? '' : this.t(err.key, ...err.args);
+    }
     return err instanceof Error ? err.message : String(err);
   }
 }

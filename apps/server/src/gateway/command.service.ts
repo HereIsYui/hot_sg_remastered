@@ -51,7 +51,10 @@ export class CommandService {
       return ret;
     } catch (err) {
       if (!(err instanceof GameError)) {
+        // Non-lang failures are the legacy PearDB die path (lib/database.php:198-203): the real
+        // error goes to error_log, the in-band reply carries only the generic trigger text.
         this.logger.error(err instanceof Error ? (err.stack ?? err.message) : String(err));
+        return [0, 'PearDB returned an error. '];
       }
       return [0, this.lang.messageOf(err)];
     }

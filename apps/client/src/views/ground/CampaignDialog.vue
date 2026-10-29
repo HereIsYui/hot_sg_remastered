@@ -35,13 +35,16 @@ import FxTextInput from '../../ui/FxTextInput.vue';
  * leading hero, soldiers and resources to carry; the dialog figures the marching time, food cost
  * and remaining carry, then sends `StartTroop` through the 校场. 方案 save/load uses getTroopScheme
  * / setTroopScheme; the max time of a non-驻扎 task is read via ExternService.getTroopMaxTime.
- * 洛阳 (luoyangTroopStart) is not open in single-player, so it shows 暂未开放.
+ * The 洛阳 target (215265) dispatches `luoyangTroopStart` when opened from the LuoYangBattlePanel
+ * (`fromLuoyang`, Ground/CampaignDialog.as:1783-1799); from anywhere else it shows
+ * LuoYang_Battle_not_from_luoyang.
  */
 const props = defineProps<{
   groundBid: number;
   groundParam: number;
   targetCid: number;
   taskIndex: number;
+  fromLuoyang?: boolean;
 }>();
 const emit = defineEmits<{ close: [] }>();
 
@@ -249,10 +252,6 @@ function saveScheme(): void {
 // ---- StartTroop ----
 
 function startTroop(): void {
-  if (target.isLuoyang) {
-    void showAlert(i18n('LuoYang_Battle_not_from_luoyang') || '暂未开放');
-    return;
-  }
   const soldiersStr = buildTroopSoldiersString(soldiers);
   if (!soldiersStr) {
     void showAlert(i18n('Ground_CampaignDialogSrc_10') || '请先选择出征的士兵');
@@ -262,6 +261,23 @@ function startTroop(): void {
   const tx = parseInt(destX.value, 10) || 0;
   const ty = parseInt(destY.value, 10) || 0;
   const targetcid = ty * 1000 + tx;
+  // 洛阳 (Ground/CampaignDialog.as:1783): only the LuoYangBattlePanel's own dispatch may start a
+  // troop at 215265 — `luoyangTroopStart [hid, City.cid, User.unionid, soldiers, useFlag]`.
+  if (target.isLuoyang) {
+    if (!props.fromLuoyang) {
+      void showAlert(i18n('LuoYang_Battle_not_from_luoyang'));
+      return;
+    }
+    game.sendGlobalCommand('LuoYangBattle', 'luoyangTroopStart', [
+      hid,
+      city.cid,
+      game.user.unionid,
+      soldiersStr,
+      useFlag.value,
+    ]);
+    emit('close');
+    return;
+  }
   // The task is the combo index itself (`startTroop` AS3 1805 passes `taskSelect.selectedIndex`;
   // the server reads it as 运输=0 / 派遣=1 / 侦察=2 / 掠夺=3 / 占领=4).
   const task = taskIndex.value;

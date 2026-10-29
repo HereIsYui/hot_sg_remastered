@@ -21,7 +21,12 @@ export type PlainDialog =
   | 'rank'
   | 'stat'
   | 'userInfo'
-  | 'lottery';
+  | 'lottery'
+  | 'zhanjiang'
+  | 'arena'
+  | 'luoyangBattle'
+  | 'luoyangBelong'
+  | 'marry';
 
 /**
  * `DialogManager.showCreateBuildingDialog(kind)` (0 fields, 1 inner, 2 wall), `showBuildingDialog`,
@@ -72,6 +77,8 @@ export interface CampaignRequest {
   groundParam: number;
   targetCid: number;
   taskIndex: number;
+  /** `CampaignDialog.mIsFromLuoYang`: the 洛阳 dispatch rights of LuoYangBattlePanel. */
+  fromLuoyang?: boolean;
 }
 
 /** Client-side flow state of BloodWar.as (which top-level view is shown, busy cursor). */
@@ -126,5 +133,9 @@ export const useSessionStore = defineStore('session', {
     battle: null as { battleid: number; userIsAttack: boolean } | null,
     /** TrickBufferDialog (计谋状态, TopPanel trick button) stacked over the scene. */
     trickBuffer: false,
+    /** FuncBtnPanel (功能按钮区, the openBtn at 925,476) over the scene. */
+    funcButtons: false,
+    /** `GovernPanel.setLuoyangGovernInfo`: the 洛阳政令 mode with its used count. */
+    luoyangGovern: null as { count: number } | null,
   }),
 });

@@ -135,9 +135,12 @@ export const cases: DiffCase[] = [
       const session = await s.login('difftest_new');
       await s.command(session, 'loadUserInfo', 1);
       await avoidCidWidTiles(s, 3);
-      // Free tiles can retain buildings from a deleted NPC city; remove those stale rows so a
-      // random choice cannot produce a one-sided deletion when the new role reuses the tile.
+      // Free tiles can retain buildings / schedule / resource rows from a deleted NPC city; remove
+      // those stale rows so a random choice cannot produce a one-sided deletion when the new role
+      // reuses the tile (doCreateCity's replace-into would delete the stale row on one side only).
       await s.query('delete from sys_building where cid not in (select cid from sys_city)');
+      await s.query('delete from mem_city_schedule where cid not in (select cid from sys_city)');
+      await s.query('delete from mem_city_resource where cid not in (select cid from sys_city)');
       await s.command(session, 'createRole', '风云子', '新城', 3, '风', 1, 2, 0);
       await aliasNewCity(s, session.uid);
       await s.command(session, 'loadUserInfo', 1);
@@ -5828,6 +5831,730 @@ export const cases: DiffCase[] = [
       s.mask(4, 1, '*', 'time');
       await s.command(first, 'getUnionRelation', 0);
       await s.command(second, 'pendingFriendly', 0, firstUnion);
+    },
+  },
+  {
+    // 过关斩将 (PKFunc.php 征战半部): loadCampaignInitData 的首次建档与 10 军令赠礼、
+    // regetCampaignMaxData、buyJunlingFunc 的价格/上限/非元宝拒绝、getAllHeroByUid 的分页与
+    // 君主将置顶，以及 getOneBattleRet 的军令不足/参数/越级/等级/修为五类拒绝。
+    // rng 10000: mt_rand(1,20000)→10001 不触发四技能、mt_rand(1,10)→1 不掉落。
+    name: 'campaign: init, junling economy and hero picker',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      // 军令尚未发放：征战拒绝走 changeCityPosition.no_adv_lijianfu。
+      await s.command(session, 'getOneBattleRet', 1, 0, 1, [80213, 900500, 900501]);
+      // 参数不足 4 个（PHP count 标量=1 的第四参同样走 invalid_param）。
+      await s.command(session, 'getOneBattleRet', 1);
+      await s.command(session, 'getOneBattleRet', 1, 0, 1, 80213);
+      // 首次建档：sys_pk_user (1,1) + 赠 10 军令（cfg 面板数据两边同库同文；英雄清单无
+      // order by，5.7/8.4 扫描序不同，按多重集比较）。
+      await s.command(session, 'loadCampaignInitData');
+      s.unordered(4, 1);
+      s.unordered(4, 2);
+      await s.command(session, 'regetCampaignMaxData');
+      // 军令经济：非元宝、0 个、正常购买、超出 100 上限（sprintf 的余量入文案）。
+      await s.command(session, 'buyJunlingFunc', 1, 1);
+      await s.command(session, 'buyJunlingFunc', 0, 0);
+      await s.command(session, 'buyJunlingFunc', 0, 5);
+      await s.query('update sys_goods set count = 99 where uid = ? and gid = 19200', [uid]);
+      await s.command(session, 'buyJunlingFunc', 0, 2);
+      await s.query('update sys_goods set count = 15 where uid = ? and gid = 19200', [uid]);
+      // 将领选择器：非数组/0 页拒绝；空选首页带君主将；选中君主将不带；选他人；翻页。
+      await s.command(session, 'getAllHeroByUid', 5);
+      await s.command(session, 'getAllHeroByUid', [], 0);
+      await s.command(session, 'getAllHeroByUid', [], 1);
+      await s.command(session, 'getAllHeroByUid', [80213], 1);
+      await s.command(session, 'getAllHeroByUid', [999999], 1);
+      await s.command(session, 'getAllHeroByUid', [], 2);
+      // 关卡闸门：君主将等级（普通）、修为（精英）、越级三层拒绝，然后是将领归属。
+      await s.command(session, 'getOneBattleRet', 1, 0, 1, [80213, 900500, 900501]);
+      await s.query('update sys_city_hero set level = 10 where uid = ? and herotype = 1000', [uid]);
+      await s.command(session, 'getOneBattleRet', 1, 1, 1, [80213, 900500, 900501]);
+      await s.command(session, 'getOneBattleRet', 1, 0, 2, [80213, 900500, 900501]);
+      await s.command(session, 'getOneBattleRet', 1, 0, 5, [80213, 900500, 900501]);
+      await s.command(session, 'getOneBattleRet', 3, 0, 1, [80213, 900500, 900501]);
+      await s.command(session, 'getOneBattleRet', 1, 0, 1, [80213, 999997, 999998]);
+      // 两员陪练猛将（一击秒杀 NPC），君主将顶在第一位按原版先手轮换。
+      await s.query(
+        `insert into sys_city_hero (hid, uid, name, sex, face, cid, state, level, command_base,
+           affairs_base, bravery_base, wisdom_base, loyalty, herotype)
+         values (900500, ?, '陪练甲', 0, 0, ?, 0, 1, 50, 1, 20000, 20000, 100, 0),
+                (900501, ?, '陪练乙', 0, 0, ?, 0, 1, 50, 1, 20000, 20000, 100, 0)`,
+        [uid, cid, uid, cid],
+      );
+      await s.query(
+        `insert into mem_hero_blood (hid, \`force\`, force_max, energy, energy_max)
+         values (900500, 100000, 100000, 100, 100), (900501, 100000, 100000, 100, 100)`,
+      );
+      // 首场真实战斗：君主将 16 刀阵亡、两陪练各一击清场 → winer=1，奖励串为空数组。
+      s.rng([10000]);
+      await s.command(session, 'getOneBattleRet', 1, 0, 1, [80213, 900500, 900501]);
+      s.stopRng();
+    },
+  },
+  {
+    // 过关斩将: 战斗链路 — 精英档（sys_user_level 修为闸门 + 18011 掉落，rng 10002 使
+    // mt_rand(1,10)=3）、普通档 1-10 层逐层推进（第 10 层宝箱 + cfg_pk_first 首通占位）、
+    // getPkFirstReward 领取与重复拒绝、loadPKRewardRank 物品态奖励串解析（跨家族联读）。
+    name: 'campaign: ladder battles, first-pass ranks and boards',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await s.command(session, 'loadCampaignInitData'); // 10 军令 + sys_pk_user (1,1)
+      s.unordered(4, 1); // 英雄清单无 order by，5.7/8.4 扫描序不同
+      s.unordered(4, 2);
+      await s.command(session, 'buyJunlingFunc', 0, 20); // 补到 30 个
+      await s.query('insert into sys_user_level (uid, level) values (?, 1)', [uid]);
+      await s.query('update sys_city_hero set level = 10 where uid = ? and herotype = 1000', [uid]);
+      await s.query(
+        `insert into sys_city_hero (hid, uid, name, sex, face, cid, state, level, command_base,
+           affairs_base, bravery_base, wisdom_base, loyalty, herotype)
+         values (900500, ?, '陪练甲', 0, 0, ?, 0, 1, 50, 1, 20000, 20000, 100, 0),
+                (900501, ?, '陪练乙', 0, 0, ?, 0, 1, 50, 1, 20000, 20000, 100, 0)`,
+        [uid, cid, uid, cid],
+      );
+      await s.query(
+        `insert into mem_hero_blood (hid, \`force\`, force_max, energy, energy_max)
+         values (900500, 100000, 100000, 100, 100), (900501, 100000, 100000, 100, 100)`,
+      );
+      // 精英第 1 层：掉落 roll 掷中 3 → 发 18011（cfg_goods 在册），special 推进到 101。
+      s.rng([10002]);
+      await s.command(session, 'getOneBattleRet', 1, 1, 1, [80213, 900500, 900501]);
+      // 普通 1-10 层：每层胜利推进 normal，第 10 层触发 cfg_pk_reward 宝箱与首通占位。
+      s.rng([10000]);
+      for (let level = 1; level <= 10; level++) {
+        await s.command(session, 'getOneBattleRet', 1, 0, level, [80213, 900500, 900501]);
+      }
+      s.stopRng();
+      // 首通奖励：占位行 uid=1001/time=0 可领，领后 time=now；重复领取拒绝；未占位拒绝。
+      await s.command(session, 'getPkFirstReward', 1, 0, 1);
+      await s.command(session, 'getPkFirstReward', 1, 0, 1);
+      await s.command(session, 'getPkFirstReward', 1, 0, 2);
+      await s.command(session, 'getPkFirstReward', 1, 1, 1);
+      // 首通前三榜：第 1 名已有主（userName+formatTime），2/3 名空位，奖励串按物品解析。
+      await s.command(session, 'loadPKRewardRank', 1, 0);
+      s.mask(4, 0, '*', 'formatTime');
+      await s.command(session, 'loadPKRewardRank', 1, 1);
+      await s.command(session, 'regetCampaignMaxData');
+    },
+  },
+  {
+    // 竞技场: 爵位闸门（推恩令 buffer 16/bufparam 2 加成过闸，跨家族 getBufferNobility 路径）、
+    // 首进三表初始化（mem_assemble maxRank+1 / sys_user_assemble / mem_assemble_hero 三君主将）、
+    // holdBattleHeroInfo 的将数与君主将规则、loadRankBefore10/loadBeforeUser10 榜单、
+    // gotoSelectedRank 的价格档/自座/超顶/上下搬移、refreshAssembleRankInfo 6 秒冷却、
+    // clearArenaCoolTime 的未冷却拒绝与 getArenaReward 的 5 小时累计领取（type 2 资源态）。
+    // rng 10000 → resetResistArenaReward 的 mt_rand(1,100)=1 → gid -1。
+    name: 'arena: nobility gate, seating and reward clock',
+    tables: {
+      mem_assemble: { offsets: ['endtime'] },
+      sys_user_assemble: { offsets: ['next_challenge_time', 'next_refresh_time'] },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      // 爵位 0 不够上造。
+      await s.command(session, 'loadArenaBattleInitData');
+      // 推恩令 bufparam 2 → 爵位 2 过闸；首进初始化三表 + 首次奖励钟（rng 钉死）。
+      await s.query(
+        `insert into mem_user_buffer (uid, buftype, endtime, bufparam)
+         values (?, 16, unix_timestamp() + 86400, 2)`,
+        [uid],
+      );
+      s.rng([10000]);
+      await s.command(session, 'loadArenaBattleInitData');
+      s.mask(4, 3, '*', 'getRewardTime'); // 5 小时内的剩余秒，属于小数值，offset 比不了
+      s.offset(4, 3, '*', 'endtime');
+      s.stopRng();
+      await s.command(session, 'loadUserBattleHero');
+      await s.command(session, 'loadRankBefore10');
+      s.mask(4, 0, '*', 'getRewardTime');
+      s.offset(4, 0, '*', 'endtime');
+      await s.command(session, 'loadBeforeUser10');
+      s.mask(4, 0, '*', 'getRewardTime');
+      s.offset(4, 0, '*', 'endtime');
+      // 上阵配置：单参拒绝；无君主将拒绝；三君主将成功。
+      await s.command(session, 'holdBattleHeroInfo', 80213);
+      await s.command(session, 'holdBattleHeroInfo', 80213, 900600, 900601);
+      await s.command(session, 'holdBattleHeroInfo', 80213, 80213, 80213);
+      // 座次：第二名的陪榜行让 gotoSelectedRank 上下两个方向都有实搬。
+      await s.query(
+        `insert into mem_assemble (\`rank\`, uid, level, rewardid, count, endtime)
+         values (2, 1002, 1, 152, 7, unix_timestamp() + 5400)`,
+      );
+      await s.query('insert into sys_user_assemble (uid, `rank`, maxrank) values (1002, 2, 2)');
+      await s.command(session, 'gotoSelectedRank', 3);
+      await s.command(session, 'gotoSelectedRank', 1);
+      await s.command(session, 'gotoSelectedRank', 500);
+      await s.command(session, 'gotoSelectedRank', 2); // 往下爬：1002 上移、自己 2 号
+      s.mask(4, 1, '*', 'getRewardTime');
+      s.offset(4, 1, '*', 'endtime');
+      await s.command(session, 'gotoSelectedRank', 1); // 往上爬：1002 回 2 号、自己回 1 号
+      s.mask(4, 1, '*', 'getRewardTime');
+      s.offset(4, 1, '*', 'endtime');
+      // 刷新：非法页签、正常刷新与 6 秒冷却。
+      await s.command(session, 'refreshAssembleRankInfo', 2);
+      await s.command(session, 'refreshAssembleRankInfo', 0);
+      s.mask(4, 2, '*', 'getRewardTime');
+      s.offset(4, 2, '*', 'endtime');
+      await s.command(session, 'refreshAssembleRankInfo', 0);
+      // 冷却与奖励：未冷却拒绝；1002 号奖励目标拒绝；未到 5 小时拒绝；到时领取（gid -1 是
+      // type 2 资源态 → 城黄金 +base*5）→ 领取后重掷奖励钟。
+      await s.command(session, 'clearArenaCoolTime');
+      await s.command(session, 'getArenaReward', 1002);
+      await s.command(session, 'getArenaReward', uid);
+      await s.query('update mem_assemble set endtime = unix_timestamp() - 10 where uid = ?', [uid]);
+      s.rng([10000]);
+      await s.command(session, 'getArenaReward', uid);
+      s.stopRng();
+      await s.command(session, 'getArenaReward', uid);
+    },
+  },
+  {
+    // 竞技场: 挑战链路 — 三场对 uid 1002 的胜利（排名上搬/每日次数钟/连胜 3 次公告与
+    // maxwin）、首榜挑战 50 元宝（isSkip=1）、防守方 endtime 过期的无奖励记录分支、
+    // NPC（uid<1000）目标占领后 cfg_assemble_special_hero isopen 清零、
+    // getArenaRankRewardInfo/getArenaRankReward 的夹具榜单与领取。
+    // rng 10002 → mt_rand(1,20000)→10003 不触发四技能（斗将短报文）且 mt_rand(1,100)=3。
+    name: 'arena: challenge fights, streaks and rank rewards',
+    tables: {
+      mem_assemble: { offsets: ['endtime'] },
+      sys_user_assemble: { offsets: ['next_challenge_time', 'next_refresh_time'] },
+      mem_assemble_record: { offsets: ['time'] },
+      mem_assemble_win_record: { offsets: ['last_challenge_time'] },
+      log_assemble_reward: { offsets: ['time'] },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      // 夹具：自己 3 号位、1002 2 号位；自己君主将加成拉满一击秒杀（省报文）；防守方体力 10。
+      await s.query(
+        `insert into mem_assemble (\`rank\`, uid, level, rewardid, count, endtime)
+         values (3, ?, 1, 152, 7, unix_timestamp() + 5400),
+                (2, 1002, 1, 152, 7, unix_timestamp() + 5400)`,
+        [uid],
+      );
+      await s.query(
+        `insert into mem_assemble_hero (uid, hid1, hid2, hid3)
+         values (?, 80213, 80213, 80213), (1002, 80216, 80216, 80216)`,
+        [uid],
+      );
+      await s.query(
+        'insert into sys_user_assemble (uid, `rank`, maxrank) values (?, 3, 3), (1002, 2, 2)',
+        [uid],
+      );
+      await s.query('update mem_hero_blood set `force` = 10 where hid = 80216');
+      await s.query(
+        `update sys_city_hero set bravery_add_on = 5000, wisdom_add_on = 5000,
+           command_add_on = 5000 where hid = 80213`,
+      );
+      // 爵位闸门（推恩令加成路径已在另一用例覆盖，这里直接给足爵位）。
+      await s.query('update sys_user set nobility = 2 where uid = ?', [uid]);
+      const pinDefender = () =>
+        s.query(
+          `update mem_assemble set rewardid = 152, count = 7, endtime = unix_timestamp() + 5400
+           where uid = 1002`,
+        );
+      const reopen = () =>
+        s.query('update sys_user_assemble set next_challenge_time = 0 where uid = ?', [uid]);
+      // 胜 1：排名 3→2 上搬（updatePartUserRank 上行 + maxrank 更新），奖励 152×35。
+      s.rng([10002]);
+      await s.command(session, 'startArenaChallenge', 1002, 0);
+      await reopen();
+      // 胜 2：isSkip=1 → 首榜挑战 50 元宝（top10 之外窗口的强爬路径）。
+      await pinDefender();
+      await s.command(session, 'startArenaChallenge', 1002, 1);
+      await reopen();
+      // 胜 3：连胜 3 次 → mem_assemble_win_record + 全服公告 + maxwin=3。
+      await pinDefender();
+      await s.command(session, 'startArenaChallenge', 1002, 0);
+      await reopen();
+      // NPC 目标（uid 5）：胜利后 isopen 全清、mem_assemble_hero uid<1000 删行、NPC 公告、
+      // endtime=0 已过期的记录分支与占领搬移。
+      await s.query(
+        `insert into mem_assemble (\`rank\`, uid, level, rewardid, count, endtime)
+         values (3, 5, 1, 10616, 3, 0)`,
+      );
+      await s.query('insert into mem_assemble_hero (uid, hid1, hid2, hid3) values (5, 1, 2, 3)');
+      await s.command(session, 'startArenaChallenge', 5, 0);
+      s.stopRng();
+      // 榜单与排行奖励：夹具前二占位行 → 信息面 + 领取（12027）+ 重复领取拒绝。
+      await s.query(
+        `insert into log_assemble_reward (\`rank\`, uid, name, reward, time)
+         values (1, ?, 'changle', 0, 0), (2, 1002, 'judingwan', 0, 0)`,
+        [uid],
+      );
+      await s.command(session, 'getArenaRankRewardInfo');
+      await s.command(session, 'getArenaRankReward');
+      await s.command(session, 'getArenaRankReward');
+      await s.command(session, 'getArenaRankRewardInfo');
+    },
+  },
+  {
+    // 洛阳战场: mem_state 2000/2001 的四段闸门、推恩令加成过爵位闸（bufparam 5+nobility 1→6）、
+    // 联盟闸门、luoyangYuanjun 扣 100 元宝写 second=1、luoyangTroopStart 的军旗检查（周三
+    // 19 点闸门读 DB 时钟无法夹具，两边按各自钟走同一分支）、召回、战场城军队列表、
+    // 调城的四层校验、千里奔袭的类型/锦囊/状态/冷却四层、遭遇战落 sys_battle/mem_battle。
+    name: 'luoyang: battlefield gates, troops, tricks and skirmish',
+    tables: {
+      // mem_state.value 在本用例里既有开关数字也有开启时间戳，统一按偏移量比（数字原样返回）。
+      mem_state: { offsets: ['value'] },
+      sys_luoyang_troops: { offsets: ['starttime', 'endtime'] },
+      sys_battle: { offsets: ['starttime'] },
+      mem_battle: { offsets: ['nexttime'] },
+      // 途中召回的 pathtime = now-starttime，两边相差请求间隔的 1-2 秒，按 10 秒取整比对。
+      sys_troops: {
+        offsets: ['starttime', 'endtime'],
+        map: {
+          pathtime: (v) =>
+            typeof v === 'string' && /^\d+$/.test(v) ? String(Math.round(Number(v) / 10)) : v,
+        },
+      },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      // 开关四段：0→out_of_time、2→out_of_time、1+0→waigua.invalid、1+过期→has_close。
+      await s.command(session, 'getLYBattleData');
+      await s.query('update mem_state set value = 2 where state = 2000');
+      await s.command(session, 'getLYBattleData');
+      await s.query('update mem_state set value = 1 where state = 2000');
+      await s.command(session, 'getLYBattleData');
+      await s.query('update mem_state set value = unix_timestamp() - 8000 where state = 2001');
+      await s.command(session, 'getLYBattleData');
+      await s.query('update mem_state set value = unix_timestamp() - 100 where state = 2001');
+      // 爵位 6 闸门：推恩令 bufparam 5 + 实爵 1 → 6（跨家族 getBufferNobility 路径）。
+      await s.command(session, 'getLYBattleData');
+      await s.query('update sys_user set nobility = 1 where uid = ?', [uid]);
+      await s.query(
+        `insert into mem_user_buffer (uid, buftype, endtime, bufparam)
+         values (?, 16, unix_timestamp() + 86400, 5)`,
+        [uid],
+      );
+      await s.command(session, 'getLYBattleData'); // not_in_union
+      await s.query('update mem_city_resource set gold = 100000 where cid = ?', [cid]);
+      const unionid = Number(((await s.command(session, 'createUnion', '洛甲')) as unknown[])[0]);
+      s.alias(unionid, '<lyunion>');
+      await s.command(session, 'getLYBattleData'); // 全景：城图/剩余秒/援军权/军队
+      s.mask(4, 1); // leavingTime 是秒数差，小数值
+      s.mask(4, 3, '*', 'leavingTime');
+      s.offset(4, 3, '*', 'endtime');
+      s.offset(4, 3, '*', 'starttime');
+      // 派兵：军旗检查在时间闸门之前（no_flag 两边确定）；带旗后按各自时钟走闸门。
+      await s.command(session, 'luoyangTroopStart', 80213, cid, unionid, '1,3,100', 0);
+      await s.command(session, 'luoyangTroopStart', 80213, cid, unionid, '1,3,100', 1);
+      await s.query(
+        `insert into sys_goods (uid, gid, count) values (?, 59, 2)
+         on duplicate key update count = 2`,
+        [uid],
+      );
+      await s.command(session, 'luoyangTroopStart', 80213, cid, unionid, '1,3,100', 1);
+      // shipped 新手城可能已带 3 号兵行：upsert 到 100，保证两边起点一致。
+      await s.query(
+        `insert into sys_city_soldier (cid, sid, count) values (?, 3, 100)
+         on duplicate key update count = 100`,
+        [cid],
+      );
+      await s.command(session, 'luoyangTroopStart', 80213, cid, unionid, '1,3,200', 1);
+      await s.command(session, 'luoyangTroopStart', 80213, cid, unionid, '1,3,100', 1);
+      // 召回：非自己的队伍拒绝；途中召回（pathtime=now-starttime）转 sys_troops 回城。
+      await s.command(session, 'luoyangCallbackTroop', 999);
+      await s.query(
+        `insert into sys_luoyang_troops
+           (uid, cid, hid, targetcid, state, starttime, pathtime, endtime, soldiers, startcid, unionid)
+         values (?, ?, 80213, 215265, 0, unix_timestamp() - 600, 600,
+           unix_timestamp() + 600, '1,3,100', ?, ?)`,
+        [uid, cid, cid, unionid],
+      );
+      const [mine] = await s.query<{ id: string }>(
+        'select id from sys_luoyang_troops where uid = ? and hid = 80213 order by id limit 1',
+        [uid],
+      );
+      const myTroop = Number(mine?.id ?? 0);
+      await s.command(session, 'luoyangCallbackTroop', myTroop);
+      // 战场城军队列表：无座拒绝；NPC（uid<1000）与我军同城按 unionid 排序拼名字。
+      await s.command(session, 'luoyangCityTroops', 3, 80213);
+      await s.query(
+        `insert into sys_city_hero (hid, uid, name, sex, face, cid, state, level, loyalty, herotype)
+         values (900700, 5, '洛阳NPC将', 0, 0, 0, 0, 1, 100, 0)`,
+      );
+      await s.query(
+        `insert into sys_luoyang_troops
+           (uid, cid, hid, targetcid, state, starttime, pathtime, endtime, soldiers, startcid, unionid)
+         values (5, 3, 900700, 3, 0, unix_timestamp() - 600, 600, unix_timestamp() + 600,
+           '1,3,100', 3, 0)`,
+      );
+      await s.query(
+        `insert into sys_luoyang_troops
+           (uid, cid, hid, targetcid, state, starttime, pathtime, endtime, soldiers, startcid, unionid)
+         values (?, 3, 80213, 3, 0, unix_timestamp() - 600, 600, unix_timestamp() + 600,
+           '1,3,100', 3, ?)`,
+        [uid, unionid],
+      );
+      const [mine2] = await s.query<{ id: string }>(
+        'select id from sys_luoyang_troops where uid = ? and cid = 3 order by id limit 1',
+        [uid],
+      );
+      const cityTroop = Number(mine2?.id ?? 0);
+      await s.command(session, 'luoyangCityTroops', 3, 80213);
+      // 调城：非己队/无cfg边/endtime 未过/NPC 占城四层拒绝，然后成功迁到 6 号城。
+      await s.command(session, 'luoyangChangeCity', 999, 3, 6);
+      await s.command(session, 'luoyangChangeCity', cityTroop, 3, 99);
+      await s.command(session, 'luoyangChangeCity', cityTroop, 3, 6);
+      await s.query('update sys_luoyang_troops set endtime = unix_timestamp() - 1 where id = ?', [
+        cityTroop,
+      ]);
+      await s.command(session, 'luoyangChangeCity', cityTroop, 3, 6); // NPC 军队占用
+      await s.query('delete from sys_luoyang_troops where uid = 5');
+      await s.command(session, 'luoyangChangeCity', cityTroop, 3, 6);
+      // 千里奔袭：非 13 类型/usetype 不符/将领不存在/锦囊不足（原样 not_enough_goods13#12）/
+      // 目标非洛阳/正常缩时/1 小时冷却/冷却过后复用。
+      await s.command(session, 'useLuoyangTrick', 80213, 25, 2);
+      await s.command(session, 'useLuoyangTrick', 80213, 13, 3);
+      await s.command(session, 'useLuoyangTrick', 999, 13, 2);
+      await s.command(session, 'useLuoyangTrick', 80213, 13, 2);
+      await s.query(
+        `insert into sys_goods (uid, gid, count) values (?, 13, 50)
+         on duplicate key update count = 50`,
+        [uid],
+      );
+      await s.command(session, 'useLuoyangTrick', 80213, 13, 2); // targetcid=6 → wrong_state
+      await s.query('update sys_luoyang_troops set targetcid = 215265 where id = ?', [cityTroop]);
+      await s.command(session, 'useLuoyangTrick', 80213, 13, 2);
+      await s.command(session, 'useLuoyangTrick', 80213, 13, 2); // cool_down
+      await s.query('update sys_luoyang_troops set lastcc = unix_timestamp() - 4000 where id = ?', [
+        cityTroop,
+      ]);
+      await s.command(session, 'useLuoyangTrick', 80213, 13, 2);
+      // 遭遇战：双方同城异盟 → sys_battle type5 + mem_battle type5 + 默认遭遇战术。
+      await s.query(
+        `insert into sys_luoyang_troops
+           (uid, cid, hid, targetcid, state, starttime, pathtime, endtime, soldiers, startcid, unionid)
+         values (5, 6, 900700, 6, 0, unix_timestamp() - 600, 600, unix_timestamp() + 600,
+           '1,3,100', 6, 0)`,
+      );
+      await s.command(session, 'luoyangAttack', 80213, 900700, 6);
+      // 援军权：100 元宝 → sys_user_luoyang second=1，全景里 isOpenSecond 变 1。
+      await s.command(session, 'luoyangYuanjun');
+      await s.command(session, 'getLYBattleData');
+      s.mask(4, 1);
+      s.mask(4, 3, '*', 'leavingTime');
+      s.offset(4, 3, '*', 'endtime');
+      s.offset(4, 3, '*', 'starttime');
+    },
+  },
+  {
+    // 洛阳归属: 六条读命令的空表语义（含 sys_luoyang_info.uid=710 的 NPC 持有态）、
+    // luoyangAllocate 的 uid<1000/非成员/成功（count 连续、130527 王爵位 buffer、nobility=21、
+    // 换主事件）与本周已分配拒绝、sendBelongInform 当日一次、openUnionZhaoAn 全盟 72h
+    // （含从旧 endtime 顺延的 on-dup 路径）、getLuoyangGovernCount、五政令全类型与
+    // 当日已政令/每日上限拒绝、getBeiZhanLuoYangProgress 非盟拒绝与 112001-112004 补种。
+    name: 'luoyang belong: allocate, notices, decrees and union epic',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      // 空态语义：sys_luoyang_info.uid=710（NPC 持有）、积分榜空、事件空。
+      await s.command(session, 'getLuoyangInfo');
+      await s.command(session, 'getLuoyangEvent');
+      await s.command(session, 'getLYBelongInfo');
+      await s.command(session, 'getUnionRankPoint');
+      await s.command(session, 'getUserRankPoint');
+      await s.command(session, 'getUserInfoPoint');
+      // 备战洛阳：非 0 类型与无盟都走 rankfunc.uniontask。
+      await s.command(session, 'getBeiZhanLuoYangProgress', 1);
+      await s.command(session, 'getBeiZhanLuoYangProgress', 0);
+      // 分配：现持者 uid<1000 拒绝 → 夹具换主成本盟 → 非成员拒绝 → 成功分配（各路写齐）。
+      await s.command(session, 'luoyangAllocate', 'changle');
+      await s.query('update mem_city_resource set gold = 100000 where cid = ?', [cid]);
+      const unionid = Number(((await s.command(session, 'createUnion', '洛丙')) as unknown[])[0]);
+      s.alias(unionid, '<lyunion2>');
+      await s.query('update sys_luoyang_info set uid = ?, unionid = ?, name = ? where uid = 710', [
+        uid,
+        unionid,
+        'changle',
+      ]);
+      await s.command(session, 'luoyangAllocate', '不存在的人');
+      await s.command(session, 'luoyangAllocate', 'changle');
+      await s.command(session, 'luoyangAllocate', 'changle'); // 本周已分配
+      await s.command(session, 'getLYBelongInfo'); // yearCount=1 的合并行
+      // 归属者闸门下的三条：政令计数（当日清零快照序）、飘公告当日一次、诏安全盟 72h。
+      await s.command(session, 'getLuoyangGovernCount');
+      await s.command(session, 'sendBelongInform');
+      await s.command(session, 'sendBelongInform'); // has_send_inform
+      await s.query(
+        `insert into mem_user_buffer (uid, buftype, endtime)
+         values (1002, 10333, unix_timestamp() - 1000)`,
+      );
+      await s.query('update sys_user set union_id = ? where uid = 1002', [unionid]);
+      await s.command(session, 'openUnionZhaoAn');
+      await s.command(session, 'openUnionZhaoAn'); // has_used
+      // 五政令：夹具五座 uid 1002 的城（各城当日一次），征税/抽丁/征粮/收编/裁军全类型。
+      const target = async (n: number, withSoldiers: boolean) => {
+        const tcid = 20000 + n * 10;
+        await s.query(
+          `insert into sys_city (cid, uid, name, type, state, province)
+           values (?, 1002, '政令城', 0, 0, 10)`,
+          [tcid],
+        );
+        await s.query(
+          `insert into mem_city_resource (cid, people, food, wood, rock, iron, gold, morale,
+             complaint, lastupdate)
+           values (?, 1000, 1000, 0, 0, 0, 1000, 0, 0, 0)`,
+          [tcid],
+        );
+        if (withSoldiers) {
+          await s.query('insert into sys_city_soldier (cid, sid, count) values (?, 3, 1000)', [
+            tcid,
+          ]);
+        }
+        return tcid;
+      };
+      const t1 = await target(1, false);
+      const t2 = await target(2, false);
+      const t3 = await target(3, false);
+      const t4 = await target(4, true);
+      const t5 = await target(5, true);
+      await s.command(session, 'governLuoyangOthers', 0, 600, 600);
+      await s.command(session, 'governLuoyangOthers', 0, t1 % 1000, Math.floor(t1 / 1000));
+      await s.command(session, 'governLuoyangOthers', 0, t1 % 1000, Math.floor(t1 / 1000)); // 当日已政令
+      await s.command(session, 'governLuoyangOthers', 1, t2 % 1000, Math.floor(t2 / 1000));
+      await s.command(session, 'governLuoyangOthers', 2, t3 % 1000, Math.floor(t3 / 1000));
+      await s.command(session, 'governLuoyangOthers', 3, t4 % 1000, Math.floor(t4 / 1000));
+      await s.command(session, 'governLuoyangOthers', 4, t5 % 1000, Math.floor(t5 / 1000));
+      await s.command(session, 'getLuoyangGovernCount'); // 5 次
+      // 每日 10 次上限挂在洛阳 schedule 行上。
+      await s.query('update mem_city_schedule set govern_count = 10 where cid = 215265');
+      await s.command(session, 'governLuoyangOthers', 0, t2 % 1000, Math.floor(t2 / 1000));
+      // 备战洛阳：有盟后补种 112001-112004 进度行（cfg_task_goal sort 203）。
+      await s.command(session, 'getBeiZhanLuoYangProgress', 0);
+      await s.command(session, 'getBeiZhanLuoYangProgress', 0); // 已存在的行 curvalue 原样
+    },
+  },
+  {
+    // 婚姻·君主历练: loadMarryInfo/loadMarryKingExpr 的空态行、beginKingExpr 的 1-8 小时/
+    // 休假/忙碌三层拒绝与建单、fasterKingExpr 两态两道具（12060 过程 30% 封底 1800s、
+    // 12061 返程召回）、cancelKingExpr 的未过半程折半与超半程保持两分支。
+    name: 'marry: king expr lifecycle',
+    tables: {
+      sys_king_expr: { offsets: ['starttime', 'endtime'] },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      await s.command(session, 'loadMarryInfo');
+      await s.command(session, 'loadMarryKingExpr');
+      // 小时数闸门。
+      await s.command(session, 'beginKingExpr', 0);
+      await s.command(session, 'beginKingExpr', 9);
+      // 休假拒绝（sys_user_state.vacend）。
+      await s.query(
+        `insert into sys_user_state (uid, forbistart, forbiend, vacstart, vacend, reason)
+         values (?, 0, 0, 0, unix_timestamp() + 1000, '')`,
+        [uid],
+      );
+      await s.command(session, 'beginKingExpr', 2);
+      await s.query('delete from sys_user_state where uid = ?', [uid]);
+      // 忙碌拒绝（将领 state≠0）。
+      await s.query('update sys_city_hero set state = 2 where uid = ? and herotype = 1000', [uid]);
+      await s.command(session, 'beginKingExpr', 2);
+      await s.query('update sys_city_hero set state = 0 where uid = ? and herotype = 1000', [uid]);
+      // 8 小时历练建单（log_user_action/log_action_count 各 21 号；回包是 [msg, [row]]）。
+      await s.command(session, 'beginKingExpr', 8);
+      s.offset(4, 1, 0, 'endtime');
+      // 过程加速：无 12060 → 原样 not_enough_goods12060；有票两次各减 30%（封底 1800s）。
+      await s.command(session, 'fasterKingExpr');
+      await s.query('insert into sys_goods (uid, gid, count) values (?, 12060, 3)', [uid]);
+      await s.command(session, 'fasterKingExpr');
+      s.offset(4, 0, 'endtime');
+      await s.command(session, 'fasterKingExpr');
+      s.offset(4, 0, 'endtime');
+      // 取消：未过半程 endtime=2*now-starttime（随用例时长跑动，掩掉）；将领 10→11。
+      await s.command(session, 'cancelKingExpr');
+      s.mask(4, 0, 'endtime'); // 2*now-starttime 随用例时长跑动
+      // 把返程钟拨到未来，钉死 state=1 分支（原样取消后 endtime≈now，大多直接已返回）。
+      await s.query('update sys_king_expr set endtime = unix_timestamp() + 3000 where uid = ?', [
+        uid,
+      ]);
+      // 返程加速：无 12061 → 原样 not_enough_goods12061；有票立即召回（删单、将领回 0）。
+      await s.command(session, 'fasterKingExpr');
+      await s.query('insert into sys_goods (uid, gid, count) values (?, 12061, 1)', [uid]);
+      await s.command(session, 'fasterKingExpr');
+      // 超半程取消的另一分支：夹具一单 starttime 已过 4000s（> hours*1800）→ endtime 原样。
+      await s.query('update sys_city_hero set state = 10 where uid = ? and herotype = 1000', [uid]);
+      await s.query(
+        `insert into sys_king_expr (uid, cid, hid, type, starttime, endtime, hours, accTimes, state)
+         values (?, 0, (select hid from sys_city_hero where uid = ? and herotype = 1000), 0,
+           unix_timestamp() - 4000, unix_timestamp() + 4000, 1, 0, 0)`,
+        [uid, uid],
+      );
+      await s.command(session, 'cancelKingExpr');
+      s.offset(4, 0, 'endtime'); // 超半程分支 endtime 原样（now+4000，绝对时刻）
+      s.offset(4, 0, 'starttime'); // 夹具行的 starttime（now-4000）
+    },
+  },
+  {
+    // 婚姻·红颜与亲子: finishMeetWife 的红玫瑰兑换（成功文案走异常）、byebye、proposeMarry
+    // 的 favor/档位/铜钱三层拒绝与四档成功率（5/30 档掷不中直接成、空手档触发守护 NPC 战）、
+    // 3 小时冷却、addMadamFavor 的礼品梯/80 态闸门与 88 怀孕迁移、doSpeedFeta、
+    // getMadamChild 铜钱/元宝两路支付与出生（名字表裁成单行使 order by rand() 确定）、
+    // 培养与出师、改名一次性、开房 200/400 封顶 3、周游列国送子换礼包。
+    // rng 10006 → mt_rand(1,100)=7：提亲 5/30 档不触发 PK、培养成功率 80 档掷中、
+    // mt_rand(0,1)=0 生女（原版 sex==0 取 boyname 的怪癖路径）。
+    name: 'marry: girlfriend, proposal and children',
+    tables: {
+      sys_king_expr: { offsets: ['starttime', 'endtime'] },
+      mem_marry_during: { offsets: ['starttime', 'endtime'] },
+      mem_marry_hero_favor: { offsets: ['coolingEndtime', 'proposeCoolTime'] },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      // 名字表裁成单行并把幸存行改名为固定值：order by rand() 两边必同（两边默认排序规则
+      // 不同，min(name) 选出的行可能不一样，所以再 update 钉死文案）。
+      for (const [table, name] of [
+        ['mem_cfg_firstname', '丁'],
+        ['mem_cfg_boyname', '一佑'],
+        ['mem_cfg_girlname', '丫丫'],
+      ] as const) {
+        await s.query(
+          `delete from \`${table}\` where name <> (select name from
+             (select min(name) as name from \`${table}\`) t)`,
+        );
+        await s.query(`update \`${table}\` set name = ?`, [name]);
+      }
+      // 缘份奖励换红颜：无奖励行 → 夹具行 → 红玫瑰不足（cfg_marry_mother_hero hid 1 需 2 朵）
+      // → 兑换（mem_marry_hero_favor 建档 + getFlag + 公告，成功文案经异常返回）→ 重复领。
+      await s.command(session, 'finishMeetWife', 999);
+      await s.query(
+        'insert into sys_king_expr_reward (uid, hid, time, getFlag) values (?, 1, 0, 0)',
+        [uid],
+      );
+      const [reward] = await s.query<{ id: string }>(
+        'select id from sys_king_expr_reward where uid = ? limit 1',
+        [uid],
+      );
+      const rewardId = Number(reward?.id ?? 0);
+      await s.command(session, 'finishMeetWife', rewardId);
+      await s.query('insert into sys_goods (uid, gid, count) values (?, 12065, 5)', [uid]);
+      await s.command(session, 'finishMeetWife', rewardId);
+      await s.command(session, 'finishMeetWife', rewardId);
+      // 分手：无红颜拒绝；第二位红颜（夹具行）分手成功。
+      await s.command(session, 'byebye', 2);
+      await s.query(
+        'insert into mem_marry_hero_favor (uid, hid, favor, state, count) values (?, 2, 0, 0, 0)',
+        [uid],
+      );
+      await s.command(session, 'byebye', 2);
+      // 提亲：参数个数/favor<50/档位/铜钱四层拒绝 → 高档 666 元宝掷不中直接成（公告+state 1）
+      // → 3 小时冷却 → 空手档 100% 触发守护 NPC 418 的斗将（君主将落败不结）。
+      await s.command(session, 'proposeMarry', 1);
+      await s.command(session, 'proposeMarry', 1, 5);
+      await s.query('update mem_marry_hero_favor set favor = 60 where uid = ? and hid = 1', [uid]);
+      await s.command(session, 'proposeMarry', 1, 5);
+      await s.command(session, 'proposeMarry', 1, 3);
+      await s.query('insert into sys_goods (uid, gid, count) values (?, 152, 300)', [uid]);
+      s.rng([10006]);
+      await s.command(session, 'proposeMarry', 1, 1);
+      await s.command(session, 'proposeMarry', 1, 1); // 冷却文案带剩余时长，整条掩掉
+      s.mask();
+      await s.query(
+        'update mem_marry_hero_favor set proposeCoolTime = 0 where uid = ? and hid = 1',
+        [uid],
+      );
+      await s.command(session, 'proposeMarry', 1, 2); // 333 元宝档掷中 → PK 落败
+      await s.command(session, 'proposeMarry', 1, 4); // 空手档 100% → PK 落败
+      s.stopRng();
+      // 好感礼品：类型/红颜/状态闸门 → 礼品梯缺货 → 送礼 +2 → 80 态 0 拒绝 → 88 怀孕迁移
+      // （mem_marry_during 3 天）→ state 2 拒绝续送。
+      await s.command(session, 'addMadamFavor', 3, 1);
+      await s.command(session, 'addMadamFavor', 1, 999);
+      await s.command(session, 'addMadamFavor', 1, 1);
+      await s.query('insert into sys_goods (uid, gid, count) values (?, 12068, 5)', [uid]);
+      await s.command(session, 'addMadamFavor', 1, 1);
+      await s.query(
+        'update mem_marry_hero_favor set favor = 80, state = 0 where uid = ? and hid = 1',
+        [uid],
+      );
+      await s.command(session, 'addMadamFavor', 1, 1);
+      await s.query('update mem_marry_hero_favor set state = 1 where uid = ? and hid = 1', [uid]);
+      await s.command(session, 'addMadamFavor', 1, 1); // 82
+      await s.query('update mem_marry_hero_favor set favor = 88 where uid = ? and hid = 1', [uid]);
+      await s.command(session, 'addMadamFavor', 1, 1); // 怀孕 → state 2
+      await s.command(session, 'addMadamFavor', 1, 1);
+      await s.command(session, 'loadMarryMadam');
+      s.mask(4, 0, '*', 'leaveDuringTime');
+      s.offset(4, 0, '*', 'coolingEndtime');
+      s.offset(4, 0, '*', 'proposeCoolTime');
+      // 胎教加速：500 元宝减 77760s 一次；第二次 has_speed；剩余时间与状态推送。
+      await s.command(session, 'doSpeedFeta', 1);
+      s.mask(4, 0, 'leaveDuringTime');
+      s.offset(4, 0, 'endtime');
+      s.offset(4, 0, 'starttime');
+      await s.command(session, 'doSpeedFeta', 1);
+      await s.command(session, 'getMadamLeavingTime', 999);
+      await s.command(session, 'getMadamLeavingTime', 1);
+      s.mask(4, 0, 'leaveDuringTime');
+      s.offset(4, 0, 'endtime');
+      s.offset(4, 0, 'starttime');
+      // 房间数：孩子数兜底 1 的语义 + 状态推到 3。
+      await s.command(session, 'checkRoomCount', 1);
+      // 接生：铜钱路（152×200）→ 出生（名字/性别/四维 roll rng 钉死）。
+      await s.query('update mem_marry_during set endtime = unix_timestamp() - 10 where uid = ?', [
+        uid,
+      ]);
+      await s.command(session, 'getMadamChild', 3, 1);
+      await s.command(session, 'getMadamChild', 1, 999);
+      await s.command(session, 'getMadamChild', 1, 1);
+      s.offset(4, 1, 'coolingEndtime');
+      const [child] = await s.query<{ hid: string }>(
+        'select hid from sys_user_child where uid = ? order by hid limit 1',
+        [uid],
+      );
+      const childHid = Number(child?.hid ?? 0);
+      // 培养：房间号闸门 → 培养丹缺失 → 成功培养两次（属性 roll rng 钉死）→ 出师
+      // （herotype 10001 子将 + mem_hero_blood + out_hid 回写）。
+      await s.command(session, 'loadChildCulture', 5, childHid);
+      await s.command(session, 'loadChildCulture', 1, childHid);
+      await s.command(session, 'startCulture', childHid, 1);
+      await s.query('insert into sys_goods (uid, gid, count) values (?, 12059, 10)', [uid]);
+      s.rng([10006]);
+      await s.command(session, 'startCulture', childHid, 1);
+      await s.command(session, 'startCulture', childHid, 1);
+      await s.command(session, 'completeCulture', childHid);
+      s.stopRng();
+      s.mask(1, '*', 'name');
+      // 改名：一次性。
+      await s.command(session, 'changeChildName', childHid, '  小火龙  ');
+      await s.command(session, 'changeChildName', childHid, 'x');
+      // 开房：200 → 接生第二胎（元宝路 + wenpo）→ 400 → 封顶 3。
+      await s.command(session, 'openChildRoom');
+      await s.query(
+        `insert into mem_marry_during (uid, hid, starttime, endtime, isSpeed)
+         values (?, 1, unix_timestamp(), unix_timestamp() - 10, 0)`,
+        [uid],
+      );
+      s.rng([10006]); // 第二胎的性别/四维/面容 roll 与第一胎同序
+      await s.command(session, 'getMadamChild', 2, 1);
+      s.stopRng();
+      s.offset(4, 1, 'coolingEndtime');
+      await s.command(session, 'openChildRoom');
+      await s.command(session, 'openChildRoom');
+      // 周游列国：出师子不可送 → 铜钱不足 → 送走换 50320 礼包。
+      await s.command(session, 'deleteSpecialChild', childHid);
+      await s.command(session, 'deleteSpecialChild', childHid + 1);
+      await s.query('update sys_goods set count = 1000 where uid = ? and gid = 152', [uid]);
+      await s.command(session, 'deleteSpecialChild', childHid + 1);
+      s.mask(1, '*', 'name');
+      await s.command(session, 'loadMarryChild');
+      s.mask(1, '*', 'name');
+      // 白名单幽灵命令：PHP 无定义 → WizardFunc GM 台空应答 → 两边都回裸头部。
+      await s.command(session, 'sendGift', 1);
+      await s.command(session, 'getMotherInfo');
     },
   },
 ];
