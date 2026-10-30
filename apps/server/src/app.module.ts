@@ -13,6 +13,7 @@ import { CommonModule } from './common/common.module';
 import { ConfigModule } from './config/config.module';
 import { CoreModule } from './core/core.module';
 import { FriendModule } from './friend/friend.module';
+import { GmModule } from './gm/gm.module';
 import { HonorModule } from './honor/honor.module';
 import { LotteryModule } from './lottery/lottery.module';
 import { TrickModule } from './trick/trick.module';
@@ -71,6 +72,7 @@ import { WorldModule } from './world/world.module';
     LuoyangModule,
     LuoyangBelongModule,
     MarryModule,
+    GmModule,
   ],
   controllers: [HealthController],
 })
