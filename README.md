@@ -91,9 +91,9 @@ legacy/          本地生成的原版文件（不提交）
 | 6 社交与经济（好友/聊天/联盟/市场完成；既有差分与界面细化待做）                        | **进行中** |
 | 7 成长与荣誉（排行榜、领奖、统计、成就、计谋、抽奖、君主荣誉及客户端全部完成）         | 完成       |
 | 8 玩法活动（过关斩将/竞技场/洛阳/婚姻完成；沙场与闹钟原版不可达，未移植）              | 完成       |
-| 9 独立战场（开工前评审完成，推荐方案 A 变体，开工与否待决策）                          | 待决策     |
+| 9 独立战场（四本地 PVE 战场后端+核心客户端完成；官渡/董卓照原版关闭）                  | 完成       |
 | 10 GM 工具（运维 API + 单页后台完成）                                                  | 完成       |
-| 11 测试与发布                                                                          | 未开始     |
+| 11 测试与发布（一键全栈 compose/备份恢复/部署文档完成；24h 对比与浏览器走查待做）      | **进行中** |
 
 ### 阶段 3 已完成
 
@@ -193,7 +193,25 @@ legacy/          本地生成的原版文件（不提交）
 
 本轮完整回归：服务端 420 项、客户端 333 项、tools 60 项单元测试全过，差分 149/149 组通过；格式检查、Lint、类型检查和构建通过。已知波动：rank_hero 并列排名（904-906 名）在 MySQL 5.7 与 8.4 间的行序 rotates，差分偶发 1 组失败（两边引擎均逐行忠实于 ReportCron.php:412）。
 
-### 阶段 8 完成（玩法活动）
+### 阶段 9 完成（独立战场，方案 A 变体）
+
+工作流并行移植（六切片 + 战场客户端 + 集成差分）：
+
+- S1 战场大厅（battlefield/）：15 条 openfunc 命令——getBattleInfo 四类型 + 倍率活动、getBattleNetUrl 单机关闭恒回空、PVPBattleInfo 四阵营、勋章行情、清战重置；44 单测。
+- S2 生命周期（battle/）：createBattle/joinToBattle/joinToPVPBattle/getBattleInvite + battlefield-helpers/-utils 共享助手；关键差分固定点：原版 `rand()%(10-total)` 数学事实使收缩分支恒死，逐次 draw 对齐；39 单测。
+- S2b 退盟/邀请（battle/）：quitBattle 完整 337 行（倍率、援军折算荣誉、黄巾刷子检测、勋章、防沉迷、关场）+ 邀请四命令 + act-battle 助手；31 单测。
+- S3 战场 Tick（正式动刀点落地）：troop.tick.ts task 7/8 到达分支 + state-1 返回特例替换原「搁置」；battle-result.ts type-4 终局全量（mem_war_event 战况、事件触发器、winpoint、伤兵过滤）；新增 battle-field-uid.ts（resetBattleFieldUid 四态）与 battle-event.ts（cfg_battle_event 双位触发器）；41 单测。忠实复刻三处原版 bug：winpoint LEAST/GREATEST 死代码块（`$unionid==3?4:3` loose 陷阱）、cfg_js.php:550 坏列插入按可观察效果跳过、check1001 返回 2 恒真放行。
+- S4 行军与交战（battlefield/）：startBattleTroop/battleTroopDispatch/battleAttack/battlePatrol 等 11 命令 + canGoto 邻接四态；22 单测。
+- S4b 援军/召军/加速/探索（battle/）：11 命令 + 共享助手导出（firstGetUserBattleInfo/ifFrozeExit/enoughIntervalFromLastMark/resetBattleFieldUid/enhanceArmy 等）；34 单测。
+- S5 战场周边（battle/）：任务面板（ALARM_TIDS 60901-60919）、将领对话、功勋统计、成员列表、战场商城（buyBattleGoods 12 条购买路径 + updateBattleOpenState 开战场链）；37 单测。
+- S6 推送消费（push/）：mem_war_event 排空→proc 52 广播（WarEventService.drain，参战者定位 + 送达即删 + 离线保留重试）；proc 53 有意不接线（本地无生产者）。
+- 战场客户端核心流（22 文件 + 27 单测）：BattlePanel 战场大地图（等距据点/军旗/军粮条/30s 轮询/退出结算）、Create/Join/SelectUnion/BattleFiledViewDialog（派遣/侦察/攻击/交谈/详情/探索/征召）、兵力调度五对话框、军队详情两卡、BattleChatDialog、退出结算。未做：AttackTacticsDialog（白名单外死命令）、战况页签、组队邀请三件、商店/勋章三件、周边排行/趋势图（列在客户端 unresolved）。
+- 集成：6 模块注册、11 组差分用例、2 轮修复——battlePatrol 渲染参数丢失（lang.t 已是 sprintf，去掉外层无参 sprintf）、createBattle 去事务对齐原版半成品语义、新增 @RejectedCommand 装饰器（白名单外命令抛 `funcName+你异常了!!!`，同时修正好友/联盟同类偏差）、deps.cell 空值 false 语义、AMF 信封索引修正；单测修正三处与原版 PHP 不符的断言（getUserBattleInfo 空赤壁态回 [0,0]、joinToPVPBattle 闭盟 `count(1)<null` 实测 1064 → PearDB 文案、battlePatrol 断言的就是 bug）。
+
+### 阶段 11 进行中（测试与发布）
+
+- 发布准备完成：docker/prod 一键全栈 compose（db/server/nginx web 三服务，/ws 同源代理，客户端与 GM 静态同源托管；端到端实测六项冒烟全过）；scripts/backup-db.sh（mysqldump + 裁剪）与 restore-db.sh（MyISAM→InnoDB 在线转换，沙箱实测）；docs/deploy.md 部署文档；package.json 增 prod:up/prod:down/db:backup/db:restore。
+- 未做（长时/人工项）：差分 24 小时结算对比、按界面清单的全量浏览器走查（阶段 7/8/9 新面板累积）、性能与兼容性基准、可选桌面壳。
 
 工作流并行移植（调研→按家族并行→客户端→集成差分→回归门）：
 
