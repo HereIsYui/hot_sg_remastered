@@ -297,6 +297,7 @@ export class OldBattleService {
         row: (n) => this.reportRow(n),
         battle: (key) => this.battleStr(key),
         battleArr: (key, index) => this.battleArr(key, index),
+        battleKey: (key, k) => this.battleKey(key, k),
         soldierName: (sid) => this.soldierName(sid),
         defenceName: (did) => this.defenceName(did),
       },
@@ -323,6 +324,7 @@ export class OldBattleService {
         this.raiseWarEvent(battleid, unionid, type, content),
       rand: (min, max) => this.random.randRange(min, max),
       mtRand: (min, max) => this.random.mtRand(min, max),
+      randRaw: () => this.random.rand(),
       usepeople: this.usepeopleTable(),
       carry: this.carryTable(),
     };
@@ -369,6 +371,12 @@ export class OldBattleService {
   private battleArr(key: string, index: number): string {
     const v = this.lang.value<Record<string, unknown>>('battle')?.[key];
     return Array.isArray(v) ? phpString(v[index]) : '';
+  }
+  /** `$GLOBALS['battle'][key][k]` — the map lang values (union_name: {1:'汉',2:'黄',3:'袁绍',...}). */
+  private battleKey(key: string, k: number): string {
+    const v = this.lang.value<Record<string, unknown>>('battle')?.[key] as
+      Record<string, unknown> | undefined;
+    return phpString(v?.[String(k)]);
   }
   private soldierName(sid: number): string {
     const names = this.lang.value<Record<string, unknown>>('battle')?.patrol_report_soldier as

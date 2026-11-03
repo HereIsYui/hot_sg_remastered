@@ -41,5 +41,12 @@ export default tseslint.config(
     files: ['apps/server/**', 'tools/**', 'packages/**', '*.mjs'],
     languageOptions: { globals: globals.node },
   },
+  {
+    // `_`-prefixed parameters mark deliberately unused args (e.g. the ported battle stubs that
+    // mirror PHP signatures); intentionally-unused locals are handled with `void x;` instead.
+    rules: {
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+    },
+  },
   prettier,
 );

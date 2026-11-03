@@ -2,12 +2,20 @@ import { Injectable, Logger } from '@nestjs/common';
 import { sql } from 'kysely';
 import { ScoutService } from '../battle/scout';
 import { BattleArrivalService } from '../battle/battle-arrival.service';
+import {
+  applyBattlefieldWinPoint,
+  resetBattleFieldUid,
+  type BattleFieldUidDeps,
+} from '../battle/battle-field-uid';
+import { runBattlefieldArrivalEvents, type BattleEventDeps } from '../battle/battle-event';
 import { LangService } from '../common/lang.service';
 import { sprintf } from '../common/sprintf';
 import { CityRules, cid2wid } from '../core/city-rules.service';
 import { HeroRules } from '../core/hero-rules.service';
 import { phpEmpty, phpIntval, phpNum, phpString } from '../core/php';
 import { ReportService } from '../core/report.service';
+import { RandomService } from '../core/random.service';
+import { TaskRules } from '../core/task-rules.service';
 import { DbScope } from '../db/database.module';
 import { TickHandler, TickOrder } from '../tick/tick.decorator';
 
@@ -22,15 +30,19 @@ type Row = Record<string, unknown>;
  *   - state 0, task 1 派遣: arrive at an own city (hero takes a post, soldiers/resources join the
  *     city, row deleted) or at a union city / own-or-union field (merge into the stationed troop,
  *     state 4), with the arrival report.
- *   - state 1 返回: hero comes home, soldiers and resources return to the origin, row deleted.
+ *   - state 1 返回: hero comes home, soldiers and resources return to the origin, row deleted —
+ *     plus the battlefield special case (task > 7 landing mid-way at another stronghold).
  *   - state 0, task 2 侦察: delegated to `ScoutService` (apps/src/battle/scout.ts) — the scout
  *     battle (if a patrol is present), the intelligence report at every unlocked level, the troop
  *     turning home, and the target owner's alarm. Kept in the battle module so the parallel wave
- *     owning task 3/4/9 does not collide with it.
+ *     owning task 3/4/9 does not collide with it. A 侦察 on the battlefield slot (bid != 0) still
+ *     waits — the 战场 patrol flow belongs to the 战场内指令 slice.
  *
- * NOW ported (battle wave): 侦察 (task 2) is delegated to `ScoutService`; 掠夺/占领/攻击
- * (task 3/4/9) start a battle through `BattleArrivalService` (defcityadd / battleAdd / mem_battle).
- * 战场 tasks (7/8) and battlefield troops (bid != 0) stay routed to `battleArrivalNotPorted`.
+ * NOW ported (battlefield wave): 掠夺/占领/攻击 (task 3/4/9) start a battle through
+ * `BattleArrivalService` for battlefield troops too (bid != 0 → type 4 战场战斗); task 7 (战场出征)
+ * parks the troop at the target stronghold; task 8 (战场调遣) additionally re-judges both
+ * strongholds (`resetBattleFieldUid`), runs the 虎牢关/101982 gate, fires the cfg_battle_event
+ * triggers (任务/增兵/消失将领) and the dead-by-design winpoint block.
  */
 @Injectable()
 export class TroopTick {
@@ -44,7 +56,12 @@ export class TroopTick {
     private readonly report: ReportService,
     private readonly scout: ScoutService,
     private readonly arrival: BattleArrivalService,
+    private readonly tasks: TaskRules,
+    private readonly random: RandomService,
   ) {}
+
+  /** Set by settle() when the original's PearDB die() would end the HandleTroop batch. */
+  private pearDbDie = false;
 
   @TickHandler(TickOrder.Troop)
   async handleTroop(): Promise<void> {
@@ -61,6 +78,11 @@ export class TroopTick {
           `troop ${phpString(row.id)} settle failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
         );
       }
+      if (this.pearDbDie) {
+        // The PearDB die() ends the whole cron run after the current row's writes stood.
+        this.pearDbDie = false;
+        break;
+      }
     }
   }
 
@@ -75,11 +97,10 @@ export class TroopTick {
     const state = phpIntval(row.state);
     const bid = phpIntval(row.battlefieldid);
 
-    // A battlefield-slot arrival (battlefieldid != 0) and the 战场 tasks (7/8) need the battle
-    // engine / 战场 flow; leave the row for the next wave. A scout (task 2) on the battlefield slot
-    // also waits here — ScoutService only owns the ordinary (bid 0) scout arrival.
-    if (bid !== 0 || task === 7 || task === 8) {
-      this.battleArrivalNotPorted(row);
+    // A 侦察 (task 2) on the battlefield slot still waits here — ScoutService only owns the
+    // ordinary (bid 0) scout arrival; the 战场 patrol (battlePatrol) flow is the 战场内指令 slice.
+    if (task === 2 && bid !== 0) {
+      this.troopRowNotPorted(row);
       return;
     }
 
@@ -182,6 +203,62 @@ export class TroopTick {
           });
           return;
         }
+        case 7: {
+          // 战场出征到达 (cfg_js.php:515-522): park at the stronghold; the report goes out through
+          // the common tail below (result stays 1 → 军队进入). battleid is NOT reset here.
+          await sql`update sys_troops set cid = ${targetcid}, state = 4 where id = ${id}`.execute(
+            db,
+          );
+          content += sprintf(
+            this.reportStr('troopback'),
+            '战场军队',
+            hid > 0 ? await this.contentHero(hid) : '',
+            this.reportSoldier(soldierArray),
+          );
+          if (resource) content += this.resourceLine('携带资源', resource);
+          break;
+        }
+        case 8: {
+          // 战场调遣到达 (cfg_js.php:523-600): park + battleid reset, re-judge both strongholds,
+          // the bid-1001 虎牢关 gate, then the cfg_battle_event triggers keyed by
+          // triggerid=targetcid%1000.
+          await sql`update sys_troops set cid = ${targetcid}, state = 4, battleid = 0
+            where id = ${id}`.execute(db);
+          content += sprintf(
+            this.reportStr('troopback'),
+            '战场军队',
+            hid > 0 ? await this.contentHero(hid) : '',
+            this.reportSoldier(soldierArray),
+          );
+          if (resource) content += this.resourceLine('携带资源', resource);
+          const fieldUidDeps = this.fieldUidDeps();
+          await resetBattleFieldUid(fieldUidDeps, cid);
+          const bresult = await resetBattleFieldUid(fieldUidDeps, targetcid);
+          if (
+            phpNum(row.bid) === 1001 &&
+            targetcid % 1000 === 367 &&
+            phpNum(typeof bresult === 'object' && bresult !== null ? bresult.unionid : null) === 1
+          ) {
+            // 扫清虎牢关的黄巾军 (虎牢关 now held by union 1, 汉).
+            await this.tasks.completeTask(uid, 101982);
+          }
+          const events = await this.rows(sql<Row>`select * from cfg_battle_event
+            where triggerid = ${targetcid} % 1000 and bid = ${phpNum(row.bid)}
+            and unionid = ${phpNum(row.battleunionid)}`);
+          const battlelevel = phpNum(
+            await this.cell(
+              sql<Row>`select level from sys_user_battle_field where id = ${phpIntval(row.battlefieldid)}`,
+            ),
+          );
+          await runBattlefieldArrivalEvents(this.eventDeps(), row, uid, events, battlelevel);
+          await applyBattlefieldWinPoint(
+            fieldUidDeps,
+            targetcid,
+            phpIntval(row.battlefieldid),
+            phpNum(row.battleunionid),
+          );
+          break;
+        }
         case 3:
         case 9:
         case 4: {
@@ -210,7 +287,7 @@ export class TroopTick {
         }
         default: {
           // Unknown task: leave untouched rather than guess.
-          this.battleArrivalNotPorted(row);
+          this.troopRowNotPorted(row);
           return;
         }
       }
@@ -223,11 +300,40 @@ export class TroopTick {
         await this.report.sendReport(phpIntval(field.uid), 1, cid, happencid, content);
         await this.cityRules.refreshFoodArmyUsers(phpIntval(field.ownercid));
       }
+      if (phpNum(field.uid) > 1000 && phpEmpty(field.ownercid)) {
+        // cfg_js.php:624-626 — the field-owner tail when the target's world tile is MISSING
+        // (a battlefield stronghold): check_field_owner auto-vivifies `uid` from the troops
+        // parked there (loop-start snapshot), so a stronghold already held by a player makes
+        // the block run with $field['ownercid'] UNSET. refreshFoodArmyUse('') survives, then
+        // check_city_resource interpolates the empty cid into `select * from sys_city_res_add
+        // where cid=` — an SQL syntax error whose PearDB die() ENDS HandleTroop: the troop's
+        // own arrival report is never sent and the rest of the batch is skipped. The arrival's
+        // writes are already committed above (the original runs bare), so set the die marker
+        // and let handleTroop stop after this row's transaction commits.
+        this.pearDbDie = true;
+        return;
+      }
       await this.finishReport(uid, task, state, cid, happencid, content);
       return;
     }
 
     // ───────────────────── state 1: 返回 ─────────────────────
+    // cfg_js.php:625-631: a battlefield 调遣/攻击 troop (task > 7) "returning" somewhere that is
+    // not its origin startcid just parks at the landing stronghold — no hero/soldier drop-off, no
+    // food refresh, and the stronghold it left is re-judged.
+    if (task > 7 && cid !== phpIntval(row.startcid)) {
+      await sql`update sys_troops set state = 4, battleid = 0 where id = ${id}`.execute(db);
+      content += sprintf(
+        this.reportStr('troopback'),
+        '战场军队',
+        hid > 0 ? await this.contentHero(hid) : '',
+        this.reportSoldier(soldierArray),
+      );
+      if (resource) content += this.resourceLine('携带资源', resource);
+      await resetBattleFieldUid(this.fieldUidDeps(), cid);
+      await this.finishReport(uid, task, state, cid, happencid, content);
+      return;
+    }
     if (hid > 0) await this.changeHero(uid, cid, hid, 0);
     await this.cityRules.addCitySoldiers(cid, soldierArray, true);
     content += sprintf(
@@ -358,16 +464,33 @@ export class TroopTick {
     }
   }
 
+  /** Reads/writes for the battle-field-uid helpers (BattleFunc.php::resetBattleFieldUid & co). */
+  private fieldUidDeps(): BattleFieldUidDeps {
+    return { db: this.scope.db, query: async (q) => (await q.execute(this.scope.db)).rows };
+  }
+
+  /** The cfg_battle_event trigger-runner deps (arrival site, cfg_js.php:535-593). */
+  private eventDeps(): BattleEventDeps {
+    return {
+      db: this.scope.db,
+      query: async (q) => (await q.execute(this.scope.db)).rows,
+      cell: async (q) => {
+        const row = (await q.execute(this.scope.db)).rows[0];
+        return row ? Object.values(row)[0] : undefined;
+      },
+      tasks: { completeTask: (uid, goalId) => this.tasks.completeTask(uid, goalId) },
+      randRaw: () => this.random.rand(),
+    };
+  }
+
   /**
-   * The battle-starting arrival branch (task 3/4/9 in state 0) and battlefield tasks (7/8).
-   * The battle engine (OLdBattleCron.php + battleInfo) is not ported yet, so this intentionally
-   * does NOTHING to the troop row — the row stays due (`endtime` in the past) and will be settled
-   * by the next wave once the engine exists. (Task 2 侦察 is now handled by `ScoutService`.)
-   * Logged at debug so it is visible without spamming.
+   * Rows this wave still leaves in place: the battlefield-slot 侦察 arrival (battlePatrol flow,
+   * cfg_js.php HandleTroop case 2 with bid != 0 — owned by the 战场内指令 slice) and any task the
+   * port has no case for. Logged at debug so it is visible without spamming.
    */
-  private battleArrivalNotPorted(row: Row): void {
+  private troopRowNotPorted(row: Row): void {
     this.logger.debug(
-      `troop ${phpString(row.id)} (task ${phpString(row.task)}, state ${phpString(row.state)}): battle not ported — row left in place`,
+      `troop ${phpString(row.id)} (task ${phpString(row.task)}, state ${phpString(row.state)}): not ported — row left in place`,
     );
   }
 

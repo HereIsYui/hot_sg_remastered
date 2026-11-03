@@ -23,6 +23,8 @@ import { sprintf } from '../common/sprintf';
 import { cid2wid, wid2cid } from '../core/city-rules.service';
 import { phpIntval, phpNum, phpString } from '../core/php';
 import { countDescIndex, getArraySub, sol2people, troop2array } from './battle-math';
+import { applyBattlefieldWinPoint } from './battle-field-uid';
+import { runBattlefieldResultEvents } from './battle-event';
 import type { Database } from '../db/database.module';
 
 type Row = Record<string, unknown>;
@@ -39,6 +41,8 @@ export interface BattleResultDeps {
     battle(key: string): string;
     /** `$GLOBALS['battle'][key][index]` — the array lang values (citytype, juewei, ...). */
     battleArr(key: string, index: number): string;
+    /** `$GLOBALS['battle'][key][k]` — the map lang values (union_name, ...). */
+    battleKey(key: string, k: number): string;
     soldierName(sid: number): string;
     defenceName(did: number): string;
   };
@@ -75,6 +79,8 @@ export interface BattleResultDeps {
   warEvent(battleid: number, unionid: number, type: number, content: string): Promise<void>;
   rand(min: number, max: number): number;
   mtRand(min: number, max: number): number;
+  /** Raw PHP `rand()` draw — utils.php::createSoldier's share splits (cfg_battle_event 增兵). */
+  randRaw(): number;
   /** cfg usepeople table for sol2people, and fooduse/usepeople for the food recompute. */
   usepeople: Record<number, number>;
   /** cfg_soldier carry table for the surviving army's resource capacity. */
@@ -198,6 +204,27 @@ export async function getBattleResult(
   const dWoundedBase = dcount > 1000 ? 0.19 : 0.8;
   const aCapture = dcount > 1000 ? 0.15 : 0.32;
 
+  // type 4 (战场): soldiers already queued as reinforcements (sys_battle_reinforce) do not
+  // double into the wounded lists (OLdBattleCron.php:960-982). The second query re-uses troopid1
+  // verbatim — the original's own copy-paste (its yreinforce should read troopid2); and since
+  // bak_troops carries no troopid, both are dead reads here exactly as in the original.
+  const mreinforcetype: number[] = [];
+  const yreinforcetype: number[] = [];
+  if (type === 4) {
+    for (const v of await deps.query(
+      sql<Row>`select * from sys_battle_reinforce where troopid = ${troopid1}`,
+    )) {
+      mreinforcetype.push(phpIntval(v.sid));
+    }
+    if (resistuid > 1000) {
+      for (const v of await deps.query(
+        sql<Row>`select * from sys_battle_reinforce where troopid = ${troopid1}`,
+      )) {
+        yreinforcetype.push(phpIntval(v.sid));
+      }
+    }
+  }
+
   // 清囊 (buftype 9/10083) wounded/capture bonuses — a user-buffer side table (goods module).
   stub('清囊 buffers (mem_user_buffer buftype 9/10083)');
 
@@ -208,7 +235,7 @@ export async function getBattleResult(
     const aWounder = new Map<number, number>();
     for (const [sid, cnt] of aArray) {
       const w = Math.floor(cnt * aWoundedBase);
-      if (w > 0) aWounder.set(sid, w);
+      if (!mreinforcetype.includes(sid) && w > 0) aWounder.set(sid, w);
     }
     if (aWounder.size)
       await addCityWounded(deps, type === 4 ? phpIntval(mtroop.startcid) : cid, aWounder);
@@ -218,7 +245,7 @@ export async function getBattleResult(
     const w = Math.floor(cnt * dWoundedBase);
     const cap = Math.floor(w * aCapture);
     const mtsid = deps.mtRand(0, 3);
-    if (w > 0) {
+    if (!yreinforcetype.includes(sid) && w > 0) {
       dWounder.set(sid, w);
       if (mtsid === 1) {
         cCapturenum.set(sid, cap);
@@ -749,11 +776,53 @@ async function applyOutcome(deps: BattleResultDeps, a: OutcomeArgs): Promise<voi
         db,
       );
     } else if (a.type === 4) {
-      // 战场 (BloodBattle) — events/winpoints not ported.
+      // 战场 (BloodBattle) 终局 — OLdBattleCron.php:1325-1416 case 4 (end 0, attacker won).
       o.mstate = '4';
       await sql`update sys_troops set cid = ${a.resistcid}, state = 4, soldiers = ${a.attacksoldiers},
         battleid = 0 where id = ${a.troopid1}`.execute(db);
-      stub('战场 (type 4) events / winpoints / reinforcements');
+      // 战况消息 (mem_war_event, type 2). `$unionid` is UNDEFINED in the original at this point
+      // (first assigned at :1408) — the interpolation casts to 0 in the int column.
+      const myheroname = phpString(
+        await deps.cell(sql<Row>`select name from sys_city_hero where hid = ${a.hid}`),
+      );
+      const yheroname = phpString(
+        a.resistuid < 1000
+          ? await deps.cell(sql<Row>`select name from cfg_battle_hero where hid = ${a.resisthid}`)
+          : await deps.cell(sql<Row>`select name from sys_city_hero where hid = ${a.resisthid}`),
+      );
+      const battlecity = phpString(
+        await deps.cell(sql<Row>`select name from sys_battle_city where cid = ${a.resistcid}`),
+      );
+      const msg =
+        `${deps.lang.battleKey('union_name', phpNum(a.mtroop.battleunionid))}军 ${myheroname} 部 在 ${battlecity} 击败了 ` +
+        `${deps.lang.battleKey('union_name', phpNum(a.ytroop.battleunionid))}军 ${yheroname} 部。`;
+      await deps.warEvent(a.bbid, 0, 2, msg);
+      if (a.resistuid > 1000) {
+        if (a.resisthid)
+          await sql`update sys_city_hero set state = 0 where hid = ${a.resisthid}`.execute(db);
+        // bak_troops carries no troopid column (see getBattleResult) — troopid2 is 0 and this
+        // reinforce cleanup is a dead write here exactly as in the original.
+        await sql`delete from sys_battle_reinforce where troopid = ${a.troopid2}`.execute(db);
+      }
+      const events = await deps.query(sql<Row>`select * from cfg_battle_event
+        where (triggerid = ${a.resistcid} % 1000 or triggerid = ${a.resisthid})
+          and bid = ${phpNum(a.mtroop.bid)} and unionid = ${phpNum(a.mtroop.battleunionid)}`);
+      const battlelevel = phpNum(
+        await deps.cell(sql<Row>`select level from sys_user_battle_field where id = ${a.bbid}`),
+      );
+      await runBattlefieldResultEvents(
+        deps,
+        {
+          bbid: a.bbid,
+          mtroop: a.mtroop,
+          resistcid: a.resistcid,
+          resisthid: a.resisthid,
+          uid: a.uid,
+        },
+        events,
+        battlelevel,
+      );
+      await applyBattlefieldWinPoint(deps, a.resistcid, a.bbid, phpNum(a.mtroop.battleunionid));
       o.enter = 1;
     }
   } else if (a.end === 1) {

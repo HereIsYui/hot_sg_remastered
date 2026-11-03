@@ -6557,6 +6557,781 @@ export const cases: DiffCase[] = [
       await s.command(session, 'getMotherInfo');
     },
   },
+  // --- battlefield (stage9/BattleFunc.php) ---------------------------------------------------
+  // The 战场 slices: S1 hall readers, S2 create/join/quit lifecycle, S3 the tick arrivals and
+  // the type-4 settlement, S4 the in-battle command face, S5 the task/chat/shop periphery.
+  // Fixtures seed sys_user_battle_field/-state/-city rows directly; both engines answer through
+  // their own port of the same BattleFunc.php lines. Per-case table rules: the battle tables
+  // stamp unix_timestamp() into jointime/updatetime/evttime/… at insert (the two sides run a
+  // second or two apart), and the quit cases scope mem_war_event out entirely — the new side's
+  // push drain (war-event.service) deletes rows for battlefields nobody is in any more, while
+  // the original only ever INSERTs them.
+  {
+    // S1: the 战况-entry readers on a save nobody is fighting in — every not-in-battle branch,
+    // each reader's cheapest error gate, the medal quotes and the disabled-battlenet shapes.
+    name: 'battlefield hall readers and their gates (empty state)',
+    tables: {
+      mem_war_event: { offsets: ['evttime'] },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      await s.command(session, 'refreshUserBattleState'); // [0] — 不在战场
+      await s.command(session, 'getUserBattleInfo'); // [[0,0,-1],[0]]
+      await s.command(session, 'getBattleInfo'); // 大厅列表 + 战况警报复位
+      await s.command(session, 'getChibiInfo', 1);
+      await s.command(session, 'getChibiInfo', 0);
+      await s.command(session, 'getUserBattleState'); // 未入战分支（含等待队列探测）
+      await s.command(session, 'getChibiGongXun'); // 赤壁网络关闭 → [0]
+      await s.command(session, 'getChibiState4User', 1); // 爵位不足大夫
+      await s.query('update sys_user set nobility = 5 where uid = ?', [uid]);
+      await s.command(session, 'getChibiState4User', 1); // 史诗 (mem_state 5) 未完成
+      await s.command(session, 'getMedalExchangeInfo'); // 勋章行情（各战场 type）
+      await s.command(session, 'resetTodayWarCount'); // today_war_count 已是 0
+      await s.query('update mem_user_schedule set today_war_count = 1 where uid = ?', [uid]);
+      await s.command(session, 'resetTodayWarCount'); // 没有请战书 → not_enough_goods138
+      await s.query(
+        'insert into sys_goods (uid, gid, count) values (?, 138, 1) on duplicate key update count = 1',
+        [uid],
+      );
+      await s.command(session, 'resetTodayWarCount'); // 烧掉请战书，次数清零
+      await s.command(session, 'getPVPBattleInfo', 1001); // 无实例行 → 仅列表
+      await s.command(session, 'getPVPBattleInfo', 2001); // 官渡两阵营 + 每级一行
+      await s.command(session, 'getPVPBattleInfo', 4001); // 只能加入汉室 (unionid 7)
+      await s.command(session, 'getPVPBattleInfo', 6001); // 跨服兜底行 (25, 自己的名字)
+      await s.command(session, 'getPVPBattleInfo', 7001); // 本包无 7001 阵营行
+      await s.command(session, 'getPVPBattleInfo', 9999); // 未知 bid
+      await s.command(session, 'getBattleNews', 1001, 0, 0, 10); // 空战报页
+      await s.command(session, 'getBattleInfor', 1001, 1); // 场次 1 是官渡且 state 2 → 拒绝
+      await s.query(
+        `insert into sys_user_battle_field (bid, createuid, level, maxpeople, state, starttime,
+           endtime, finishtime, type, minpeople, winner, progress)
+         values (1001, 1002, 1, 5, 0, 0, 0, 0, 0, 1, -1, 0)`,
+      );
+      await s.command(session, 'getBattleInfor', 1001, 31); // state-0 场次的详情行
+      await s.command(session, 'getBattleActiveState'); // 总览：开放/未开放/条件进行中
+      // 行序：原版对 cfg_battle_field 不加 ORDER BY，MyISAM 磁盘序 (…10001, 8001…) 与 InnoDB
+      // 主键序不同 — 该列表按多重集比对。
+      s.unordered(4, 0);
+      await s.command(session, 'getBattleTime'); // 倍率时刻表（date 折算 mm.dd + weekday）
+      await s.command(session, 'getBattleNetUrl'); // BATTLE_NET 关闭 → [[]]
+    },
+  },
+  {
+    // S2: createBattle 的每一个拒绝分支 — 爵位、未知/未开战场、当日次数、荣誉、开房上限、
+    // 讨伐令 (道具 137, level>10)、黄巾门票 (demandGoods 30:2,31:2) 与已在战场。
+    name: 'battlefield createBattle refuses every bad ticket',
+    tables: {
+      // 结尾的成功开房插入真实 starttime/endtime（endtime = now + maxtime），两边相差秒级。
+      sys_user_battle_field: { offsets: ['starttime', 'endtime', 'finishtime'] },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      await s.command(session, 'createBattle', 1001, 1); // 爵位 0 → nobility_not_rearch
+      await s.query('update sys_user set nobility = 1 where uid = ?', [uid]);
+      await s.command(session, 'createBattle', 7001, 1); // 无 cfg_battle_field 行
+      await s.command(session, 'createBattle', 2001, 1); // 官渡 state 0 → no_battle_field
+      await s.query('update mem_user_schedule set today_war_count = 5 where uid = ?', [uid]);
+      await s.command(session, 'createBattle', 1001, 1); // 当日次数 5/5
+      await s.query('update mem_user_schedule set today_war_count = 0 where uid = ?', [uid]);
+      await s.query('update sys_user set honour = -1 where uid = ?', [uid]);
+      await s.command(session, 'createBattle', 1001, 1); // 荣誉为负
+      await s.query('update sys_user set honour = 1000 where uid = ?', [uid]);
+      await s.query('update cfg_battle_field set maxcount = 0 where id = 1001');
+      await s.command(session, 'createBattle', 1001, 1); // 房间数达上限
+      await s.query('update cfg_battle_field set maxcount = 300 where id = 1001');
+      await s.command(session, 'createBattle', 1001, 12); // 12 级要 2 张讨伐令 → #2
+      await s.query(
+        'insert into sys_goods (uid, gid, count) values (?, 137, 1) on duplicate key update count = 1',
+        [uid],
+      );
+      await s.command(session, 'createBattle', 1001, 1); // 黄巾票 31 缺货 → join_resource_not_enough
+      await s.query(
+        'insert into sys_goods (uid, gid, count) values (?, 30, 2), (?, 31, 2) on duplicate key update count = values(count)',
+        [uid, uid],
+      );
+      await s.query(
+        `insert into sys_user_battle_state (uid, bid, battlefieldid, unionid, level, state)
+         values (?, 1001, 1, 1, 1, 0)`,
+        [uid],
+      );
+      await s.command(session, 'createBattle', 1001, 1); // 已在战场
+      await s.query('delete from sys_user_battle_state where uid = ?', [uid]);
+      // 全部门票就位后成功开房（建 NPC 军的 rand() 序列在下一个用例固定；此处只看成功面）。
+      s.seed(11);
+      const ret = await s.command(session, 'createBattle', 1001, 11);
+      s.stopRng();
+      s.mask(0, 'endtime'); // endtime = now + maxtime，两边相差秒级
+      void ret;
+    },
+  },
+  {
+    // S2+S1: createBattle 成功开房（createSoldier 的 rand() 固定）后，大厅的各读口翻到在战态。
+    // 用例结束仍留在战场 → mem_war_event 行两边都保留（新侧 drain 不删）。
+    name: 'battlefield createBattle opens 黄巾之乱 and the hall follows',
+    tables: {
+      sys_user_battle_field: { offsets: ['starttime', 'endtime', 'finishtime'] },
+      sys_user_battle_state: {
+        only: [
+          'uid',
+          'bid',
+          'battlefieldid',
+          'unionid',
+          'level',
+          'state',
+          'honour',
+          'sent_troop_count',
+          'startcid',
+          'in_cross_battle',
+          'in_battle_hids',
+        ], // jointime 是 CURRENT_TIMESTAMP datetime，两边差秒级
+      },
+      mem_war_buf: { offsets: ['updatetime'] },
+      mem_war_event: { offsets: ['evttime'] },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      // 原始库存留有战场 35 的孤儿城池行（sys_battle_city 635xxx），而 sys_user_battle_field
+      // 的自增恰从 35 起 — 新开房间必然撞唯一键（原版同样中途 die 留半成品）。用例双方先清掉
+      // 这批孤儿行，让 createBattle 走到成功面。
+      await s.query('delete from sys_battle_city where cid between 635000 and 636000');
+      await s.query('update sys_user set nobility = 1 where uid = ?', [uid]);
+      await s.query(
+        'insert into sys_goods (uid, gid, count) values (?, 30, 2), (?, 31, 2), (?, 137, 1) on duplicate key update count = values(count)',
+        [uid, uid, uid],
+      );
+      s.rng([1, 2, 3, 4, 5, 6, 7, 8, 9, 2]); // createSoldier 的 rand()，按请求循环重放
+      const ret = await s.command(session, 'createBattle', 1001, 1);
+      s.stopRng();
+      s.offset(4, 0, 'endtime'); // 房间 endtime = now + 10800，两边差秒级
+      // 回包是 AMF 信封 [1, 2, 0, funcName, result] — createBattle 的结果在 [4]。
+      const bfid = ((ret as unknown[])[4] as unknown[])[0] as { battlefieldid: number };
+      await s.command(session, 'getUserBattleState'); // 在战全量：旗帜/军队/出生据点
+      s.offset(4, 3, 'endtime'); // [4][3] = sys_user_battle_field 行，endtime 两边差秒级
+      s.unordered(4, 2); // cfg_battle_field 列表无 ORDER BY：MyISAM 磁盘序 ≠ InnoDB 主键序
+      await s.command(session, 'refreshUserBattleState');
+      s.offset(4, 1, 'endtime'); // [4][1] = sys_user_battle_field 行，endtime 两边差秒级
+      await s.command(session, 'getPVPBattleInfo', 1001); // 自己的 level-1 房 + people 1
+      await s.command(session, 'getBattleInfo'); // canCreate 翻转前后一致地重算
+      s.unordered(4, 2);
+      await s.command(session, 'getBattleInfor', 1001, bfid.battlefieldid);
+      await s.command(session, 'getQuitResult'); // winner -1 → [-1]
+    },
+  },
+  {
+    // S2: joinToPVPBattle / joinToBattle 的拒绝与成功面 + quitBattle 的逃跑结算。中途 quit 会
+    // 清空战场 31 的参战者 → 新侧 drain 丢 mem_war_event 行（原版只写不删）→ 该表跳过比对。
+    name: 'battlefield join paths (PVP auto-pick, invite join) and an escape quit',
+    tables: {
+      sys_user_battle_field: { offsets: ['starttime', 'endtime', 'finishtime'] },
+      sys_user_battle_state: {
+        only: [
+          'uid',
+          'bid',
+          'battlefieldid',
+          'unionid',
+          'level',
+          'state',
+          'honour',
+          'sent_troop_count',
+          'startcid',
+          'in_cross_battle',
+          'in_battle_hids',
+        ], // jointime 是 CURRENT_TIMESTAMP datetime，两边差秒级
+      },
+      mem_war_buf: { offsets: ['updatetime'] },
+      mem_war_event: { skip: () => true },
+      log_battle_honour: { offsets: ['quittime'] },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      await s.query('update sys_user set nobility = 1 where uid = ?', [uid]);
+      await s.command(session, 'joinToPVPBattle', 2001, 0, 3); // 官渡关闭 → 兜底行 → max_people
+      await s.command(session, 'joinToPVPBattle', 9999, 1, 1); // 无场次 → no_battle_field
+      await s.command(session, 'joinToPVPBattle', 1001, 31, 1); // 场次 31 不存在
+      await s.query(
+        `insert into sys_user_battle_field (bid, createuid, level, maxpeople, state, starttime,
+           endtime, finishtime, type, minpeople, winner, progress)
+         values (1001, 1002, 1, 5, 0, 0, 0, 0, 0, 1, -1, 0)`,
+      );
+      await s.command(session, 'joinToPVPBattle', 1001, 31, 1); // 黄巾票缺 31
+      await s.query(
+        'insert into sys_goods (uid, gid, count) values (?, 30, 2), (?, 31, 2) on duplicate key update count = values(count)',
+        [uid, uid],
+      );
+      await s.command(session, 'joinToPVPBattle', 1001, 31, 1); // 成功（扣票、进门、初始任务）
+      await s.command(session, 'joinToPVPBattle', 1001, 31, 1); // 已在战场
+      await s.command(session, 'getBattleInvite'); // 自己没有邀请
+      await s.command(session, 'joinToBattle', 999); // 邀请不存在
+      await s.query(
+        `insert into sys_battle_invite (fromuid, battlename, battlefieldid, level, time, touid,
+           state, fromname, toname)
+         values (1002, '黄巾之乱', 31, 1, unix_timestamp(), 1002, 0, '飓鼎玩网单', '飓鼎玩网单')`,
+      );
+      await s.command(session, 'joinToBattle', 31); // touid 不是自己 → no_such_invite
+      await s.command(session, 'quitBattle'); // winner -1 → 逃跑：荣誉 -level²·20、关场
+      await s.command(session, 'quitBattle'); // 已不在战场
+      // 重进一场再走一次 joinToBattle 成功面（门票重新入库）。
+      await s.query(
+        'insert into sys_goods (uid, gid, count) values (?, 30, 2), (?, 31, 2) on duplicate key update count = values(count)',
+        [uid, uid],
+      );
+      await s.query(
+        `insert into sys_user_battle_field (bid, createuid, level, maxpeople, state, starttime,
+           endtime, finishtime, type, minpeople, winner, progress)
+         values (1001, 1002, 1, 5, 0, 0, 0, 0, 0, 1, -1, 0)`,
+      );
+      await s.query(
+        `insert into sys_battle_invite (fromuid, battlename, battlefieldid, level, time, touid,
+           state, fromname, toname)
+         values (1002, '黄巾之乱', 32, 1, unix_timestamp(), ?, 0, '飓鼎玩网单', '长乐')`,
+        [uid],
+      );
+      await s.command(session, 'joinToBattle', 32); // 成功：删邀请、进门、初始任务
+      await s.command(session, 'getBattleInvite'); // 邀请已被 join 消费
+      await s.command(session, 'getQuitResult');
+    },
+  },
+  {
+    // S2: 邀请生命周期 — 创建者邀请/重复邀请/未知玩家、被邀视角的 getBattleInvite/ignore、
+    // 创建者撤回 cancelBattleInvite，以及 getBattleFieldUsers 的在战+邀请合并视图。
+    name: 'battlefield invites (inviteBattleUser, ignore, cancel, member list)',
+    tables: {
+      sys_user_battle_field: { offsets: ['starttime', 'endtime', 'finishtime'] },
+      sys_user_battle_state: {
+        only: [
+          'uid',
+          'bid',
+          'battlefieldid',
+          'unionid',
+          'level',
+          'state',
+          'honour',
+          'sent_troop_count',
+          'startcid',
+          'in_cross_battle',
+          'in_battle_hids',
+        ], // jointime 是 CURRENT_TIMESTAMP datetime，两边差秒级
+      },
+      mem_war_buf: { offsets: ['updatetime'] },
+      mem_war_event: { offsets: ['evttime'] },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      // 同上一用例：先清掉原始库存的战场 35 孤儿城池行，createBattle 才能以 id 35 走完。
+      await s.query('delete from sys_battle_city where cid between 635000 and 636000');
+      await s.query('update sys_user set nobility = 1 where uid = ?', [uid]);
+      await s.query(
+        'insert into sys_goods (uid, gid, count) values (?, 30, 2), (?, 31, 2), (?, 137, 1) on duplicate key update count = values(count)',
+        [uid, uid, uid],
+      );
+      s.seed(5);
+      const created = await s.command(session, 'createBattle', 1001, 1);
+      s.stopRng();
+      s.offset(4, 0, 'endtime'); // 房间 endtime = now + 10800，两边差秒级
+      // 回包是 AMF 信封 [1, 2, 0, funcName, result] — 结果在 [4]，inviteBattleUser 的
+      // 邀请行在 result[3]。
+      const fieldid = (((created as unknown[])[4] as unknown[])[0] as { battlefieldid: number })
+        .battlefieldid;
+      const invited = await s.command(session, 'inviteBattleUser', fieldid, '飓鼎玩网单', '长乐');
+      const invite = ((invited as unknown[])[4] as unknown[])[3] as { id: number };
+      await s.command(session, 'inviteBattleUser', fieldid, '飓鼎玩网单', '长乐'); // 重复邀请
+      await s.command(session, 'inviteBattleUser', fieldid, 'npc', '长乐'); // 第二个被邀人
+      await s.command(session, 'inviteBattleUser', fieldid, '不存在的人', '长乐');
+      await s.command(session, 'inviteBattleUser', 999, 'npc', '长乐'); // 不在战场
+      await s.command(session, 'getBattleInvite'); // 自己名下无邀请
+      await s.query(
+        `insert into sys_battle_invite (fromuid, battlename, battlefieldid, level, time, touid,
+           state, fromname, toname)
+         values (1002, '黄巾之乱', ?, 1, unix_timestamp(), ?, 0, '飓鼎玩网单', '长乐')`,
+        [fieldid, uid],
+      );
+      await s.command(session, 'getBattleInvite'); // 被邀视角：一行 pending
+      await s.command(session, 'ignoreBattle', 32); // 谁的邀请都能忽略（原样）
+      await s.command(session, 'cancelBattleInvite', invite.id); // 创建者撤回
+      await s.command(session, 'cancelBattleInvite', 999); // 不存在
+      await s.command(session, 'getBattleFieldUsers', fieldid); // 在战 1 人 + npc 邀请
+      await s.command(session, 'getBattleHonourStat'); // 剧情战场 → 不支持
+    },
+  },
+  {
+    // S2: quitBattle 的四种结算 — 准备 (quittype 3)、逃跑 (2)、失败 (1)、胜利 (0，canwin 的
+    // false/true 两态：黄巾主线 goal 60000-60002 计数 3 才算赢)。空场关场 + 3001 winner 6、
+    // 胜利犒赏 gid 19990、勋章 addThings、log_battle_honour、战报 40 全部落库比对。
+    name: 'battlefield quitBattle settles every quit type',
+    tables: {
+      sys_user_battle_field: { offsets: ['starttime', 'endtime', 'finishtime'] },
+      sys_user_battle_state: {
+        only: [
+          'uid',
+          'bid',
+          'battlefieldid',
+          'unionid',
+          'level',
+          'state',
+          'honour',
+          'sent_troop_count',
+          'startcid',
+          'in_cross_battle',
+          'in_battle_hids',
+        ], // jointime 是 CURRENT_TIMESTAMP datetime，两边差秒级
+      },
+      mem_war_buf: { offsets: ['updatetime'] },
+      mem_war_event: { skip: () => true },
+      log_battle_honour: { offsets: ['quittime'] },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const seedField = async (id: number, state: number, winner: number, createuid: number) => {
+        await s.query(
+          `insert into sys_user_battle_field (id, bid, createuid, level, maxpeople, state,
+             starttime, endtime, finishtime, type, minpeople, winner, progress)
+           values (?, 1001, ?, 1, 5, ?, 0, 0, 0, 0, 1, ?, 0)`,
+          [id, createuid, state, winner],
+        );
+        await s.query(
+          `insert into sys_user_battle_state (uid, bid, battlefieldid, unionid, level, state)
+           values (?, 1001, ?, 1, 1, 0)`,
+          [uid, id],
+        );
+      };
+      // 准备态 (state 2)：quittype 3，不写 log，称号文案不同。
+      await seedField(31, 2, -1, 1002);
+      await s.command(session, 'getQuitResult'); // [2]
+      await s.command(session, 'quitBattle');
+      // 逃跑 (winner -1)：荣誉 -20，创建者空场转队长（无他人 → 不动）。
+      await seedField(32, 0, -1, uid);
+      await s.command(session, 'getQuitResult'); // [-1]
+      await s.command(session, 'quitBattle');
+      // 失败 (winner 3 袁绍)：荣誉 -5。
+      await seedField(33, 0, 3, 1002);
+      await s.command(session, 'quitBattle');
+      // 胜利但没做满黄巾主线 goal → canwin false：荣誉 +0、勋章 0，犒赏 19990 照发。
+      await seedField(34, 0, 1, 1002);
+      s.rng([50]); // mt_rand(1,100) 的战场活动 roll（canwin false 时先消耗）
+      await s.command(session, 'quitBattle');
+      s.stopRng();
+      // 补上三条主线 goal 再胜利退出 → 荣誉 +level²·8·rate、勋章 +level、活动 roll 空转。
+      await seedField(35, 0, 1, 1002);
+      await s.query(
+        'insert into sys_user_goal (uid, gid) values (?, 101951), (?, 101952), (?, 101953)',
+        [uid, uid, uid],
+      );
+      s.rng([50]);
+      await s.command(session, 'quitBattle');
+      s.stopRng();
+      await s.query('delete from sys_user_battle_state where uid = ?', [uid]);
+    },
+  },
+  {
+    // S3: task 7 战场出征到达（park、军报 36）与 task 8 战场调遣到达（battleid 复位、两个据点
+    // resetBattleFieldUid、虎牢关门 101982、cfg_battle_event triggerid 367 的任务触发器、
+    // 死代码 winpoint 块）。用例结束仍留战场。
+    name: 'battlefield tick settles task 7 and task 8 arrivals at the strongholds',
+    tables: {
+      sys_user_battle_field: { offsets: ['starttime', 'endtime', 'finishtime'] },
+      // 资源波未移植：任务到达公共收尾的 check_city_resource 会按各自引擎重算城池上限
+      // （legacy 多计了城内建筑加成），sys_city_res_add 的空据点初始化行同样属于资源波 —
+      // 本用例的真实断言在 sys_troops / sys_report / sys_user_goal / sys_battle_city。
+      mem_city_resource: { skip: () => true },
+      sys_city_res_add: { skip: () => true },
+      sys_user_battle_state: {
+        only: [
+          'uid',
+          'bid',
+          'battlefieldid',
+          'unionid',
+          'level',
+          'state',
+          'honour',
+          'sent_troop_count',
+          'startcid',
+          'in_cross_battle',
+          'in_battle_hids',
+        ], // jointime 是 CURRENT_TIMESTAMP datetime，两边差秒级
+      },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const bfid = 31;
+      const cidOf = (xy: number) => (bfid + 600) * 1000 + xy; // utils.php battleid2cid
+      await s.query(
+        `insert into sys_user_battle_field (id, bid, createuid, level, maxpeople, state, starttime,
+           endtime, finishtime, type, minpeople, winner, progress)
+         values (?, 1001, 1002, 1, 5, 0, 0, 0, 0, 0, 1, -1, 0)`,
+        [bfid],
+      );
+      await s.query(
+        `insert into sys_user_battle_state (uid, bid, battlefieldid, unionid, level, state)
+         values (?, 1001, ?, 1, 1, 0)`,
+        [uid, bfid],
+      );
+      for (const [xy, name, unionid] of [
+        [767, '襄阳', 1],
+        [101, '钜鹿', 2],
+        [164, '下曲阳', 2],
+        [223, '东郡', 2],
+        [367, '虎牢关', 0],
+      ] as const) {
+        await s.query(
+          `insert into sys_battle_city (cid, battlefieldid, name, nextxy, \`drop\`, unionid, rate,
+             uid, xy, image, hasuser, winpoint, losepoint, ownerunionid, can_quest)
+           values (?, ?, ?, '0', '-1', ?, 0, 0, ?, 0, 0, 0, 0, 0, 0)`,
+          [cidOf(xy), bfid, name, unionid, xy],
+        );
+      }
+      // task 7：从襄阳出发去虎牢关（无将领，纯兵力）。
+      await s.query(
+        `insert into sys_troops (uid, cid, hid, targetcid, task, state, starttime, pathtime,
+           endtime, soldiers, resource, people, fooduse, battlefieldid, startcid, battleunionid, bid)
+         values (?, 209355, 0, ?, 7, 0, unix_timestamp() - 600, 600, unix_timestamp() - 1,
+           '1,7,100', '0', 0, 0, ?, 209355, 1, 1001)`,
+        [uid, cidOf(367), bfid],
+      );
+      await s.tick('HandleTroop'); // 虎牢关驻军 (state 4) + 军报 36
+      // task 8：襄阳 → 虎牢关的调遣；另留一支黄巾 NPC 在东郡撑起 triggertype 2 的"敌军尚在"闸门。
+      await s.query(
+        `insert into sys_troops (uid, cid, hid, targetcid, task, state, starttime, pathtime,
+           endtime, soldiers, resource, people, fooduse, battlefieldid, startcid, battleunionid, bid)
+         values (?, ?, 0, ?, 8, 0, unix_timestamp() - 600, 600, unix_timestamp() - 1,
+           '1,7,100', '0', 0, 0, ?, ?, 1, 1001)`,
+        [uid, cidOf(767), cidOf(367), bfid, cidOf(767)],
+      );
+      await s.query(
+        `insert into sys_troops (uid, cid, hid, soldiers, state, \`drop\`, rate, battlefieldid,
+           battleunionid, bid)
+         values (0, ?, 1004, '1,19,50,', 4, '', 0, ?, 2, 1001)`,
+        [cidOf(223), bfid],
+      );
+      await s.tick('HandleTroop'); // 虎牢关门 101982 + 事件 60015 + 两据点重判定 + 军报 37
+      await s.command(session, 'selectOneTroop', 2); // 军队现位（取 id 序第二支）
+    },
+  },
+  {
+    // S3: 战场战斗 (type 4) 打到终局 — 攻击同据点 NPC 驻军 → mem_battle → HandleBattle 推回合
+    // → getBattleResult end 0 type 4：战况消息 (mem_war_event)、cfg_battle_event 终局触发器、
+    // bak_troops 快照、胜方驻防。随机序列固定。
+    name: 'battlefield battle runs a type-4 fight to settlement',
+    tables: {
+      sys_user_battle_field: { offsets: ['starttime', 'endtime', 'finishtime'] },
+      // 资源波未移植：任务到达公共收尾的 check_city_resource 会按各自引擎重算城池上限
+      // （legacy 多计了城内建筑加成），sys_city_res_add 的空据点初始化行同样属于资源波 —
+      // 本用例的真实断言在 sys_troops / sys_report / sys_user_goal / sys_battle_city。
+      mem_city_resource: { skip: () => true },
+      sys_city_res_add: { skip: () => true },
+      sys_user_battle_state: {
+        only: [
+          'uid',
+          'bid',
+          'battlefieldid',
+          'unionid',
+          'level',
+          'state',
+          'honour',
+          'sent_troop_count',
+          'startcid',
+          'in_cross_battle',
+          'in_battle_hids',
+        ], // jointime 是 CURRENT_TIMESTAMP datetime，两边差秒级
+      },
+      mem_war_event: { offsets: ['evttime'] },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const bfid = 31;
+      const cidOf = (xy: number) => (bfid + 600) * 1000 + xy;
+      await s.query(
+        `insert into sys_user_battle_field (id, bid, createuid, level, maxpeople, state, starttime,
+           endtime, finishtime, type, minpeople, winner, progress)
+         values (?, 1001, 1002, 1, 5, 0, 0, 0, 0, 0, 1, -1, 0)`,
+        [bfid],
+      );
+      await s.query(
+        `insert into sys_user_battle_state (uid, bid, battlefieldid, unionid, level, state)
+         values (?, 1001, ?, 1, 1, 0)`,
+        [uid, bfid],
+      );
+      await s.query(
+        `insert into sys_battle_city (cid, battlefieldid, name, nextxy, \`drop\`, unionid, rate,
+           uid, xy, image, hasuser, winpoint, losepoint, ownerunionid, can_quest)
+         values (?, ?, '虎牢关', '0', '-1', 0, 0, 0, 367, 0, 0, 0, 0, 0, 0)`,
+        [cidOf(367), bfid],
+      );
+      await s.query(
+        `insert into sys_troops (uid, cid, hid, targetcid, task, state, starttime, pathtime,
+           endtime, soldiers, resource, people, fooduse, battlefieldid, startcid, battleunionid,
+           bid, targettroopid)
+         values (?, 209355, 80213, ?, 9, 0, unix_timestamp() - 600, 600, unix_timestamp() - 1,
+           '1,7,2000', '0', 0, 0, ?, 209355, 1, 1001, 900001)`,
+        [uid, cidOf(367), bfid],
+      );
+      // 虎牢关的黄巾驻军（弱，让攻击方速胜）。
+      await s.query(
+        `insert into sys_troops (id, uid, cid, hid, soldiers, state, \`drop\`, rate, battlefieldid,
+           battleunionid, bid)
+         values (900001, 0, ?, 1011, '1,18,5,', 4, '', 0, ?, 2, 1001)`,
+        [cidOf(367), bfid],
+      );
+      s.rng([1, 2, 1, 0, 0, 3, 1]); // 回合目标选择 + 终局负伤/俘获 roll
+      await s.tick('HandleTroop');
+      for (let i = 0; i < 45; i++) await s.tick('HandleBattle');
+      s.stopRng();
+      await s.query('delete from sys_troops where uid = ? or id = 900001', [uid]);
+      await s.query('delete from mem_battle where attackcid = ? or resistcid = ?', [
+        209355,
+        cidOf(367),
+      ]);
+    },
+  },
+  {
+    // S4: 战场内指令面 — startBattleTroop 出征、getBattleFieldState 快照、校场闸门、调遣/攻击
+    // （邻接/同阵营/锁定）、探索 60 秒冷却、召军/援军池/回军/加速/信鸽侦察、军队详情与木料监官。
+    name: 'battlefield in-battle command face marches, fights and supports the armies',
+    tables: {
+      sys_user_battle_field: { offsets: ['starttime', 'endtime', 'finishtime'] },
+      // 资源波未移植：任务到达公共收尾的 check_city_resource 会按各自引擎重算城池上限
+      // （legacy 多计了城内建筑加成），sys_city_res_add 的空据点初始化行同样属于资源波 —
+      // 本用例的真实断言在 sys_troops / sys_report / sys_user_goal / sys_battle_city。
+      mem_city_resource: { skip: () => true },
+      sys_city_res_add: { skip: () => true },
+      sys_user_battle_state: {
+        only: [
+          'uid',
+          'bid',
+          'battlefieldid',
+          'unionid',
+          'level',
+          'state',
+          'honour',
+          'sent_troop_count',
+          'startcid',
+          'in_cross_battle',
+          'in_battle_hids',
+        ], // jointime 是 CURRENT_TIMESTAMP datetime，两边差秒级
+      },
+      mem_battle_event_mark: { offsets: ['time'] },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const bfid = 31;
+      const cidOf = (xy: number) => (bfid + 600) * 1000 + xy;
+      await s.query(
+        `insert into sys_user_battle_field (id, bid, createuid, level, maxpeople, state, starttime,
+           endtime, finishtime, type, minpeople, winner, progress)
+         values (?, 1001, 1002, 1, 5, 0, 0, 0, 0, 0, 1, -1, 0)`,
+        [bfid],
+      );
+      await s.query(
+        `insert into sys_user_battle_state (uid, bid, battlefieldid, unionid, level, state)
+         values (?, 1001, ?, 1, 1, 0)`,
+        [uid, bfid],
+      );
+      // 襄阳(1) — 钜鹿(2) — 下曲阳(2) — 东郡(2) 的邻接图；钜鹿可探索。
+      for (const [xy, name, unionid, nextxy, canQuest] of [
+        [767, '襄阳', 1, '2,101,164,', 0],
+        [101, '钜鹿', 2, '2,767,164,', 1],
+        [164, '下曲阳', 2, '3,767,101,282,', 0],
+        [282, '陈留', 2, '1,164,', 0],
+      ] as const) {
+        await s.query(
+          `insert into sys_battle_city (cid, battlefieldid, name, nextxy, \`drop\`, unionid, rate,
+             uid, xy, image, hasuser, winpoint, losepoint, ownerunionid, reinforce_soldiers, can_quest)
+           values (?, ?, ?, ?, '-1', ?, 0, 0, ?, 0, 0, 0, 0, 0, ?, ?)`,
+          [cidOf(xy), bfid, name, nextxy, unionid, xy, xy === 101 ? '1,7,50,' : null, canQuest],
+        );
+      }
+      // T1 从主城出征；T2 直接驻在钜鹿；T3 在调遣途中；T4 剩余 5 秒（加速拒绝面）。
+      await s.command(session, 'startBattleTroop', 209355, 80213, '1,7,500', 0, 767);
+      await s.query(
+        `insert into sys_troops (uid, cid, hid, targetcid, task, state, starttime, pathtime,
+           endtime, soldiers, resource, people, fooduse, battlefieldid, startcid, battleunionid, bid)
+         values (?, ?, 80213, ?, 7, 4, unix_timestamp(), 0, 0, '1,7,100', '0', 0, 0, ?, ?, 1, 1001)`,
+        [uid, cidOf(101), cidOf(101), bfid, cidOf(101)],
+      );
+      await s.query(
+        `insert into sys_troops (uid, cid, hid, targetcid, task, state, starttime, pathtime,
+           endtime, soldiers, resource, people, fooduse, battlefieldid, startcid, battleunionid, bid)
+         values (?, ?, 0, ?, 8, 0, unix_timestamp(), 600, unix_timestamp() + 600,
+           '1,7,20', '0', 0, 0, ?, ?, 1, 1001)`,
+        [uid, cidOf(101), cidOf(164), bfid, cidOf(101)],
+      );
+      await s.query(
+        `insert into sys_troops (uid, cid, hid, targetcid, task, state, starttime, pathtime,
+           endtime, soldiers, resource, people, fooduse, battlefieldid, startcid, battleunionid, bid)
+         values (?, ?, 0, ?, 8, 0, unix_timestamp(), 600, unix_timestamp() + 5,
+           '1,7,5', '0', 0, 0, ?, ?, 1, 1001)`,
+        [uid, cidOf(164), cidOf(282), bfid, cidOf(164)],
+      );
+      const mine = await s.query<{ id: string; targetcid: string }>(
+        'select id, targetcid from sys_troops where uid = ? order by id',
+        [uid],
+      );
+      const t1 = Number(mine[0]!.id); // startBattleTroop 的那支（先插）
+      const t2 = Number(mine[1]!.id);
+      const t3 = Number(mine[2]!.id);
+      const t4 = Number(mine[3]!.id);
+      // 敌军：钜鹿的黄巾悍将 + 陈留的黄巾军 + 监官 (8056)。
+      await s.query(
+        `insert into sys_troops (id, uid, cid, hid, soldiers, state, \`drop\`, rate, battlefieldid,
+           battleunionid, bid)
+         values (900101, 0, ?, 1011, '1,18,10,', 4, '', 0, ?, 2, 1001),
+                (900102, 0, ?, 1004, '1,19,10,', 4, '', 0, ?, 2, 1001),
+                (900103, 0, ?, 8056, '1,20,5,', 4, '', 0, ?, 2, 1001)`,
+        [cidOf(101), bfid, cidOf(282), bfid, cidOf(101), bfid],
+      );
+      // T2 随身的木料（监官对话的转移物）。
+      await s.query(
+        'insert into sys_troop_things (uid, troop_id, thing_id, count) values (?, ?, 83, 100)',
+        [uid, t2],
+      );
+      await s.query(
+        'insert into sys_goods (uid, gid, count) values (?, 135, 1), (?, 136, 3), (?, 140, 1) on duplicate key update count = values(count)',
+        [uid, uid, uid],
+      );
+      await s.tick('HandleTroop'); // T1 从主城进入襄阳 (state 4)
+      await s.command(session, 'getBattleFieldState', bfid, 1, cidOf(767), '襄阳', cidOf(767));
+      await s.command(session, 'getCurrentCityGroundLevel1', 209355);
+      await s.command(session, 'getCurrentCityGroundLevel2', 209355);
+      await s.command(session, 'getInfoForBattleArmyReinforce', cidOf(767));
+      await s.command(session, 'getInfoForBattleArmySend', t1, cidOf(101), '钜鹿');
+      await s.command(session, 'getInfoForBattleArmyAttack', t1, 900101, '黄巾悍将');
+      await s.command(session, 'selectOneTroop', t1);
+      await s.command(session, 'battleTroopDispatch', t1, cidOf(101), '长乐', '钜鹿');
+      await s.command(session, 'battleTroopDispatch', t2, cidOf(282), '长乐', '陈留'); // 不邻接
+      await s.tick('HandleTroop'); // T1 进钜鹿；两据点重判定（钜鹿混营 → 争夺中）
+      await s.command(session, 'battleAttack', t2, 900101, '黄巾悍将', '钜鹿'); // 同据点 10 秒
+      await s.command(session, 'battleAttack', t2, 900102, '黄巾军', '陈留'); // 不邻接
+      await s.command(session, 'battleAttack', t2, t1, '长乐', '钜鹿'); // 同阵营
+      await s.command(session, 'questInCity', 80213, cidOf(101));
+      await s.command(session, 'questInCity', 80213, cidOf(101)); // 60 秒冷却
+      await s.command(session, 'callArmy', t2, 7, 100); // 援军令 1 张、荣誉 -3
+      await s.command(session, 'callArmy', t2, 7, 100000); // 超过 honor/人数上限
+      await s.command(session, 'addArmyFromReinforce', cidOf(101), t2, 7); // 池里 50 个
+      await s.command(session, 'addArmyFromReinforce', cidOf(101), t2, 7); // 池已空
+      await s.command(session, 'getCityBattleTroopDetail', 900101);
+      await s.command(session, 'getBattleTroopDetail', 900101);
+      await s.command(session, 'getBattleTroopDetail', t3);
+      s.offset(4, 0, 'endtime'); // t3 详情里的行军 endtime，两边差秒级
+      // 注：t2 在 battleAttack 后已是 task-9 进攻态（endtime=now+10），fasterArmy 的
+      // `<10 秒` 检查落在秒边界上，两边谁成功取决于请求是否跨秒 — 固有非确定，跳过；
+      // 状态 4 驻军的 troop_not_in_move 拒绝面此场景不再可达。
+      await s.command(session, 'fasterArmy', t3, bfid); // 成功：剩 600 秒
+      s.offset(4, 0, 'endtime'); // 加速后的 endtime = now+10，两边差秒级
+      await s.command(session, 'fasterArmy', t4, bfid); // 剩 5 秒 → 拒绝
+      await s.command(session, 'battlePatrol', t2, 900101); // 没有信鸽
+      await s.command(session, 'battlePatrol', t2, 900102); // 信鸽侦察陈留 → 45 号战报
+      await s.command(session, 'callBackArmy', t1); // 钜鹿撤回主城
+      await s.command(session, 'callBackToField', t3, bfid); // 调遣途中召回
+      await s.command(session, 'chatWithHero', t2, 900103); // 木料监官：100/5000，无阶段钟
+      await s.command(session, 'chatWithHero', t2, 900101); // 无对话事件 → 默认台词
+      await s.command(session, 'getFasterGoodInfo', 136);
+    },
+  },
+  {
+    // S5: 战场周边 — 任务面板 (refreshBattleTaskState/getLastMainTask)、战场商城与勋章购买
+    // （沙场积分/黄巾勋章、限购、缺货）、成员视图。回包的 endtime 类字段用 mask 抹秒差。
+    name: 'battlefield periphery: task panel, NPC shop, member views',
+    tables: {
+      sys_user_battle_field: { offsets: ['starttime', 'endtime', 'finishtime'] },
+      sys_user_battle_state: {
+        only: [
+          'uid',
+          'bid',
+          'battlefieldid',
+          'unionid',
+          'level',
+          'state',
+          'honour',
+          'sent_troop_count',
+          'startcid',
+          'in_cross_battle',
+          'in_battle_hids',
+        ], // jointime 是 CURRENT_TIMESTAMP datetime，两边差秒级
+      },
+      mem_war_buf: { offsets: ['updatetime'] },
+      mem_war_event: { offsets: ['evttime'] },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const bfid = 31;
+      await s.query(
+        `insert into sys_user_battle_field (id, bid, createuid, level, maxpeople, state, starttime,
+           endtime, finishtime, type, minpeople, winner, progress)
+         values (?, 1001, 1002, 1, 5, 0, 0, 0, 0, 0, 1, -1, 0)`,
+        [bfid],
+      );
+      await s.query(
+        `insert into sys_user_battle_state (uid, bid, battlefieldid, unionid, level, state)
+         values (?, 1001, ?, 1, 1, 0)`,
+        [uid, bfid],
+      );
+      // 任务面板素材：60901-60905 挂起，另造一条 9001 主线链。
+      for (let tid = 60901; tid <= 60905; tid++) {
+        await s.query('insert into sys_user_task (uid, tid, state) values (?, ?, 0)', [uid, tid]);
+      }
+      for (let tid = 60906; tid <= 60914; tid++) {
+        await s.query('insert into sys_user_task (uid, tid, state) values (?, ?, 0)', [uid, tid]);
+      }
+      await s.command(session, 'refreshBattleTaskState');
+      await s.command(session, 'getLastMainTask', 1001); // 非 9001 → 空
+      await s.command(session, 'getLastMainTask', 9001); // 60901-60914 链
+      await s.command(session, 'getUserBattleShopInfo');
+      s.unordered(4, 1); // cfg_battle_field 列表无 ORDER BY：MyISAM 磁盘序 ≠ 主键序
+      s.unordered(4, 7); // 装甲列表 (cfg_armor join) 原版同样无 ORDER BY，两引擎计划序不同
+      await s.command(session, 'getUserBattleShopInfoForChiBi');
+      s.unordered(4, 1);
+      s.unordered(4, 7);
+      await s.command(session, 'buyBattleGoods', 0, 1, 0, 0); // 下架
+      await s.command(session, 'buyBattleGoods', 41011, 0, 0, 0); // 数量非法
+      await s.command(session, 'buyBattleGoods', 41011, 1, 0, 0); // 沙场积分不足
+      await s.query(
+        'insert into sys_things (uid, tid, count) values (?, 104001, 100) on duplicate key update count = values(count)',
+        [uid],
+      );
+      await s.command(session, 'buyBattleGoods', 41011, 1, 0, 0); // 扣积分买 gid 1010
+      await s.query(
+        'insert into sys_things (uid, tid, count) values (?, 30001, 200) on duplicate key update count = values(count)',
+        [uid],
+      );
+      await s.command(session, 'buyBattleGoods', 20001, 1, 1, 0); // 限购装备第一次
+      await s.command(session, 'buyBattleGoods', 20001, 1, 1, 0); // 达每日限购
+      await s.command(session, 'getBattleFieldUsers', bfid);
+    },
+  },
+  {
+    // 排行联动: quitBattle 落的 log_battle_honour 是 rank_battle_* 的源 — 先种荣誉流水，
+    // 再跑 UpdateUsersCurse（'is' 补丁让 HandleUsersRank 必跑），读三个战场榜。
+    name: 'battlefield honour log feeds the rank_battle boards',
+    tables: {
+      log_battle_honour: { offsets: ['quittime'] },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      await s.query(
+        `insert into log_battle_honour (uid, battleid, battlefieldid, starttime, quittime,
+           result, honour, metal, unionid, level)
+         values (?, 1001, 31, 0, unix_timestamp(), 0, 120, 1, 1, 1),
+                (?, 1001, 32, 0, unix_timestamp() - 100, 1, 30, 0, 1, 2),
+                (?, 2001, 33, 0, unix_timestamp() - 700000, 2, 500, 3, 3, 5)`,
+        [uid, uid, uid],
+      );
+      await s.query('update sys_user set honour = 650 where uid = ?', [uid]);
+      await s.tick('UpdateUsersCurse', { hour: 8, weekday: 6 });
+      await s.command(session, 'getPageRank', 0, 'battle_total');
+      await s.command(session, 'getPageRank', 0, 'battle_day');
+      await s.command(session, 'getPageRank', 0, 'battle_week');
+    },
+  },
 ];
 
 async function seedScoutPatrol(

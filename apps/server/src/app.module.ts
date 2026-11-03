@@ -6,7 +6,13 @@ import { LuoyangModule } from './activity/luoyang.module';
 import { MarryModule } from './activity/marry.module';
 import { PkModule } from './activity/pk.module';
 import { AuthModule } from './auth/auth.module';
+import { BattleLifecycleCommands } from './battle/battle-lifecycle.commands';
 import { BattleModule } from './battle/battle.module';
+import { BattlefieldTroopSupportModule } from './battle/battlefield-troop-support.module';
+import { BATTLEFIELD_QUIT } from './battle/battlefield-troop-support.commands';
+import { BattlefieldLifecycleModule } from './battle/battlefield-lifecycle.module';
+import { BattlefieldModule } from './battlefield/battlefield.module';
+import { BattleMoveModule } from './battlefield/battle-move.module';
 import { BufferModule } from './buffer/buffer.module';
 import { CityModule } from './city/city.module';
 import { CommonModule } from './common/common.module';
@@ -60,6 +66,23 @@ import { WorldModule } from './world/world.module';
     MailModule,
     TroopModule,
     BattleModule,
+    BattlefieldModule,
+    // 阶段 9 战场 slices: S2a create/join lifecycle, S4a march & engagement, S4b
+    // 援军/召军/回军/加速/探索. The S4b quit hook (callBackArmy bid=5001 auto-fail) wires
+    // to BattleLifecycleCommands.quitBattle, exported by BattleModule above.
+    BattlefieldLifecycleModule,
+    BattleMoveModule,
+    BattlefieldTroopSupportModule.register(
+      {
+        provide: BATTLEFIELD_QUIT,
+        useFactory: (quit: BattleLifecycleCommands) => ({
+          quitBattle: (uid: number) => quit.quitBattle({ uid, cid: 0, ip: 0, sip: '' }),
+        }),
+        inject: [BattleLifecycleCommands],
+      },
+      // The factory's inject needs BattleLifecycleCommands, which BattleModule exports.
+      [BattleModule],
+    ),
     FriendModule,
     UnionModule,
     MarketModule,

@@ -5,7 +5,7 @@ import { UserRules } from '../core/user-rules.service';
 import { phpEmpty, phpIntval, phpNum, phpString } from '../core/php';
 import { GameError } from '../common/game-error';
 import { DbScope } from '../db/database.module';
-import { GlobalCommand, type CommandContext } from '../gateway/decorators';
+import { GlobalCommand, RejectedCommand, type CommandContext } from '../gateway/decorators';
 
 type Row = Record<string, unknown>;
 
@@ -78,7 +78,8 @@ export class FriendCommands {
    * the README), with the guards the original HTTP body had: type < 2, the user exists, and 20
    * relations max. The broken `tname` column of the original insert is gone.
    */
-  @GlobalCommand()
+  // 存在于 FriendFunc.php 但不在 openfunc 白名单：Command.php 抛 `addUserRelation你异常了!!!`。
+  @RejectedCommand()
   async addUserRelation(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
     const uid = ctx.uid;
     // 添加的名字；0 好友 1 仇
@@ -117,7 +118,8 @@ export class FriendCommands {
    * nonexistent tname column and (b) had no uid filter at all; the remaster scopes it to the
    * caller and matches sys_user.tname through the join.
    */
-  @GlobalCommand()
+  // 同 addUserRelation：不在 openfunc 白名单。
+  @RejectedCommand()
   async removeRelation(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
     const tname = phpString(param[0]);
     const type = phpIntval(param[1]);

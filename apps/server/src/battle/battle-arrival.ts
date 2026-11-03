@@ -20,6 +20,7 @@ import type { Database } from '../db/database.module';
 import { sprintf } from '../common/sprintf';
 import { phpIntval, phpNum, phpString } from '../core/php';
 import { changePos, getBattleRange, troop2array } from './battle-math';
+import { resetBattleFieldUid } from './battle-field-uid';
 import { checkSodier, type CheckSodierDeps } from './check-sodier';
 
 type Row = Record<string, unknown>;
@@ -141,12 +142,15 @@ export async function handleBattleArrival(deps: BattleArrivalDeps, a: ArrivalArg
   let throwEmpty = false;
   let emptyMsg = '';
   if (!targetrow && type === 4) {
-    // 战场: target gone → walk in, no battle.
+    // 战场: target gone → walk in, no battle (cfg_js.php:411-424).
     await sql`update sys_troops set cid = ${targetcid}, state = 4, battleid = 0 where id = ${id}`.execute(
       db,
     );
     content += '目标已离开或被消灭，没有发生战斗。';
     content += sprintf(deps.lang.report('troopback'), '战场军队', '', this_reportSoldier());
+    // cfg_js.php:419-420: re-judge both the origin and the target stronghold after the walk-in.
+    await resetBattleFieldUid({ db: deps.db, query: deps.query }, cid);
+    await resetBattleFieldUid({ db: deps.db, query: deps.query }, targetcid);
     content += `<br/>军队进入${a.targetcityname}。`;
     await deps.report.sendReport(uid, reportTitleType(task, state), cid, a.happencid, content);
     return;

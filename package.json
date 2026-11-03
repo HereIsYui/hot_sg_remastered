@@ -31,6 +31,10 @@
     "db:down": "docker compose -f docker/dev/docker-compose.yml down",
     "db:migrate": "pnpm --filter @hot/tools migrate-db",
     "db:codegen": "pnpm --filter @hot/server db:codegen",
+    "db:backup": "bash scripts/backup-db.sh",
+    "db:restore": "bash scripts/restore-db.sh",
+    "prod:up": "docker compose -f docker/prod/docker-compose.yml up -d --build --wait",
+    "prod:down": "docker compose -f docker/prod/docker-compose.yml down",
     "difftest": "pnpm build:shared && pnpm --filter @hot/server build && pnpm --filter @hot/tools difftest"
   },
   "pnpm": {

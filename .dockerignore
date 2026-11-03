@@ -1,0 +1,26 @@
+# docker/prod builds from the repository root — keep the context small. Generated
+# original content that IS shipped in the image (apps/client/public/assets) must stay.
+node_modules
+**/node_modules
+.git
+legacy
+docs
+design
+start.exe
+*.exe
+*.rar
+backups
+mysqldata
+coverage
+.turbo
+*.tsbuildinfo
+apps/server/dist
+apps/client/dist
+apps/gm/dist
+packages/*/dist
+tools/dist
+*.sql
+*.sql.gz
+*.log
+.env
+docker/legacy

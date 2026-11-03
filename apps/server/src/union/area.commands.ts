@@ -4,7 +4,7 @@ import { GameError } from '../common/game-error';
 import { cid2wid } from '../core/city-rules.service';
 import { phpEmpty, phpIntval, phpString } from '../core/php';
 import { DbScope } from '../db/database.module';
-import { GlobalCommand, type CommandContext } from '../gateway/decorators';
+import { GlobalCommand, RejectedCommand, type CommandContext } from '../gateway/decorators';
 
 type Row = Record<string, unknown>;
 
@@ -69,7 +69,8 @@ export class AreaCommands {
   }
 
   /** `[]`: the caller's current-union city marks after expiry pruning. */
-  @GlobalCommand()
+  // 存在于 UnionFunc.php 但不在 openfunc 白名单：Command.php 抛 `getUnionMarkCity你异常了!!!`。
+  @RejectedCommand()
   async getUnionMarkCity(ctx: CommandContext): Promise<unknown[]> {
     return this.unionMarkCity(ctx.uid);
   }

@@ -2,6 +2,7 @@
 import { useSessionStore } from '../stores/session';
 import ColorFilters from '../ui/ColorFilters.vue';
 import FxButton from '../ui/FxButton.vue';
+import BattlePanel from './battle/BattlePanel.vue';
 import BottomPanel from './game/BottomPanel.vue';
 import CityInnerPanel from './game/CityInnerPanel.vue';
 import CityPanel from './game/CityPanel.vue';
@@ -22,6 +23,8 @@ const session = useSessionStore();
     <CityInnerPanel v-if="session.view === 'cityInner'" :x="263" :y="0" />
     <CityPanel v-if="session.view === 'city'" :x="264" :y="0" />
     <WorldPanel v-if="session.view === 'world'" />
+    <!-- 战场 (BloodBattle.swf BattlePanel): the stage-9 battlefield view -->
+    <BattlePanel v-if="session.view === 'battle'" />
     <ServerTime :x="538" :y="65" />
     <TopPanel :x="264" :y="0" />
     <DialogManager :x="289" :y="54" />

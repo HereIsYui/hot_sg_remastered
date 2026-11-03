@@ -5,7 +5,7 @@ export const COMMAND_HANDLER = 'hot:command-handler';
 export const AMF_SERVICE = 'hot:amf-service';
 export const AMF_METHOD = 'hot:amf-method';
 
-export type CommandKind = 'dialog' | 'global';
+export type CommandKind = 'dialog' | 'global' | 'rejected';
 
 export interface CommandHandlerMeta {
   kind: CommandKind;
@@ -31,6 +31,14 @@ export const DialogCommand = (name?: string) =>
 /** Like DialogCommand for `type=2 (global)`, replacing `function f($uid, $param)`. */
 export const GlobalCommand = (name?: string) =>
   SetMetadata<string, CommandHandlerMeta>(COMMAND_HANDLER, { kind: 'global', name });
+
+/**
+ * For a PHP function that exists but is NOT in `$GLOBALS['openfunc']` (lang.php): Command.php
+ * throws `funcName . command_exception` ("你异常了!!!") instead of running it — reproduced by
+ * the type-2 dispatch in command.service.ts.
+ */
+export const RejectedCommand = (name?: string) =>
+  SetMetadata<string, CommandHandlerMeta>(COMMAND_HANDLER, { kind: 'rejected', name });
 
 /** Marks a provider as an amfphp service class (e.g. `Login`), reachable at /api/service/:name/:method. */
 export const AmfService = (name: string) => SetMetadata(AMF_SERVICE, name);

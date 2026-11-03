@@ -36,11 +36,12 @@ const lang = new LangService({
     catchhero: '擒获%s(%s)',
     invademsg: '%s%s被%s占领',
     citytype: '城池',
+    union_name: { '1': '汉', '2': '黄' },
   },
   soldier: { usepeople: { '1': 1, '3': 1 } },
 });
 
-const random = { randRange: () => 0, mtRand: () => 0 } as unknown as RandomService;
+const random = { randRange: () => 0, mtRand: () => 0, rand: () => 0 } as unknown as RandomService;
 
 function service(rules: Respond[]) {
   const db = new FakeDb(rules);
@@ -457,5 +458,124 @@ describe('OldBattleService.settleDueBattles', () => {
     const { svc, db } = service([NO(/.*/)]);
     await svc.raiseWarEvent(7, 3, 2, '盟军击败了敌军');
     expect(db.executed.some((q) => /insert into mem_war_event/i.test(q.sql))).toBe(true);
+  });
+
+  /**
+   * 战场 (type 4) 终局 (end 0): the attacker parks at the fought-over stronghold, the 战况 message
+   * lands in mem_war_event with unionid 0 (the original's undefined $unionid), the cfg_battle_event
+   * triggers run keyed by (resistcid%1000 OR resisthid), and the winpoint block stays dead.
+   */
+  it('settles a won 战场 battle: mem_war_event message, event triggers, no winpoint write', async () => {
+    const { svc, db } = service([
+      { match: /select \* from sys_battle where id = /i, rows: [{ id: 11, resistdefence: '' }] },
+      {
+        match: /select \* from bak_troops where battleid = /i,
+        rows: [
+          {
+            id: 701,
+            uid: 1001,
+            task: 9,
+            state: 0,
+            cid: 630001,
+            soldiers: '1,1,500',
+            resource: '0',
+            battlefieldid: 30,
+            bid: 1001,
+            battleunionid: 1,
+            startcid: 630001,
+          },
+          {
+            id: 702,
+            uid: 0,
+            task: 5,
+            state: 4,
+            cid: 630367,
+            soldiers: '1,3,50',
+            resource: '0',
+            battlefieldid: 30,
+            bid: 1001,
+            battleunionid: 2,
+            startcid: 630367,
+          },
+        ],
+      },
+      {
+        match: /select \* from sys_user where uid = /i,
+        rows: [{ uid: 1001, prestige: 100, nobility: 1 }],
+      },
+      NO(/select \* from mem_world where wid = /i),
+      { match: /select name from sys_battle_city where cid = \?/i, rows: [{ name: '虎牢关' }] },
+      // type-4 reinforce-type lookups (dead reads: bak_troops carries no troopid → troopid1 = 0).
+      NO(/select \* from sys_battle_reinforce where troopid = /i),
+      // one trigger: 增兵 (targetid1 1104) + 消失将领 (targetid2 1101), keyed by triggerid.
+      {
+        match:
+          /select \* from cfg_battle_event\s*where \(triggerid = \? % 1000 or triggerid = \?\)/i,
+        rows: [
+          { targetid1: 1104, targetid2: 1101, targettype: 0, triggertype: 0, msg: '', bid: 1001 },
+        ],
+      },
+      { match: /select \* from cfg_battle_troop\s*where bid = \? and hid in \(\?\)/i, rows: [] },
+      // resetBattleFieldUid(630367): no troops left → 空白据点.
+      NO(/select \* from sys_troops where cid = \?\s+and \(\(state = 4 or state = 3\)/i),
+      {
+        match: /select uid, unionid from sys_battle_city where cid = \?/i,
+        rows: [{ uid: 2, unionid: 2 }],
+      },
+      ...TAIL,
+    ]);
+    const mem = {
+      id: 11,
+      type: 4,
+      round: 4,
+      attacksoldiers: '1,1,420',
+      resistsoldiers: '0',
+      state: 0,
+      attackcid: 630001,
+      resistcid: 630367,
+      attackhid: 42,
+      resisthid: 1011,
+    };
+    const { getBattleResult } = await import('./battle-result');
+    await getBattleResult(svc.resultDeps(), mem, 0);
+
+    // The attacker parks at the stronghold (state 4, battleid cleared).
+    expect(
+      db.executed.some((q) =>
+        /update sys_troops set cid = \?, state = 4, soldiers = \?,\s*battleid = 0 where id = \?/is.test(
+          q.sql,
+        ),
+      ),
+    ).toBe(true);
+    // The 战况 message: 「汉军 … 部 在 虎牢关 击败了 黄军 … 部。」 with unionid 0.
+    const war = db.executed.find((q) => /insert into mem_war_event/i.test(q.sql))!;
+    expect(war.parameters[0]).toBe(30);
+    expect(war.parameters[1]).toBe(0);
+    expect(war.parameters[2]).toBe(2);
+    expect(war.parameters[3]).toBe('汉军  部 在 虎牢关 击败了 黄军  部。');
+    // The trigger pass ran with (resistcid%1000, resisthid) and bid/unionid from bak_troops.
+    const events = db.executed.find((q) =>
+      /select \* from cfg_battle_event\s*where \(triggerid = \? % 1000 or triggerid = \?\)/i.test(
+        q.sql,
+      ),
+    )!;
+    expect(events.parameters).toEqual([630367, 1011, 1001, 1]);
+    // 增兵 grouped (cfg_battle_troop read); 消失将领 grouped (delete with uid < 1000).
+    expect(db.executed.some((q) => /select \* from cfg_battle_troop/i.test(q.sql))).toBe(true);
+    const los = db.executed.find((q) =>
+      /delete from sys_troops where battlefieldid = \? and uid < 1000\s*and hid in \(\?\)/i.test(
+        q.sql,
+      ),
+    )!;
+    expect(los.parameters).toEqual([30, 1101]);
+    // The winpoint block stays dead (array != int), the stronghold itself is re-judged to empty.
+    expect(db.executed.some((q) => /update sys_battle_winpoint/i.test(q.sql))).toBe(false);
+    expect(
+      db.executed.some((q) =>
+        /update sys_battle_city set uid = -1, unionid = -1, hasuser = 0 where cid = \?/i.test(
+          q.sql,
+        ),
+      ),
+    ).toBe(true);
   });
 });

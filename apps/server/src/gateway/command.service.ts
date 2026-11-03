@@ -42,9 +42,14 @@ export class CommandService {
         ret.push(param.shift());
         const func = String(param.shift() ?? '');
         ret.push(func);
-        // Unknown global commands fall through to the `#` GM console (WizardFunc.php, not ported),
-        // which answers anything else with the bare header.
-        if (this.registry.command(func)) {
+        // A function that exists in the PHP but is missing from the openfunc whitelist dies with
+        // `funcName + command_exception` (Command.php:118-120); unknown names fall through to the
+        // `#` GM console (WizardFunc.php, not ported), which answers with the bare header.
+        const registered = this.registry.command(func);
+        if (registered?.kind === 'rejected') {
+          throw GameError.raw(func + this.lang.t('sendCommand.command_exception'));
+        }
+        if (registered) {
           ret.push(await this.invoke('global', func, { ...client, uid, cid: 0 }, param));
         }
       }

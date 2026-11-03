@@ -1,0 +1,112 @@
+# One-box production stack: MySQL 8.4 + NestJS game server + nginx that serves the
+# client console and the GM console (static) and proxies /api and the push websocket.
+#
+#   cp docker/prod/.env.example docker/prod/.env   # ports, passwords, GM token
+#   pnpm prod:up                                   # build the images and start everything
+#   pnpm db:backup                                 # mysqldump bloodwar into backups/
+#
+# Set HOT_DOCKER_MIRROR (e.g. docker.m.daocloud.io/library/) when Docker Hub is slow,
+# same convention as docker/legacy/docker-compose.yml.
+name: hot-prod
+
+services:
+  db:
+    image: ${HOT_DOCKER_MIRROR:-}mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-hot}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-bloodwar}
+      MYSQL_USER: ${MYSQL_USER:-hot}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-hot}
+      TZ: Asia/Shanghai
+    command:
+      # Same flags as docker/dev — they carry game semantics, do not "fix" them:
+      # lower_case_table_names must be chosen at initialisation; sql-mode stays empty like
+      # the original server; utf8mb4_general_ci keeps the PAD SPACE behaviour of the
+      # original utf8_general_ci; the original database works in +08:00.
+      - --lower-case-table-names=1
+      - --sql-mode=
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+      - --default-time-zone=+08:00
+      - --max-allowed-packet=64M
+      - --innodb-buffer-pool-size=512M
+      - --skip-log-bin
+    volumes:
+      - db-data:/var/lib/mysql
+    ports:
+      # Host-side admin access only (backup/restore go through docker compose exec);
+      # 3319 so it can run next to the dev db (3318) and the legacy oracle (3317).
+      - 127.0.0.1:${HOT_DB_PORT:-3319}:3306
+    healthcheck:
+      # $$ defers to the container shell so the password from docker/prod/.env is used.
+      test: ['CMD-SHELL', 'mysqladmin ping -h127.0.0.1 -u"$$MYSQL_USER" -p"$$MYSQL_PASSWORD"']
+      interval: 3s
+      timeout: 5s
+      retries: 60
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  server:
+    build:
+      context: ../..
+      dockerfile: docker/prod/Dockerfile
+      target: server
+      args:
+        HOT_DOCKER_MIRROR: ${HOT_DOCKER_MIRROR:-}
+    environment:
+      PORT: 3000
+      DATABASE_URL: mysql://${MYSQL_USER:-hot}:${MYSQL_PASSWORD:-hot}@db:3306/${MYSQL_DATABASE:-bloodwar}
+      LANG_FILE: /repo/legacy/lang/zh_CN.json
+      GM_TOKEN: ${GM_TOKEN:-}
+      TICK_ENABLED: ${TICK_ENABLED:-true}
+      TICK_INTERVAL_MS: ${TICK_INTERVAL_MS:-3000}
+      DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE:-10}
+      LOG_JSON: ${LOG_JSON:-false}
+      SERVER_MARK: ${SERVER_MARK:-hot}
+      SERVER_NAME: ${SERVER_NAME:-hot}
+      WORLD_REFRESH_ENABLED: ${WORLD_REFRESH_ENABLED:-true}
+      # The tick endpoint is a differential-test hook (tools/src/difftest) — never in prod.
+      TICK_DEBUG_ENDPOINT: 'false'
+      TZ: Asia/Shanghai
+    volumes:
+      # Original in-game texts, generated on a dev machine by `pnpm legacy:lang`
+      # (git-ignored). A missing file only degrades messages to their keys
+      # (apps/server/src/common/lang.service.ts), so the stack also boots without it.
+      - ../../legacy/lang:/repo/legacy/lang:ro
+    ports:
+      # Direct access from the host for debugging; players go through web.
+      - 127.0.0.1:${HOT_SERVER_PORT:-3000}:3000
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:3000/api/health']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ../..
+      dockerfile: docker/prod/Dockerfile
+      target: web
+      args:
+        HOT_DOCKER_MIRROR: ${HOT_DOCKER_MIRROR:-}
+        # Baked into the client/GM bundles at build time — changing them means rebuilding
+        # the web image (docker compose build web && docker compose up -d web).
+        VITE_GM_TOKEN: ${VITE_GM_TOKEN:-}
+        VITE_ASSET_URL: ${VITE_ASSET_URL:-/assets/}
+        VITE_REGISTER_URL: ${VITE_REGISTER_URL:-}
+        VITE_HOME_LABEL: ${VITE_HOME_LABEL:-}
+        VITE_HOME_URL: ${VITE_HOME_URL:-}
+    ports:
+      - ${HOT_WEB_PORT:-8080}:80
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  db-data:

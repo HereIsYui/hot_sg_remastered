@@ -1,6 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { Interval } from '@nestjs/schedule';
 import { PushProc } from '@hot/shared';
+import { sql } from 'kysely';
+import { phpIntval, phpString } from '../core/php';
+import { DbScope } from '../db/database.module';
 import { PushService } from './push.service';
+
+type Row = Record<string, unknown>;
 
 /**
  * `ChatPanel.onNotifyWarEvent` (proc 52, NOTIFY_WAR_EVENT) sysType codes, from the AS3: the server
@@ -44,7 +50,13 @@ export interface WarEvent {
  */
 @Injectable()
 export class WarEventService {
-  constructor(private readonly push: PushService) {}
+  private readonly logger = new Logger(WarEventService.name);
+  private running = false;
+
+  constructor(
+    private readonly scope: DbScope,
+    private readonly push: PushService,
+  ) {}
 
   /** Push one proc-52 war event to a single online player. Returns the sockets delivered to. */
   notifyWarEvent(uid: number, event: WarEvent): number {
@@ -78,5 +90,64 @@ export class WarEventService {
       battleUnionId: 0,
       msg: message,
     });
+  }
+
+  /**
+   * Drain `mem_war_event` into proc-52 frames — the port-side replacement for the original
+   * backend's standalone chat/push server. In the PHP package that server is absent (the PHP only
+   * ever INSERTs into `mem_war_event` — BattleFunc.php:4046/4061/4422, OLdBattleCron.php:1336/1378;
+   * no `select`/`delete` exists), and the AS3 `ChatPanel.onNotifyWarEvent` (ChatPanel.as:1860)
+   * received its frames over TCP. Here the engine and the battlefield commands keep writing the
+   * table exactly like the PHP, and this loop consumes it, so writers never touch the socket layer
+   * (same split as `UnionEventService` / mem_union_event).
+   *
+   * Recipients are the players currently in that battlefield instance — `sys_user_battle_state`
+   * rows with `state=0`, the same predicate the PHP uses to count participants
+   * (BattleFunc.php:1003). Rows for a battlefield nobody is in any more can never be delivered
+   * (the original push was realtime-only; offline players read the 战况 tab through
+   * getBattleNews/log_battle_news instead), so they are dropped to keep the queue from growing
+   * stale; rows whose recipients are merely offline are retried next pass.
+   *
+   * `sysType` is the raw `mem_war_event.type` passed through: the engine writes 1/2, which the AS3
+   * handler treats like any non-100/101/102 code (a plain 战况 line), and a value ≥100 lets a
+   * writer address the battle dialogs (FieldChat/BattleEnd/Notice) directly through the queue.
+   */
+  @Interval(1000)
+  async drain(): Promise<void> {
+    if (this.running) return;
+    this.running = true;
+    try {
+      const rows = (await sql<Row>`select * from mem_war_event order by id`.execute(this.scope.db))
+        .rows;
+      for (const row of rows) await this.deliver(row);
+    } finally {
+      this.running = false;
+    }
+  }
+
+  private async deliver(row: Row): Promise<void> {
+    const battleid = phpIntval(row.battleid);
+    try {
+      const members = await sql<{ uid: unknown }>`select uid from sys_user_battle_state
+        where battlefieldid = ${battleid} and state = 0`.execute(this.scope.db);
+      const ids = new Set(members.rows.map((m) => phpIntval(m.uid)));
+      if (ids.size === 0) {
+        await sql`delete from mem_war_event where id = ${phpIntval(row.id)}`.execute(this.scope.db);
+        return;
+      }
+      const sent = this.push.broadcast(
+        PushProc.NOTIFY_WAR_EVENT,
+        {
+          sysType: phpIntval(row.type),
+          battleUnionId: phpIntval(row.unionid),
+          msg: phpString(row.content),
+        },
+        (uid) => ids.has(uid),
+      );
+      if (sent === 0) return;
+      await sql`delete from mem_war_event where id = ${phpIntval(row.id)}`.execute(this.scope.db);
+    } catch (error) {
+      this.logger.warn(`battlefield ${battleid}: war event delivery failed: ${String(error)}`);
+    }
   }
 }
