@@ -169,6 +169,76 @@ export class GmController {
     return this.gm.speak({ msg: String(body.msg ?? ''), from: body.from });
   }
 
+  @Get('announce/login')
+  loginAnnounce(): Promise<{ announce: Row | null; content: string }> {
+    return this.gm.loginAnnounce();
+  }
+
+  @Post('announce/login')
+  setLoginAnnounce(
+    @Body()
+    body: {
+      maxname?: string;
+      maxpos?: string;
+      maxnob?: string;
+      maxattack?: string;
+      maxdefence?: string;
+      content?: string;
+    },
+  ): Promise<{ announce: Row | null; content: string }> {
+    return this.gm.setLoginAnnounce({
+      maxname: optString(body.maxname),
+      maxpos: optString(body.maxpos),
+      maxnob: optString(body.maxnob),
+      maxattack: optString(body.maxattack),
+      maxdefence: optString(body.maxdefence),
+      content: optString(body.content),
+    });
+  }
+
+  // ---------------------------------------------------------------- game state (mem_state)
+
+  @Get('state/list')
+  listState(@Query('state') state: string): Promise<Row[]> {
+    return this.gm.listState(optInt(state));
+  }
+
+  @Post('state/set')
+  setState(@Body() body: { state: number; value: number; description?: string }): Promise<Row> {
+    return this.gm.setState({
+      state: int(body.state),
+      value: optNumber(body.value) ?? 0,
+      description: optString(body.description),
+    });
+  }
+
+  // ---------------------------------------------------------------- tasks (epic)
+
+  @Get('task/epic')
+  epicTasks(@Query('uid') uid: string): Promise<Row[]> {
+    return this.gm.epicTasks(int(uid));
+  }
+
+  @Post('task/epic')
+  setEpicTask(
+    @Body()
+    body: {
+      uid: number;
+      gid?: number;
+      currentcount?: number;
+      tid?: number;
+      state?: number;
+    },
+  ): Promise<Row> {
+    return this.gm.setEpicTask({
+      uid: int(body.uid),
+      gid: optInt(body.gid),
+      currentcount: optNumber(body.currentcount),
+      tid: optInt(body.tid),
+      state: optNumber(body.state),
+    });
+  }
+
   // ---------------------------------------------------------------- world
 
   @Post('world/refresh')
@@ -197,4 +267,10 @@ function optNumber(value: unknown): number | undefined {
   if (value === undefined || value === null || value === '') return undefined;
   const n = Number(value);
   return Number.isFinite(n) ? n : undefined;
+}
+
+/** `''` stays a real value (clearing a text field), only null/undefined mean "not given". */
+function optString(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  return String(value);
 }

@@ -5,7 +5,7 @@ import { sql } from 'kysely';
 import { TaskRewards } from '../task/task-rewards.service';
 import { GoodsRules } from '../core/goods-rules.service';
 import { HeroRules } from '../core/hero-rules.service';
-import { phpIntval } from '../core/php';
+import { phpIntval, phpString } from '../core/php';
 import { UserRules } from '../core/user-rules.service';
 import { DbScope } from '../db/database.module';
 import { dbNow } from '../db/sql-fragments';
@@ -38,6 +38,8 @@ const FIRST_PLAYER_UID = 1000;
 const FORBID_END = 2000000000;
 /** Hero states that may be reassigned to a city (free, chief, general, adviser). */
 const HERO_IN_CITY_STATES = [0, 1, 7, 8];
+/** cfg_task_group.type of the 史诗任务 tab (task.commands.ts TaskType.Epic). */
+const EPIC_TASK_TYPE = 3;
 /** Row caps for the LIKE searches, so a loose pattern cannot flood the ops UI. */
 const SEARCH_LIMIT = 50;
 /** Tables counted by the status overview (one scalar subquery each). */
@@ -59,9 +61,10 @@ const STATUS_TABLES = [
 ] as const;
 
 /**
- * The GM toolbox behind `api/gm`: player / city / hero / goods / announce / world operations,
- * ported from the original manage scripts (`legacy/raw/.../server/manage/game/*.php`) and the
- * 修改器 (design/02-开发计划.md, 阶段 10). Unlike the command gateway this is an ops surface —
+ * The GM toolbox behind `api/gm`: player / city / hero / goods / announce / game-state /
+ * epic-task / world operations, ported from the original manage scripts
+ * (`legacy/raw/.../server/manage/game/*.php`, `manage/announce/*.php`) and the 修改器
+ * (design/02-开发计划.md, 阶段 10). Unlike the command gateway this is an ops surface —
  * direct DB writes with log-table bookkeeping instead of game semantics, so GM deliberately
  * skips the GameError/lang path and reports plain HTTP errors.
  */
@@ -525,6 +528,203 @@ export class GmCommands {
       touser: '',
       msg: input.msg,
     });
+  }
+
+  /**
+   * 登录公告, both halves the client sees at login: the announcement text (sys_announce id 1,
+   * read by Login.php::getLoginAnnouncement and set by manage/announce/set_login_announce.php)
+   * and the sys_login_announce id-1 row with the rank winners (ReportFunc.php::getLoginAnnounce,
+   * rebuilt from the rankings by RankRebuildService.announce).
+   */
+  async loginAnnounce(): Promise<{ announce: Row | null; content: string }> {
+    const announce = await this.one(sql`select maxname, maxpos, maxnob, maxattack, maxdefence, id
+      from sys_login_announce where id = 1`);
+    const content = await this.one(sql`select content from sys_announce where id = 1`);
+    return { announce: announce ?? null, content: phpString(content?.content ?? '') };
+  }
+
+  /**
+   * Sets the login announcement: `content` rewrites sys_announce id 1 exactly like the manage
+   * script (`update sys_announce set content='$msg' where id=1`); the max* fields are merged
+   * over the current sys_login_announce row (unspecified fields keep their value, a missing row
+   * is created with the DDL's '' defaults) and upserted on the fixed id 1.
+   */
+  async setLoginAnnounce(input: {
+    maxname?: string;
+    maxpos?: string;
+    maxnob?: string;
+    maxattack?: string;
+    maxdefence?: string;
+    content?: string;
+  }): Promise<{ announce: Row | null; content: string }> {
+    return this.scope.transaction(async () => {
+      const db = this.scope.db;
+      if (
+        input.maxname !== undefined ||
+        input.maxpos !== undefined ||
+        input.maxnob !== undefined ||
+        input.maxattack !== undefined ||
+        input.maxdefence !== undefined
+      ) {
+        const current = await this.one(sql`select maxname, maxpos, maxnob, maxattack, maxdefence
+          from sys_login_announce where id = 1`);
+        const maxname = input.maxname ?? phpString(current?.maxname);
+        const maxpos = input.maxpos ?? phpString(current?.maxpos);
+        const maxnob = input.maxnob ?? phpString(current?.maxnob);
+        const maxattack = input.maxattack ?? phpString(current?.maxattack);
+        const maxdefence = input.maxdefence ?? phpString(current?.maxdefence);
+        await sql`insert into sys_login_announce
+          (maxname, maxpos, maxnob, maxattack, maxdefence, id)
+          values (${maxname}, ${maxpos}, ${maxnob}, ${maxattack}, ${maxdefence}, 1)
+          on duplicate key update maxname = ${maxname}, maxpos = ${maxpos}, maxnob = ${maxnob},
+          maxattack = ${maxattack}, maxdefence = ${maxdefence}`.execute(db);
+      }
+      if (input.content !== undefined) {
+        await sql`update sys_announce set content = ${input.content} where id = 1`.execute(db);
+      }
+      return this.loginAnnounce();
+    });
+  }
+
+  // ---------------------------------------------------------------- game state (mem_state)
+
+  /**
+   * The mem_state switches, all of them or one by number (the numeric key/value store the
+   * original scripts flipped for epic-task phases, luoyang, anti-addiction, ... — see
+   * GameStateService and luoyang/battlefield's state 5/7/8/2000 reads).
+   */
+  async listState(state?: number): Promise<Row[]> {
+    if (state !== undefined) {
+      const result = await sql<Row>`select state, value, description from mem_state
+        where state = ${state}`.execute(this.scope.db);
+      return result.rows;
+    }
+    const result = await sql<Row>`select state, value, description from mem_state
+      order by state`.execute(this.scope.db);
+    return result.rows;
+  }
+
+  /**
+   * Sets one mem_state switch (value required; description optional — kept as-is when omitted).
+   * The write is the `insert ... on duplicate key update` of shop.commands.ts / ReportCron.
+   */
+  async setState(input: { state: number; value: number; description?: string }): Promise<Row> {
+    if (!Number.isInteger(input.state) || input.state <= 0) {
+      throw new BadRequestException('state must be a positive integer');
+    }
+    return this.scope.transaction(async () => {
+      const db = this.scope.db;
+      const current = await this.one(sql`select state, value, description from mem_state
+        where state = ${input.state}`);
+      const description = input.description ?? phpString(current?.description);
+      await sql`insert into mem_state (\`state\`, \`value\`, \`description\`)
+        values (${input.state}, ${input.value}, ${description})
+        on duplicate key update \`value\` = ${input.value}, \`description\` = ${description}`.execute(
+        db,
+      );
+      const row = await this.one(sql`select state, value, description from mem_state
+        where state = ${input.state}`);
+      if (!row) throw new NotFoundException(`mem_state ${input.state} not found after write`);
+      return row;
+    });
+  }
+
+  // ---------------------------------------------------------------- epic tasks
+
+  /**
+   * One player's 史诗任务 progress: every cfg_task of an epic group (cfg_task_group.type = 3,
+   * 黄巾之乱 / 讨伐董卓 / 洛阳...) with the sys_user_task state (null = not accepted) and each
+   * cfg_task_goal with the sys_user_goal counter (null = no progress recorded yet).
+   */
+  async epicTasks(uid: number): Promise<Row[]> {
+    await this.requireUser(uid);
+    const db = this.scope.db;
+    const tasks = (
+      await sql<Row>`select t.id as tid, t.name, t.\`group\` as group_id, g.name as group_name,
+        u.state as task_state
+      from cfg_task t
+      join cfg_task_group g on g.id = t.\`group\` and g.type = ${EPIC_TASK_TYPE}
+      left join sys_user_task u on u.tid = t.id and u.uid = ${uid}
+      order by t.id`.execute(db)
+    ).rows;
+    const goals = (
+      await sql<Row>`select cg.tid, cg.id as gid, cg.content, cg.count, ug.currentcount
+      from cfg_task_goal cg
+      left join sys_user_goal ug on ug.gid = cg.id and ug.uid = ${uid}
+      where cg.tid in (select t.id from cfg_task t, cfg_task_group g
+        where g.id = t.\`group\` and g.type = ${EPIC_TASK_TYPE})
+      order by cg.tid, cg.id`.execute(db)
+    ).rows;
+    for (const task of tasks) {
+      task.goals = goals.filter((goal) => phpIntval(goal.tid) === phpIntval(task.tid));
+    }
+    return tasks;
+  }
+
+  /**
+   * Sets one player's epic-task progress: `gid` (+ optional `currentcount`, defaulting to the
+   * goal's target, i.e. completing it) upserts sys_user_goal like Login.php's 返乡 event does;
+   * `tid` + `state` upserts sys_user_task (0 accepted/unfinished, 1 finished). The goal/task
+   * must belong to an epic group, so the GM cannot silently rewrite growth tasks.
+   */
+  async setEpicTask(input: {
+    uid: number;
+    gid?: number;
+    currentcount?: number;
+    tid?: number;
+    state?: number;
+  }): Promise<Row> {
+    if (input.gid === undefined && input.tid === undefined) {
+      throw new BadRequestException('gid or tid is required');
+    }
+    return this.scope.transaction(async () => {
+      await this.requirePlayer(input.uid);
+      const db = this.scope.db;
+      let tid = input.tid;
+      if (input.gid !== undefined) {
+        const goal = await this.one(sql`select cg.tid, cg.count from cfg_task_goal cg, cfg_task t,
+            cfg_task_group g
+          where cg.id = ${input.gid} and t.id = cg.tid and g.id = t.\`group\`
+          and g.type = ${EPIC_TASK_TYPE}`);
+        if (!goal) throw new NotFoundException(`epic goal ${input.gid} not found`);
+        tid = phpIntval(goal.tid);
+        const currentcount = input.currentcount ?? phpIntval(goal.count);
+        await sql`insert into sys_user_goal (uid, gid, currentcount)
+          values (${input.uid}, ${input.gid}, ${currentcount})
+          on duplicate key update currentcount = ${currentcount}`.execute(db);
+      }
+      if (input.tid !== undefined) {
+        if (input.state === undefined) {
+          throw new BadRequestException('state is required when tid is given');
+        }
+        const task = await this.one(sql`select t.id from cfg_task t, cfg_task_group g
+          where t.id = ${input.tid} and g.id = t.\`group\` and g.type = ${EPIC_TASK_TYPE}`);
+        if (!task) throw new NotFoundException(`epic task ${input.tid} not found`);
+        await sql`insert into sys_user_task (uid, tid, state)
+          values (${input.uid}, ${input.tid}, ${input.state})
+          on duplicate key update state = ${input.state}`.execute(db);
+        tid = input.tid;
+      }
+      return this.epicTaskOf(input.uid, tid!);
+    });
+  }
+
+  /** The single-task view of epicTasks: the task row plus its goals with progress. */
+  private async epicTaskOf(uid: number, tid: number): Promise<Row> {
+    const task = await this.one(sql`select t.id as tid, t.name, t.\`group\` as group_id,
+        g.name as group_name, u.state as task_state
+      from cfg_task t
+      join cfg_task_group g on g.id = t.\`group\` and g.type = ${EPIC_TASK_TYPE}
+      left join sys_user_task u on u.tid = t.id and u.uid = ${uid}
+      where t.id = ${tid}`);
+    if (!task) throw new NotFoundException(`epic task ${tid} not found`);
+    task.goals = (
+      await sql<Row>`select cg.id as gid, cg.content, cg.count, ug.currentcount
+      from cfg_task_goal cg
+      left join sys_user_goal ug on ug.gid = cg.id and ug.uid = ${uid}
+      where cg.tid = ${tid} order by cg.id`.execute(this.scope.db)
+    ).rows;
+    return task;
   }
 
   // ---------------------------------------------------------------- world

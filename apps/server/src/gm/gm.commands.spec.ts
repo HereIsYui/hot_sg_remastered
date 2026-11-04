@@ -366,6 +366,53 @@ describe('GmCommands.announce', () => {
     expect(row.parameters).toContain('维护开始');
   });
 
+  it('reads the sys_login_announce row and the sys_announce id=1 text', async () => {
+    const { commands, db } = build([
+      {
+        match: /from sys_login_announce where id = 1/i,
+        rows: [
+          { maxname: '长乐', maxpos: '平民', maxnob: '平民', maxattack: '', maxdefence: '', id: 1 },
+        ],
+      },
+      {
+        match: /select content from sys_announce where id = 1/i,
+        rows: [{ content: '欢迎来到热血三国' }],
+      },
+    ]);
+    const result = await commands.loginAnnounce();
+    expect(result.announce).toMatchObject({ maxname: '长乐', maxpos: '平民' });
+    expect(result.content).toBe('欢迎来到热血三国');
+    expect(db.executed).toHaveLength(2);
+  });
+
+  it('merges rank fields over the current sys_login_announce row and rewrites the text', async () => {
+    const { commands, db } = build([
+      {
+        match: /from sys_login_announce where id = 1/i,
+        rows: [
+          { maxname: '旧名', maxpos: '王', maxnob: '平民', maxattack: '', maxdefence: '', id: 1 },
+        ],
+      },
+      NO(/.*/),
+    ]);
+    await commands.setLoginAnnounce({ maxname: '新名', content: '停机维护' });
+    const upsert = db.executed.find((q) => /insert into sys_login_announce/i.test(q.sql))!;
+    expect(upsert.sql).toContain('on duplicate key update');
+    // the given field and the merged-from-db field both land in the upsert
+    expect(upsert.parameters).toContain('新名');
+    expect(upsert.parameters).toContain('王');
+    expect(
+      db.executed.some((q) => /update sys_announce set content = \? where id = 1/i.test(q.sql)),
+    ).toBe(true);
+  });
+
+  it('updates only the announcement text when no rank fields are given', async () => {
+    const { commands, db } = build([NO(/.*/)]);
+    await commands.setLoginAnnounce({ content: '' });
+    expect(db.executed.some((q) => /insert into sys_login_announce/i.test(q.sql))).toBe(false);
+    expect(db.executed.some((q) => /update sys_announce set content/i.test(q.sql))).toBe(true);
+  });
+
   it('broadcasts GM speak as proc 14 with the ChatPanel.onNotifyGMSpeek fields', async () => {
     const sent: unknown[] = [];
     const sockets = new Map<number, Set<{ readyState: number; send(data: string): void }>>();
@@ -386,6 +433,157 @@ describe('GmCommands.announce', () => {
       proc: PushProc.NOTIFY_ADMIN_SPEEK,
       data: { type: 3, fromuid: 0, msg: '大家好' },
     });
+  });
+});
+
+describe('GmCommands.listState / setState', () => {
+  it('lists all mem_state switches ordered by state', async () => {
+    const { commands, db } = build([
+      {
+        match: /from mem_state\s*order by state/i,
+        rows: [
+          { state: 5, value: 0, description: '黄巾之乱史诗任务是否完成' },
+          { state: 8, value: 1, description: '洛阳战场是否开启' },
+        ],
+      },
+    ]);
+    const rows = await commands.listState();
+    expect(rows).toHaveLength(2);
+    expect(db.executed[0]!.sql).toContain('order by state');
+  });
+
+  it('filters one switch when a state number is given', async () => {
+    const { commands, db } = build([
+      { match: /from mem_state\s*where state = \?/i, rows: [{ state: 5, value: 0 }] },
+    ]);
+    const rows = await commands.listState(5);
+    expect(rows[0]!.state).toBe(5);
+    expect(db.executed[0]!.sql).toContain('where state = ?');
+  });
+
+  it('upserts a switch keeping the description when not given', async () => {
+    const { commands, db } = build([
+      {
+        match: /from mem_state\s*where state = \?/i,
+        rows: [{ state: 5, value: 0, description: '黄巾之乱史诗任务是否完成' }],
+      },
+      NO(/.*/),
+    ]);
+    await commands.setState({ state: 5, value: 1 });
+    const upsert = db.executed.find((q) => /insert into [`]?mem_state/i.test(q.sql))!;
+    expect(upsert.sql).toContain('on duplicate key update');
+    expect(upsert.parameters).toContain(1);
+    expect(upsert.parameters).toContain('黄巾之乱史诗任务是否完成');
+  });
+
+  it('rejects a non-positive state number', async () => {
+    const { commands } = build();
+    await expect(commands.setState({ state: 0, value: 1 })).rejects.toThrow(BadRequestException);
+  });
+});
+
+describe('GmCommands.epicTasks / setEpicTask', () => {
+  const epicTaskRows = [
+    { tid: 103741, name: '返乡·一月', group_id: 103700, group_name: '返乡', task_state: 0 },
+    { tid: 103742, name: '返乡·三月', group_id: 103700, group_name: '返乡', task_state: null },
+  ];
+  const epicGoalRows = [
+    { tid: 103741, gid: 3101113, content: '累计登录1天', count: 1, currentcount: 0 },
+    { tid: 103742, gid: 3101114, content: '充值', count: 100, currentcount: null },
+  ];
+
+  it('lists epic tasks with the player state and per-goal progress', async () => {
+    const { commands, db } = build([
+      ...userRules(),
+      {
+        match:
+          /join cfg_task_group g on g\.id = t\.`group` and g\.type = \?[\s\S]*left join sys_user_task u/i,
+        rows: epicTaskRows,
+      },
+      {
+        match: /where cg\.tid in \(select t\.id from cfg_task t, cfg_task_group g/i,
+        rows: epicGoalRows,
+      },
+    ]);
+    const rows = await commands.epicTasks(1001);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ tid: 103741, goals: [{ gid: 3101113, currentcount: 0 }] });
+    expect(rows[1]).toMatchObject({ tid: 103742, goals: [{ gid: 3101114, currentcount: null }] });
+    expect(db.executed).toHaveLength(3); // requireUser + tasks + goals
+  });
+
+  it('reports a missing player', async () => {
+    const { commands } = build([NO(/.*/)]);
+    await expect(commands.epicTasks(1001)).rejects.toThrow(NotFoundException);
+  });
+
+  it('sets goal progress, defaulting the count to the goal target', async () => {
+    const { commands, db } = build([
+      ...userRules(),
+      {
+        match: /from cfg_task_goal cg, cfg_task t,\s*cfg_task_group g/i,
+        rows: [{ tid: 103741, count: 5 }],
+      },
+      { match: /select t\.id as tid, t\.name/i, rows: [epicTaskRows[0]!] },
+      NO(/.*/),
+    ]);
+    await commands.setEpicTask({ uid: 1001, gid: 3101113 });
+    const upsert = db.executed.find((q) => /insert into sys_user_goal/i.test(q.sql))!;
+    expect(upsert.sql).toContain('on duplicate key update currentcount = ?');
+    expect(upsert.parameters.slice(0, 3)).toEqual([1001, 3101113, 5]);
+  });
+
+  it('sets an explicit goal count and returns the refreshed task view', async () => {
+    const { commands, db } = build([
+      ...userRules(),
+      {
+        match: /from cfg_task_goal cg, cfg_task t,\s*cfg_task_group g/i,
+        rows: [{ tid: 103741, count: 5 }],
+      },
+      { match: /select t\.id as tid, t\.name/i, rows: [epicTaskRows[0]!] },
+      { match: /where cg\.tid = \? order by cg\.id/i, rows: [epicGoalRows[0]!] },
+      NO(/.*/),
+    ]);
+    const task = await commands.setEpicTask({ uid: 1001, gid: 3101113, currentcount: 2 });
+    const upsert = db.executed.find((q) => /insert into sys_user_goal/i.test(q.sql))!;
+    expect(upsert.parameters).toContain(2);
+    expect(task).toMatchObject({ tid: 103741, name: '返乡·一月', goals: [{ gid: 3101113 }] });
+  });
+
+  it('sets the accepted / finished state of an epic task', async () => {
+    const { commands, db } = build([
+      ...userRules(),
+      { match: /select t\.id from cfg_task t, cfg_task_group g/i, rows: [{ id: 103741 }] },
+      { match: /select t\.id as tid, t\.name/i, rows: [epicTaskRows[0]!] },
+      { match: /where cg\.tid = \? order by cg\.id/i, rows: [] },
+      NO(/.*/),
+    ]);
+    await commands.setEpicTask({ uid: 1001, tid: 103741, state: 1 });
+    expect(
+      db.executed.some((q) =>
+        /insert into sys_user_task \(uid, tid, state\)[\s\S]*on duplicate key update state = \?/i.test(
+          q.sql,
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects a call without gid/tid and non-epic goal or task ids', async () => {
+    const { commands } = build([
+      ...userRules(),
+      { match: /select t\.id as tid, t\.name/i, rows: [] },
+      NO(/.*/),
+    ]);
+    await expect(commands.setEpicTask({ uid: 1001 })).rejects.toThrow(BadRequestException);
+    await expect(commands.setEpicTask({ uid: 1001, gid: 999999 })).rejects.toThrow(
+      NotFoundException,
+    );
+    await expect(commands.setEpicTask({ uid: 1001, tid: 1, state: 1 })).rejects.toThrow(
+      NotFoundException,
+    );
+    await expect(commands.setEpicTask({ uid: 1001, tid: 103741 })).rejects.toThrow(
+      BadRequestException,
+    );
   });
 });
 
