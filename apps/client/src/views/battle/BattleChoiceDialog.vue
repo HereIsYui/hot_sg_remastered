@@ -10,6 +10,7 @@ import FxCanvas from '../../ui/FxCanvas.vue';
 import FxDataGrid from '../../ui/FxDataGrid.vue';
 import FxImage from '../../ui/FxImage.vue';
 import FxLabel from '../../ui/FxLabel.vue';
+import FxText from '../../ui/FxText.vue';
 import CreateBattleDialog from './CreateBattleDialog.vue';
 
 /**
@@ -212,13 +213,13 @@ function close(): void {
         :fx="{ textAlign: 'center', color: 3289650 }"
         :text="detailTop"
       />
-      <FxLabel
+      <FxText
         :x="10"
         :y="170"
         :w="465"
         :h="140"
         :fx="{ color: 16776960 }"
-        :text="String(selected?.content ?? '')"
+        :html="String(selected?.content ?? '')"
       />
     </FxCanvas>
 
@@ -300,13 +301,13 @@ function close(): void {
           :h="20"
           :text="`${i18n('Battle_BattleInfor_8_1')}${instructionLevel}`"
         />
-        <FxLabel
+        <FxText
           :x="12"
           :y="192"
           :w="396"
           :h="120"
           :fx="{ color: 16776960 }"
-          :text="String(selected?.content ?? '')"
+          :html="String(selected?.content ?? '')"
         />
         <FxLabel :x="12" :y="312" :w="396" :h="20" :text="String(selected?.winCondition ?? '')" />
         <FxLabel :x="12" :y="336" :w="396" :h="20" :text="String(selected?.loseCondition ?? '')" />
