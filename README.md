@@ -211,7 +211,8 @@ legacy/          本地生成的原版文件（不提交）
 ### 阶段 11 进行中（测试与发布）
 
 - 发布准备完成：docker/prod 一键全栈 compose（db/server/nginx web 三服务，/ws 同源代理，客户端与 GM 静态同源托管；端到端实测六项冒烟全过）；scripts/backup-db.sh（mysqldump + 裁剪）与 restore-db.sh（MyISAM→InnoDB 在线转换，沙箱实测）；docs/deploy.md 部署文档；package.json 增 prod:up/prod:down/db:backup/db:restore。
-- 未做（长时/人工项）：差分 24 小时结算对比、按界面清单的全量浏览器走查（阶段 7/8/9 新面板累积）、性能与兼容性基准、可选桌面壳。
+- GM 补齐（走查前置能力）：登录公告（announce/login 查看与设置）、任务/活动开关（mem_state 读写）、史诗任务进度（sys_user_goal 查询/设置）——13 项新单测，总 41/41。
+- 未做（长时/人工项）：差分 24 小时结算对比、按界面清单的全量浏览器走查（阶段 7/8/9 新面板累积；前置数据能力已由 GM 端点补齐——活动开关可开抽奖、登录公告可验证登录链路、史诗进度可铺任务走查数据）、性能与兼容性基准、可选桌面壳。
 
 工作流并行移植（调研→按家族并行→客户端→集成差分→回归门）：
 
