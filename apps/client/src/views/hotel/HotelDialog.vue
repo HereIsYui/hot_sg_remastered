@@ -36,7 +36,7 @@ const param = computed(() => props.building.y * 10 + props.building.x);
 /** The hero id a pending 结交 confirm applies to (`mLastHeroID`). */
 let lionizeHid = 0;
 
-/** `tryLionizeHero` resolves `[hid, goldNeed]`; confirm, then `lionizeHero` (both reply ttype 22). */
+/** `tryLionizeHero` resolves `[hid, goldNeed]`; confirm, then `LionizeHero` (both reply ttype 22). */
 const unregister = game.addDialogReceiver({
   isTarget: (id, p) => id === ID_BUILDING_HOTEL && p === param.value,
   onData(reply, ttype) {
@@ -48,7 +48,7 @@ const unregister = game.addDialogReceiver({
       'no',
     ]).then((answer) => {
       if (answer === 'yes') {
-        game.sendDialogCommand('lionizeHero', ID_BUILDING_HOTEL, param.value, [lionizeHid], 22);
+        game.sendDialogCommand('LionizeHero', ID_BUILDING_HOTEL, param.value, [lionizeHid], 22);
       }
     });
   },
