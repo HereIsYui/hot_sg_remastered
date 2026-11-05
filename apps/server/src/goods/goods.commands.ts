@@ -26,6 +26,14 @@ const LOG_PACK_GOODS = 6;
 const LOG_PACK_THINGS = 8;
 const LOG_SELL = 9;
 const LOG_BOX_GIFT = 20;
+const LOG_COMPOSE = 917;
+/** goodsCompose: 聚魂珠 10830-10839 (the last one is the top level), 马鬃 and 马鞭. */
+const COMPOSE_GIDS = new Set([
+  10830, 10831, 10832, 10833, 10834, 10835, 10836, 10837, 10838, 10839, 19081, 19082,
+]);
+const COMPOSE_MAX_GID = 10839;
+const HORSE_MANE_GID = 19081;
+const HORSE_WHIP_GID = 19082;
 /** Gids that only report the "not enough" code the client turns into a buy prompt. */
 const BUY_PROMPT_GIDS = new Set([
   2, 44, 3, 45, 4, 46, 5, 47, 54, 55, 57, 25, 6, 48, 7, 49, 60, 61, 62, 58, 140, 56, 142, 124, 117,
@@ -222,6 +230,46 @@ export class GoodsCommands {
           where g.uid = ${uid} and g.gid = ${gid}`)) ?? false,
         cid,
         await this.cell(sql`select gold from mem_city_resource where cid = ${cid}`),
+      ];
+    });
+  }
+
+  /**
+   * `[gid]`: 合成 — two 聚魂珠 make one of the next level, five 马鬃 a 马鞭, two 马鞭 a 25% shot
+   * at a 汗血马鞭 → `[succeeded, [the next item]]`.
+   */
+  @GlobalCommand()
+  async goodsCompose(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const uid = ctx.uid;
+    const gid = phpIntval(param[0]);
+    if (!COMPOSE_GIDS.has(gid)) throw GameError.lang('goods.can_not_compose');
+    if (gid === COMPOSE_MAX_GID) throw GameError.lang('goods.good_compose_maxLevel');
+    return this.scope.transaction(async () => {
+      const count = phpIntval(
+        await this.cell(sql`select count from sys_goods where uid = ${uid} and gid = ${gid}`),
+      );
+      const next = gid + 1;
+      let succeeded = 1;
+      if (gid === HORSE_MANE_GID) {
+        if (count < 5) throw GameError.lang('goods.good_not_enough_1');
+        await this.goods.addGoods(uid, gid, -5, LOG_COMPOSE);
+        await this.goods.addGoods(uid, next, 1, LOG_COMPOSE);
+      } else if (gid === HORSE_WHIP_GID) {
+        if (count < 2) throw GameError.lang('goods.good_not_enough_2');
+        await this.goods.addGoods(uid, gid, -2, LOG_COMPOSE);
+        if (this.random.mtRand(1, 100) <= 25) {
+          await this.goods.addGoods(uid, next, 1, LOG_COMPOSE);
+        } else {
+          succeeded = 0;
+        }
+      } else {
+        if (count < 2) throw GameError.lang('goods.good_not_enough');
+        await this.goods.addGoods(uid, gid, -2, LOG_COMPOSE);
+        await this.goods.addGoods(uid, next, 1, LOG_COMPOSE);
+      }
+      return [
+        succeeded,
+        await this.rows(sql`select *, 1 as count from cfg_goods where gid = ${next}`),
       ];
     });
   }

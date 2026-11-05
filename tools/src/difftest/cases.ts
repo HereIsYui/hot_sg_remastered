@@ -815,6 +815,122 @@ export const cases: DiffCase[] = [
     },
   },
   {
+    name: 'troops gather on their fields and bring in what they found',
+    tables: {
+      sys_gather: { offsets: ['starttime'] },
+      log_gather_count: { offsets: ['time'] },
+      sys_report: { offsets: ['time'], map: { content: gatherSeconds } },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const field = async (type: number) => {
+        const [row] = await s.query<{ wid: string }>(
+          `select wid from mem_world where ownercid = 0 and type = ? and state = 0
+            order by wid limit 1`,
+          [type],
+        );
+        return Number(row?.wid);
+      };
+      const desert = await field(2);
+      const mountain = await field(5);
+      const lake = await field(6);
+      const barren = await field(3);
+      const empty = await field(7);
+      const foreign = await field(4);
+      const plain = await field(1);
+      await s.query('update mem_world set ownercid = ?, level = 5 where wid in (?, ?, ?, ?)', [
+        cid,
+        desert,
+        mountain,
+        lake,
+        empty,
+      ]);
+      await s.query('update mem_world set ownercid = ?, level = 0 where wid = ?', [cid, barren]);
+      await s.query(
+        `insert into sys_city_hero (hid, uid, name, npcid, sex, face, cid, state, level, exp,
+          command_base, affairs_base, bravery_base, wisdom_base, loyalty, herotype)
+        values (900011, ?, '甲', 0, 1, 10, ?, 4, 30, 0, 20, 40, 60, 50, 60, 0),
+          (900012, ?, '乙', 0, 1, 10, ?, 4, 45, 0, 20, 40, 60, 50, 60, 0)`,
+        [uid, cid, uid, cid],
+      );
+      const troop = `insert into sys_troops (id, uid, cid, hid, targetcid, task, state, starttime,
+          pathtime, endtime, soldiers, resource, fooduse)
+        values (?, ?, ?, ?, ?, 1, 4, 0, 600, 0, '', '', ?)`;
+      await s.query(troop, [900011, uid, cid, 900011, wid2cid(desert), 10]);
+      await s.query(troop, [900012, uid, cid, 900012, wid2cid(mountain), 20000]);
+      await s.query(troop, [900013, uid, cid, 0, wid2cid(lake), 10]);
+
+      await s.command(session, 'gatherFieldStart', cid2wid(cid));
+      await s.command(session, 'gatherFieldStart', plain);
+      await s.command(session, 'gatherFieldStart', barren);
+      await s.command(session, 'gatherFieldStart', foreign);
+      await s.command(session, 'gatherFieldStart', empty);
+      await s.command(session, 'gatherFieldStart', lake);
+      await s.query('update mem_world set state = 1 where wid = ?', [desert]);
+      await s.command(session, 'gatherFieldStart', desert);
+      await s.query('update mem_world set state = 0 where wid = ?', [desert]);
+      await s.query(
+        `insert into sys_user_state (uid, vacstart, vacend, reason)
+        values (?, 0, unix_timestamp() + 3600, '')`,
+        [uid],
+      );
+      await s.command(session, 'gatherFieldStart', desert);
+      await s.query('delete from sys_user_state where uid = ?', [uid]);
+      await s.command(session, 'gatherFieldStart', desert);
+      s.offset(4, 1, 'starttime');
+      await s.command(session, 'gatherFieldStart', desert);
+
+      await s.command(session, 'gatherFieldEnd', foreign);
+      await s.command(session, 'gatherFieldEnd', desert);
+      await s.command(session, 'gatherFieldEnd', desert);
+      await s.query('insert into mem_treasure_map (uid, cid, endtime) values (?, ?, 0)', [
+        uid,
+        wid2cid(desert),
+      ]);
+      await s.query('insert into sys_hero_task (uid, `group`, tid, state) values (?, 4, 411, 1)', [
+        uid,
+      ]);
+      for (const seed of [11, 12, 13]) {
+        await s.query(
+          `replace into sys_gather (wid, troopid, fooduse, level, starttime)
+          values (?, 900011, 10, 5, unix_timestamp() - 37800)`,
+          [desert],
+        );
+        s.seed(seed);
+        await s.command(session, 'gatherFieldEnd', desert);
+        gatherSecondsIn(s, 4, 1);
+      }
+      s.stopRng();
+      await s.query(
+        `insert into sys_gather (wid, troopid, fooduse, level, starttime)
+        values (?, 900013, 10, 0, unix_timestamp() - 7200), (?, 999999, 10, 5, 0)`,
+        [barren, lake],
+      );
+      await s.command(session, 'gatherFieldEnd', barren);
+      await s.command(session, 'gatherFieldEnd', lake);
+
+      await s.command(session, 'gatherStartAll');
+      await s.command(session, 'gatherStartAll');
+      await s.query('update sys_gather set starttime = unix_timestamp() - 1000 where wid = ?', [
+        mountain,
+      ]);
+      await s.query('update sys_gather set starttime = unix_timestamp() - 40000 where wid = ?', [
+        desert,
+      ]);
+      s.seed(21);
+      await s.command(session, 'gatherEndAll');
+      s.stopRng();
+      await s.command(session, 'gatherEndAll');
+
+      await s.command(session, 'allowAutoDiscard', false);
+      await s.command(session, 'allowAutoDiscard', true);
+      await s.command(session, 'getStayTroops', 1);
+      s.unordered(1);
+    },
+  },
+  {
     name: 'lord tasks refresh, free once a day',
     run: async (s) => {
       const session = await s.login(EXISTING_PLAYER);
@@ -960,6 +1076,35 @@ export const cases: DiffCase[] = [
       await s.command(session, 'sellGoods', cid, 67, 0);
       await s.command(session, 'sellGoods', cid, 160052, 1);
       await s.command(session, 'loadUserGoods');
+    },
+  },
+  {
+    name: 'goods compose 聚魂珠, 马鬃 and 马鞭',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const give = (gid: number, count: number) =>
+        s.query(
+          `insert into sys_goods (uid, gid, count) values (?, ?, ?)
+            on duplicate key update count = values(count)`,
+          [uid, gid, count],
+        );
+      await give(10830, 3);
+      await give(10839, 2);
+      await give(19081, 6);
+      await give(19082, 4);
+      await s.command(session, 'goodsCompose', 999);
+      await s.command(session, 'goodsCompose', 10839);
+      await s.command(session, 'goodsCompose', 10830);
+      await s.command(session, 'goodsCompose', 10830);
+      await s.command(session, 'goodsCompose', 19081);
+      await s.command(session, 'goodsCompose', 19081);
+      s.rng([10]);
+      await s.command(session, 'goodsCompose', 19082);
+      s.rng([50]);
+      await s.command(session, 'goodsCompose', 19082);
+      s.stopRng();
+      await s.command(session, 'goodsCompose', 19082);
     },
   },
   {
@@ -7519,6 +7664,24 @@ function activityConfigTimes(s: Side): void {
   s.offset(4, 0, 'starttime');
   s.offset(4, 0, 'endtime');
   s.offset(4, 0, 'reward_endtime');
+}
+
+/**
+ * A gather report says how long it ran ("经过10小时30分0秒的采集"); the start time is set just
+ * before the call, so the seconds may tick over on one side.
+ */
+function gatherSeconds(value: unknown): unknown {
+  return typeof value === 'string' ? value.replace(/(\d+小时\d+分钟?)\d+秒/g, '$1*秒') : value;
+}
+
+/** {@link gatherSeconds} for the string at `path` in the last response. */
+function gatherSecondsIn(side: Side, ...path: number[]): void {
+  const last = side.responses.at(-1);
+  if (!last) return;
+  let node = last.value as unknown[];
+  for (const key of path.slice(0, -1)) node = node?.[key] as unknown[];
+  const leaf = path.at(-1)!;
+  if (Array.isArray(node)) node[leaf] = gatherSeconds(node[leaf]);
 }
 
 async function lastCity(side: Side, uid: number): Promise<number> {

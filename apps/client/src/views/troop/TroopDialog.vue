@@ -57,6 +57,7 @@ function switchTab(which: Tab): void {
 }
 
 const unregister = game.addGlobalReceiver('troop', (command, data) => {
+  const reply = Array.isArray(data) ? (data as unknown[]) : [];
   switch (command) {
     case 'getArmyTroops':
       army.value = parseTroopRows(data);
@@ -79,10 +80,22 @@ const unregister = game.addGlobalReceiver('troop', (command, data) => {
       load();
       break;
     case 'gatherFieldStart':
+      load('stay');
+      void showAlert(i18n('Troop_TroopDialogSrc_25'));
+      break;
     case 'gatherStartAll':
-    case 'gatherEndAll':
+      load('stay');
+      void showAlert(
+        i18n(reply[0] === true ? 'Troop_TroopDialogSrc_26' : 'Troop_TroopDialogSrc_27'),
+      );
+      break;
     case 'gatherFieldEnd':
       load('stay');
+      void showAlert(String(reply[1] ?? ''));
+      break;
+    case 'gatherEndAll':
+      load('stay');
+      void showAlert(String(reply[0] ?? ''));
       break;
   }
 });
@@ -108,13 +121,8 @@ function onAutoDiscard(value: boolean): void {
   game.sendGlobalCommand('troop', 'allowAutoDiscard', [value]);
 }
 
-async function onGatherStartAll(): Promise<void> {
-  if (
-    (await showAlert(i18n('Troop_TroopDialogSrc_26') || '确定全部集结？', '', ['yes', 'no'])) ===
-    'yes'
-  ) {
-    game.sendGlobalCommand('troop', 'gatherStartAll');
-  }
+function onGatherStartAll(): void {
+  game.sendGlobalCommand('troop', 'gatherStartAll');
 }
 
 function onGatherEndAll(): void {

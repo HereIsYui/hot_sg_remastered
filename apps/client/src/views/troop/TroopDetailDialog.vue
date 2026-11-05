@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { serverTime, timeLeftText } from '../../core/clock';
 import { useGame } from '../../game/game';
 import { parseTroopDetail, taskName, type TroopDetail, type TroopRow } from '../../game/troop';
 import { cid2wid, makeCid } from '../../game/world';
@@ -89,13 +90,15 @@ function onGatherStart(): void {
   emit('close');
 }
 
+/** `onGatherEnd`: a gathering troop's endtime is its gather start (getStayTroops). */
 async function onGatherEnd(): Promise<void> {
-  if (
-    (await showAlert(i18n('Troop_TroopDetailDialogSrc_11') || '确定结束集结？', '', [
-      'yes',
-      'no',
-    ])) === 'yes'
-  ) {
+  const elapsed = serverTime() - props.troop.endtime;
+  const [head, tail] =
+    elapsed >= 3600
+      ? ['Troop_TroopDetailDialogSrc_9', 'Troop_TroopDetailDialogSrc_10']
+      : ['Troop_TroopDetailDialogSrc_11', 'Troop_TroopDetailDialogSrc_12'];
+  const text = `${i18n(head)}${timeLeftText(elapsed, i18n)}${i18n(tail)}`;
+  if ((await showAlert(text, '', ['yes', 'no'])) === 'yes') {
     game.sendGlobalCommand('troop', 'gatherFieldEnd', [cid2wid(props.troop.targetcid)]);
     emit('close');
   }

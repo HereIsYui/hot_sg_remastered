@@ -147,7 +147,8 @@ export class FieldCommands {
       left join sys_gather g on g.wid = m.wid where m.ownercid = ${cid} and m.type > 0`);
   }
 
-  private async fieldDetail(wid: number): Promise<unknown[]> {
+  /** CityFunc.php::getFieldDetail */
+  async fieldDetail(wid: number): Promise<unknown[]> {
     const troops = await this.rows(sql`select t.*, u.name as username, h.name as heroname
       from sys_user u, sys_troops t left join sys_city_hero h on h.hid = t.hid
       where t.uid = u.uid and t.targetcid = ${wid2cid(wid)} and t.state = 4 and t.uid > 0`);

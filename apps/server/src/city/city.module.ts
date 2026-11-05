@@ -61,6 +61,7 @@ import { TechnicTick } from './technic.tick';
     CityBuildingsService,
     CityInfoService,
     CityProductionService,
+    FieldCommands,
     HotelRules,
   ],
 })

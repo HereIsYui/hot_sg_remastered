@@ -240,7 +240,7 @@ const unregister = game.addGlobalReceiver('goods', (command, data) => {
   else if (command === 'sellGoods') onSellGoodsSucc(d);
   else if (command === 'goodsCompose') {
     if (!d.shift()) gameAlert(i18n('Goods_UseGoodsDialogSrc_UseHorsewhip_fail'));
-    else treasure.value = treasureItems([d.shift()]);
+    else treasure.value = treasureItems(d.shift());
     loadUserGoods();
   }
 });

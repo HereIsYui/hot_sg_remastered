@@ -68,6 +68,15 @@ export class TroopCommands {
     return [await this.allowFlag(ctx.uid, 'anti_invade')];
   }
 
+  /** CityFunc.php::allowAutoDiscard: toggle 自动遣返 → `[flag]`. */
+  @GlobalCommand()
+  async allowAutoDiscard(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const allow = phpIntval(param[0]);
+    await sql`insert into sys_allow_auto_discard (uid, \`allow\`) values (${ctx.uid}, ${allow})
+      on duplicate key update \`allow\` = ${allow}`.execute(this.scope.db);
+    return [await this.autoDiscardFlag(ctx.uid)];
+  }
+
   /**
    * CityFunc.php::getAllowAutoDiscard — the 自动遣散 flag lives in its OWN table
    * (`sys_allow_auto_discard`), not a column of `sys_allow_union_troop`. When a player has no row

@@ -1,7 +1,11 @@
 import { Module } from '@nestjs/common';
 import { BattleModule } from '../battle/battle.module';
+import { CityModule } from '../city/city.module';
+import { GoodsModule } from '../goods/goods.module';
+import { TaskModule } from '../task/task.module';
 import { BattleReadCommands } from './battle-read.commands';
 import { ExternService } from './extern.service';
+import { GatherCommands } from './gather.commands';
 import { ReportCommands } from './report.commands';
 import { StartTroopCommands } from './start-troop.commands';
 import { TroopCommands } from './troop.commands';
@@ -9,7 +13,8 @@ import { TroopTick } from './troop.tick';
 
 /**
  * GroundFunc.php (出征) + TroopFunc.php (军队面板 + battle readers) + ExternService.php
- * (getTroopMaxTime) commands, ReportFunc.php (战报) + HeroFunc.php::getKingReward, and the
+ * (getTroopMaxTime) commands, the 采集 commands of CityFunc.php, ReportFunc.php (战报) +
+ * HeroFunc.php::getKingReward, and the
  * HandleTroop settlement of cfg_js.php on the 3s loop (TickOrder.Troop).
  *
  * The battle readers (getBattleReport / getBattleData / setSoldierTactics) and the report readers
@@ -20,9 +25,10 @@ import { TroopTick } from './troop.tick';
  * 掠夺/占领/攻击 to `BattleArrivalService`.
  */
 @Module({
-  imports: [BattleModule],
+  imports: [BattleModule, CityModule, GoodsModule, TaskModule],
   providers: [
     ExternService,
+    GatherCommands,
     TroopCommands,
     StartTroopCommands,
     TroopTick,
