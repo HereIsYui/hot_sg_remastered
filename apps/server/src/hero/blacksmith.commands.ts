@@ -9,10 +9,11 @@ import { TaskRules } from '../core/task-rules.service';
 import { UserRules } from '../core/user-rules.service';
 import { DbScope } from '../db/database.module';
 import { GlobalCommand, type CommandContext } from '../gateway/decorators';
+import { ArmorCommands } from './armor.commands';
 
 type Row = Record<string, unknown>;
 
-/** 坐骑 part id; the smithy refuses mounts (驯马 is a separate 马厩 flow). */
+/** 坐骑 part id: mounts take the barn's branch of the shared smithy commands. */
 const PART_HORSE = 12;
 /** 强化宝珠 / 高级强化宝珠 (level 0-9 / 10-15). */
 const GOODS_STRONG_PEARL = 205;
@@ -20,9 +21,62 @@ const GOODS_HIGH_STRONG_PEARL = 11170;
 /** 天工符 / 乾坤宝珠 — the two optional strengthening aids. */
 const GOODS_TIANGONG = 203;
 const GOODS_QIANKUN = 204;
-/** 伯乐符 / 师皇针 (the horse branch's aliases, refused by the smithy). */
+/** 伯乐符 / 师皇针: the mount's 天工符 / 乾坤宝珠. */
 const GOODS_BOLE = 212;
 const GOODS_SHIHUANG = 213;
+/** 灵通甘草 / 高级灵通甘草: the mount's strengthening stones (level 0-9 / 10-15). */
+const GOODS_LINGTONG = 214;
+const GOODS_HIGH_LINGTONG = 11171;
+/** Success rate (%) of strengthening a mount to level 11-15. */
+const HORSE_HIGH_STRONG_RATE: Record<number, number> = { 11: 5, 12: 5, 13: 5, 14: 3, 15: 1 };
+/** 熔炼 stones (level 0-2 / 3+) and the 熔炼保护符. */
+const GOODS_FUSION_LOW = 10776;
+const GOODS_FUSION_HIGH = 10777;
+const GOODS_FUSION_PROTECT = 10778;
+/** Success rate (%) of 熔炼 to each combine level. */
+const FUSION_RATE: Record<number, number> = { 1: 75, 2: 35, 3: 15, 4: 10, 5: 5, 6: 3, 7: 1 };
+/** The sets and loose pieces 熔炼 accepts; the `reloadArmor` "all" filter lacks 15003 / 15004. */
+const FUSION_TIES = [
+  10001, 10003, 10004, 10005, 10007, 10008, 11002, 12003, 12004, 15000, 15001, 15002, 15003, 15004,
+];
+const RELOAD_ALL_TIES = FUSION_TIES.slice(0, 12);
+const FUSION_IDS = [52001, 12009, 12010, 12012, 12013, 12016, 12018];
+/** 熔炼 part filter index -> set id (0 = every set above, 10 = the loose pieces). */
+const FUSION_FILTER_TIE: Record<string, number> = {
+  '1': 12003,
+  '2': 11002,
+  '3': 10008,
+  '4': 10004,
+  '5': 10003,
+  '6': 10001,
+  '7': 10005,
+  '8': 10007,
+  '9': 12004,
+  '11': 15000,
+  '12': 15001,
+  '13': 15002,
+  '14': 15003,
+  '15': 15004,
+};
+/** The PHP warning the original turns into an error reply when it loops over an unset list. */
+const FOREACH_WARNING = 'Invalid argument supplied for foreach()';
+/** 祝融之符 / 极品属性清洗符 / 极品属性洗练符, by 洗练 index. */
+const XILIAN_GIDS = [12079, 12080, 12081];
+/** 装备升级保护符. */
+const GOODS_UPGRADE_PROTECT = 12157;
+/** 装备升级: set -> [common material, set material]. */
+const UPGRADE_GOODS: Record<number, [number, number]> = {
+  11002: [12158, 12159],
+  12003: [12158, 12160],
+  10008: [12158, 12161],
+  12006: [12158, 12161],
+  12007: [12158, 12161],
+};
+/** 装备升级: set -> success rate (%) and the armorid offset of the upgraded piece. */
+const UPGRADE_RATE: Record<number, number> = { 11002: 30, 12003: 20, 10008: 15 };
+const UPGRADE_ID_ADD: Record<number, number> = { 11002: 42810, 12003: -37000, 10008: 4116 };
+/** addGoods reason of 装备升级 materials. */
+const LOG_UPGRADE = 1115;
 /** 巧手符 / 宝珠保护符 for 合成. */
 const GOODS_QIAOSHOU = 202;
 const GOODS_PEARL_PROTECT = 11172;
@@ -32,8 +86,11 @@ const GOODS_SKILL_PROTECT = 10667;
 const ACTION_STRONG = 15;
 /** log_user_action of a 材料合成. */
 const ACTION_SYNTH = 23;
-/** log_user_action of a 开孔. */
+/** log_user_action of a 坐骑强化. */
+const ACTION_HORSE_STRONG = 16;
+/** log_user_action of activating gear / taming a mount. */
 const ACTION_OPEN_HOLE = 14;
+const ACTION_TAME_HORSE = 25;
 /** addGoods / reduceGoods reason of a 合成. */
 const LOG_SYNTH = 99;
 /** addGoods reason of a 镶嵌. */
@@ -43,12 +100,26 @@ const INFORM_COLOR = 49151;
 /** cfg_act id of the strengthening event. */
 const ACT_STRONG = 4422;
 
+/** EquipmentFunc.php::doEmbed: whether a 马装 gid goes in hole `pos` of a mount. */
+export function zuojiHoleFits(gid: number, pos: number): boolean {
+  if (pos === Math.trunc((gid - 400) / 20)) return true;
+  if (gid >= 502 && gid <= 582) return pos === Math.trunc((gid - 400) / 20) - 5;
+  if (gid >= 1400 && gid <= 1500) return pos === Math.trunc((gid - 1400) / 20);
+  if (gid >= 12178 && gid <= 12182) return pos === gid - 12178;
+  return false;
+}
+
+/** EquipmentFunc.php::doXilian: 洗练符 per re-roll by colour (0 = the colour cannot be re-rolled). */
+export function xilianStoneCount(type: number): number {
+  if (type >= 1 && type <= 3) return 1;
+  return ({ 4: 2, 5: 3, 6: 4 } as Record<number, number>)[type] ?? 0;
+}
+
 /**
- * EquipmentFunc.php — the 铁匠铺 (blacksmith): 强化 (strengthen), 镶嵌 (embed), 合成 (synthesize
- * materials), plus the 技能书合并 tab shared from HeroSkillFunc.php. The 坐骑 (mount) branch of
- * every function is **not ported** (it belongs to the 马厩 flow another agent owns): the smithy
- * always sends `is_zuoji = 0`, so a mount throws `equipment.data_exception` just as in the
- * original. 洗练 / 熔炼 / 装备升级 are separate subsystems and are not ported here either.
+ * EquipmentFunc.php — the 铁匠铺 (blacksmith): 洗练, 强化 (strengthen), 镶嵌 (embed), 合成
+ * (synthesize materials), 熔炼 (fuse three equal pieces), 装备升级 (ArmorFunc.php), plus the
+ * 技能书合并 tab shared from HeroSkillFunc.php. The barn's 坐骑 tabs call the same commands with
+ * `is_zuoji = 1` (强化 / 镶嵌) or with a mount (驯服 = initHoles, 升级).
  */
 @Injectable()
 export class BlackSmithCommands {
@@ -59,6 +130,7 @@ export class BlackSmithCommands {
     private readonly users: UserRules,
     private readonly tasks: TaskRules,
     private readonly random: RandomService,
+    private readonly armors: ArmorCommands,
   ) {}
 
   private async rows(query: RawBuilder<unknown>): Promise<Row[]> {
@@ -86,8 +158,8 @@ export class BlackSmithCommands {
 
   /**
    * `[step, xilianIndex]`: the aid goods shown in every tab, plus (step < 0) the full pearl
-   * list for the 合成 tab. The original passed a 洗练 index too; that tab is not ported, so it
-   * is read and ignored here.
+   * list for the 合成 tab. The client also sends a 洗练 index, which the original ignores too
+   * (the 洗练 stone comes from loadXilianGoods).
    */
   @GlobalCommand()
   async loadEquitmentInfor(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
@@ -112,14 +184,16 @@ export class BlackSmithCommands {
 
   // ---------------------------------------------------------------- 强化
 
-  /** EquipmentFunc.php::strongLimit: the strengthening caps by colour and 打造技巧. */
+  /** EquipmentFunc.php::strongLimit: the caps by colour and 打造技巧 (驯马技巧 for a mount). */
   private async strongLimit(armor: Row, cid: number): Promise<void> {
     const type = phpIntval(armor.type);
     const strongLevel = phpIntval(armor.strong_level);
+    const horse = phpLooseEquals(armor.part, PART_HORSE);
     if (strongLevel >= 15) throw GameError.lang('equipment.strong_level_limit');
-    // 坐骑 would use 驯马技巧 (tid 22); the smithy only handles gear, so 打造技巧 (tid 21).
-    const tid = 21;
-    const info = 'equipment.strong_limit_technic_blacksmith';
+    const tid = horse ? 22 : 21;
+    const info = horse
+      ? 'equipment.strong_limit_technic_barn'
+      : 'equipment.strong_limit_technic_blacksmith';
     const limitByTechnic = await this.cell(sql`select level from sys_city_technic
       where cid = ${cid} and tid = ${tid}`);
     const technic = phpEmpty(limitByTechnic) ? 0 : phpNum(limitByTechnic);
@@ -140,16 +214,16 @@ export class BlackSmithCommands {
         Record<string, string> | undefined;
       throw GameError.lang('equipment.strong_limit', colours?.[String(type)] ?? type, strongLevel);
     }
-    // 蓝装 strengthened to 11+ needs 熔炼 level 3 (mounts excepted, but mounts never reach here).
-    if (type === 4 && strongLevel >= 10 && phpIntval(armor.combine_level) <= 2) {
+    // 蓝装 strengthened to 11+ needs 熔炼 level 3 (mounts excepted).
+    if (!horse && type === 4 && strongLevel >= 10 && phpIntval(armor.combine_level) <= 2) {
       throw GameError.lang('equipment.blue_strong_limit');
     }
   }
 
   /**
-   * `[cid, gid1, g1count, gid2, g2count, sid, (is_zuoji)]`: strengthen one piece. The client
-   * never sends a mount, so this always runs the gear branch; a mount piece throws
-   * `equipment.data_exception`. Answers like the original: `[0, msg]` when the piece vanished,
+   * `[cid, gid1, g1count, gid2, g2count, sid, is_zuoji]`: strengthen one piece — gear from the
+   * smithy, a mount (is_zuoji = 1, 灵通甘草 instead of 强化宝珠) from the barn. A piece of the
+   * wrong kind throws `equipment.data_exception`. Answers `[0, msg]` when the piece vanished,
    * else `[1, result, strong_value, bestQuality]`.
    */
   @GlobalCommand()
@@ -168,46 +242,45 @@ export class BlackSmithCommands {
     if (gid2 !== GOODS_SHIHUANG && gid2 !== GOODS_QIANKUN) {
       throw GameError.lang('equipment.wrong_item');
     }
-    // 坐骑 is not ported: the smithy dialog always sends gear, so is_zuoji is forced to 0.
-    const isZuoji = 0;
+    const zuoji = phpLooseEquals(param[6], 1);
+    const isZuoji = zuoji ? param[6] : 0;
 
     return this.scope.transaction(async () => {
       const db = this.scope.db;
       const armor = await this.row(sql`select * from sys_user_armor s
         left join cfg_armor c on s.armorid = c.id where s.sid = ${sid} and s.uid = ${uid}`);
-      if (!armor) return [0, this.msg('equipment.no_such_armor')];
+      if (!armor) {
+        return [0, this.msg(zuoji ? 'equipment.no_such_horse' : 'equipment.no_such_armor')];
+      }
       if (!phpLooseEquals(armor.hid, 0)) throw GameError.lang('equipment.armor_in_hero');
-      if (phpLooseEquals(armor.part, PART_HORSE)) throw GameError.lang('equipment.data_exception');
+      if (phpLooseEquals(armor.part, PART_HORSE) !== zuoji) {
+        throw GameError.lang('equipment.data_exception');
+      }
 
       if (good1Count === 1 && (await this.goodsCount(uid, gid1)) <= 0) {
-        throw GameError.raw(`not_enough_goods${GOODS_TIANGONG}`);
+        throw GameError.raw(`not_enough_goods${zuoji ? GOODS_BOLE : GOODS_TIANGONG}`);
       }
       if (good2Count === 1 && (await this.goodsCount(uid, gid2)) <= 0) {
-        throw GameError.raw(`not_enough_goods${GOODS_QIANKUN}`);
+        throw GameError.raw(`not_enough_goods${zuoji ? GOODS_SHIHUANG : GOODS_QIANKUN}`);
       }
 
       const startLevel = phpIntval(armor.strong_level);
       let strongValue = phpNum(armor.strong_value);
       const nlevel = startLevel + 1;
 
-      // The strengthening pearl for the current level band.
-      if (
-        startLevel >= 0 &&
-        startLevel <= 9 &&
-        (await this.goodsCount(uid, GOODS_STRONG_PEARL)) <= 0
-      ) {
-        throw GameError.lang('equipment.no_strong_pearl');
+      // The strengthening stone for the current level band.
+      const lowStone = zuoji ? GOODS_LINGTONG : GOODS_STRONG_PEARL;
+      const highStone = zuoji ? GOODS_HIGH_LINGTONG : GOODS_HIGH_STRONG_PEARL;
+      if (startLevel >= 0 && startLevel <= 9 && (await this.goodsCount(uid, lowStone)) <= 0) {
+        throw GameError.lang(zuoji ? 'equipment.no_tlgc_goods' : 'equipment.no_strong_pearl');
       }
-      if (
-        startLevel >= 10 &&
-        startLevel <= 15 &&
-        (await this.goodsCount(uid, GOODS_HIGH_STRONG_PEARL)) <= 0
-      ) {
-        throw GameError.lang('equipment.no_high_strong_pearl');
+      if (startLevel >= 10 && startLevel <= 15 && (await this.goodsCount(uid, highStone)) <= 0) {
+        throw GameError.lang(
+          zuoji ? 'equipment.no_gjltgc_goods' : 'equipment.no_high_strong_pearl',
+        );
       }
 
       await this.strongLimit(armor, cid);
-      if (phpLooseEquals(armor.part, PART_HORSE)) throw GameError.lang('equipment.is_zuoji');
 
       const inAct = !phpEmpty(
         await this.cell(sql`select actid from cfg_act where actid = ${ACT_STRONG}
@@ -222,14 +295,19 @@ export class BlackSmithCommands {
       if (inAct) succAdd += 3;
 
       const ret: unknown[] = [1];
-      const sucVal = phpNum(next.suc_value) * (1 + succAdd / 100);
+      // A mount past level 10 has its own odds; the table still gives the value and 洗练 rate.
+      const baseRate =
+        zuoji && nlevel > 10 ? (HORSE_HIGH_STRONG_RATE[nlevel] ?? 0) : phpNum(next.suc_value);
+      const sucVal = baseRate * (1 + succAdd / 100);
       let isSucc = this.random.rand() % 10000 < sucVal * 100;
       isSucc = await this.reCalculateSuccess(armor, inAct, isSucc);
 
-      let bestQuality: string | null = phpString(armor.best_quality) || null;
+      // Only a success sets it; a failure answers null even when the piece has one.
+      let bestQuality: string | null = null;
       let endLevel = startLevel;
 
       if (isSucc) {
+        bestQuality = phpString(armor.best_quality) || null;
         if (!bestQuality) {
           bestQuality = await this.getBestQuality(phpNum(next.xilian_rate), phpIntval(armor.type));
         }
@@ -300,10 +378,9 @@ export class BlackSmithCommands {
 
       if (good1Count === 1) await this.goods.addGoods(uid, gid1, -1, 0);
       if (good2Count === 1) await this.goods.addGoods(uid, gid2, -1, 0);
-      if (startLevel <= 9) await this.goods.addGoods(uid, GOODS_STRONG_PEARL, -1, 0);
-      else await this.goods.addGoods(uid, GOODS_HIGH_STRONG_PEARL, -1, 0);
+      await this.goods.addGoods(uid, startLevel <= 9 ? lowStone : highStone, -1, 0);
 
-      await this.users.logUserAction(uid, ACTION_STRONG);
+      await this.users.logUserAction(uid, zuoji ? ACTION_HORSE_STRONG : ACTION_STRONG);
       const useGoods = `${gid1},${good1Count},${gid2},${good2Count}`;
       await sql`insert into log_armor_strong values (${uid}, ${sid}, ${armor.armorid}, ${isZuoji},
         ${startLevel}, ${endLevel}, ${useGoods}, ${isSucc ? 1 : 0}, unix_timestamp())`.execute(db);
@@ -494,7 +571,10 @@ export class BlackSmithCommands {
         where sid = ${sid}`.execute(db);
       await sql`update mem_city_resource set gold = gold - ${reduceGold}
         where cid = ${cid}`.execute(db);
-      await this.users.logUserAction(uid, ACTION_OPEN_HOLE);
+      await this.users.logUserAction(
+        uid,
+        part !== PART_HORSE ? ACTION_OPEN_HOLE : ACTION_TAME_HORSE,
+      );
       await this.tasks.completeTaskWithTaskid(uid, 103802);
       return [reduceGold];
     });
@@ -623,37 +703,78 @@ export class BlackSmithCommands {
     }
   }
 
-  /** `[sid, pos, gid]`: set a pearl in a hole. Answers `[1, 0, pearls, cfgRows]` (or `[0, msg]`). */
+  /**
+   * EquipmentFunc.php::doEmbed: a 马装 needs the mount's level (10 per grade), 战神马装 a purple
+   * mount, and the 冰封 / 赤龙 / 的卢 pieces their own mount. `ownedGid` is the bag row's gid
+   * (0 when the player has none, which the original reports as `not_zuoji_goods`).
+   */
+  private zuojiGoodsLimit(armor: Row, ownedGid: number, gid: number): void {
+    const g = ownedGid;
+    if ((g >= 400 && g <= 500) || (g >= 502 && g <= 582) || (g >= 1400 && g <= 1500)) {
+      if ((((g - 400) % 20) + 1) * 10 > phpNum(armor.hero_level)) {
+        throw GameError.lang('equipment.zuoji_goods_level0');
+      }
+    } else if (g >= 12178 && g <= 12182) {
+      if (phpIntval(armor.type) !== 5) throw GameError.lang('equipment.can_not_exist');
+    } else {
+      throw GameError.lang('equipment.not_zuoji_goods');
+    }
+    const own = (ids: number[], armorId: number) => {
+      if (ids.includes(gid) && !phpLooseEquals(armor.id, armorId)) {
+        throw GameError.lang('equipment.not_zuoji_goods_2');
+      }
+    };
+    own([409, 429, 449, 469, 489], 53016);
+    own([410, 430, 450, 470, 490], 12011);
+    own([1401, 1421, 1441, 1461, 1481], 12015);
+  }
+
+  /**
+   * `[sid, pos, gid, is_zuoji]`: set a pearl in a hole of gear, or a 马装 on a mount (is_zuoji =
+   * 1, from the barn). Answers `[1, 0, pearls, cfgRows]` (or `[0, msg]`).
+   */
   @GlobalCommand()
   async doEmbed(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
     const { uid } = ctx;
     const sid = phpIntval(param[0]);
     const pos = phpIntval(param[1]);
     const gid = phpIntval(param[2]);
+    const zuoji = phpLooseEquals(param[3], 1);
     return this.scope.transaction(async () => {
       const db = this.scope.db;
       const armor = await this.row(sql`select * from sys_user_armor s
         left join cfg_armor c on s.armorid = c.id where s.sid = ${sid} and s.uid = ${uid}`);
       if (!armor) return [0, this.msg('equipment.no_such_armor')];
-      if (phpLooseEquals(armor.part, PART_HORSE)) throw GameError.lang('equipment.data_exception');
+      const horse = phpLooseEquals(armor.part, PART_HORSE);
+      if (horse !== zuoji) throw GameError.lang('equipment.data_exception');
       if (phpEmpty(armor.embed_holes) || phpString(armor.embed_holes) === '') {
         throw GameError.lang('equipment.no_pos');
       }
       const holes = phpString(armor.embed_holes).split(',');
       if (phpIntval(holes[pos]) !== 0) throw GameError.lang('equipment.no_pos');
       if (!phpLooseEquals(armor.hid, 0)) throw GameError.lang('equipment.armor_in_hero');
+      // 战神马装 fits purple mounts only.
+      if (gid >= 12178 && gid <= 12182) {
+        if (!horse) throw GameError.lang('equipment.data_exception');
+        if (phpIntval(armor.type) !== 5) throw GameError.lang('equipment.can_not_exist');
+      }
+      if (zuoji && !zuojiHoleFits(gid, pos)) throw GameError.lang('equipment.invalid_pos');
 
       const goods = await this.row(
         sql`select * from sys_goods where uid = ${uid} and gid = ${gid}`,
       );
-      this.embedLimit(armor, gid);
-      if (!goods || phpNum(goods.count) <= 0) throw GameError.lang('equipment.no_embed_pearl');
+      if (zuoji) this.zuojiGoodsLimit(armor, goods ? phpIntval(goods.gid) : 0, gid);
+      else this.embedLimit(armor, gid);
+      if (!goods) throw GameError.lang('equipment.no_embed_pearl');
+      if (phpNum(goods.count) <= 0) {
+        throw GameError.lang(horse ? 'equipment.no_embed_zuoji_armor' : 'equipment.no_embed_pearl');
+      }
 
       const oldPearls = phpString(armor.embed_pearls);
       const ary = oldPearls.split(',');
       if (phpIntval(ary[pos]) !== 0) throw GameError.lang('waigua.invalid');
 
-      const pearls = this.assembleEmbedHoles(ary, pos, gid, 0);
+      const pearls = this.assembleEmbedHoles(ary, pos, gid, zuoji ? 1 : 0);
       const ret: unknown[] = [1, 0];
       if (pearls !== oldPearls) {
         await sql`update sys_user_armor set embed_pearls = ${pearls}
@@ -915,6 +1036,387 @@ export class BlackSmithCommands {
       ret.push(await this.skillBookTab(uid));
       return ret;
     });
+  }
+
+  // ---------------------------------------------------------------- 洗练
+
+  /** `[xilianIndex]`: the chosen 洗练 stone with the player's count; answers `[goods]`. */
+  @GlobalCommand()
+  async loadXilianGoods(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const index = phpIntval(param[0]);
+    if (index > 2 || index < 0) throw GameError.lang('xilian.param_error');
+    const gid = XILIAN_GIDS[index]!;
+    const info: Row = { ...(await this.row(sql`select * from cfg_goods where gid = ${gid}`)) };
+    const count = await this.cell(
+      sql`select count from sys_goods where gid = ${gid} and uid = ${ctx.uid}`,
+    );
+    info.count = phpEmpty(count) ? 0 : count;
+    return [info];
+  }
+
+  /**
+   * `[xilianIndex, gid, sid]`: 祝融之符 (index 0) rolls a 极品 attribute onto a piece without
+   * one, 清洗符 (1) wipes it, 洗练符 (2) re-rolls it for 1-4 stones by colour. Answers
+   * `[bestQuality, stonesSpent]`.
+   */
+  @GlobalCommand()
+  async doXilian(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const { uid } = ctx;
+    if (param.length !== 3) throw GameError.lang('xilian.param_error');
+    const index = phpIntval(param[0]);
+    const gid = phpIntval(param[1]);
+    const sid = phpIntval(param[2]);
+    if (index > 2 || index < 0 || gid !== XILIAN_GIDS[index]) {
+      throw GameError.lang('xilian.param_error');
+    }
+    return this.scope.transaction(async () => {
+      const db = this.scope.db;
+      const armor = await this.row(sql`select * from sys_user_armor s
+        left join cfg_armor c on s.armorid = c.id where s.sid = ${sid} and s.uid = ${uid}`);
+      if (!armor) throw GameError.lang('equipment.no_such_armor');
+      const hasBest = !phpEmpty(armor.best_quality);
+      const owned = await this.goodsCount(uid, gid);
+
+      if (index === 1) {
+        if (!hasBest) throw GameError.lang('xilian.xilian_not_exist');
+        if (owned < 1) throw GameError.raw(`not_enough_goods${gid}`);
+        await sql`update sys_user_armor set best_quality = null
+          where uid = ${uid} and sid = ${sid}`.execute(db);
+        await this.goods.addGoods(uid, gid, -1, 0);
+        return ['', 1];
+      }
+
+      let count = 1;
+      if (index === 0) {
+        if (hasBest) throw GameError.lang('xilian.xilian_exist');
+        if (owned < 1) throw GameError.lang('xilian.lack_xilian');
+      } else {
+        if (!hasBest) throw GameError.lang('xilian.xilian_not_exist');
+        count = xilianStoneCount(phpIntval(armor.type));
+        if (count === 0) throw GameError.lang('xilian.xilian_not_open');
+        if (owned < count) throw GameError.raw(`not_enough_goods${gid}#${count - owned}`);
+      }
+      const best = await this.getBestQuality(100, phpIntval(armor.type));
+      if (best) {
+        await sql`update sys_user_armor set best_quality = ${best}
+          where uid = ${uid} and sid = ${sid}`.execute(db);
+      }
+      await this.goods.addGoods(uid, gid, -count, 0);
+      return [best, count];
+    });
+  }
+
+  // ---------------------------------------------------------------- 熔炼
+
+  /** `[index]`: every fusable (set, combine level) group the player owns, with its count. */
+  @GlobalCommand()
+  async loadFusionableArmor(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const rows = await this.rows(sql`select a.*, b.combine_level, count(b.armorid) as \`count\`
+      from cfg_armor a, sys_user_armor b where a.id = b.armorid and b.uid = ${ctx.uid}
+      and a.part <> '12' and (a.tieid in (${sql.join(FUSION_TIES)})
+      or a.id in (${sql.join(FUSION_IDS)}))
+      group by a.id, b.combine_level order by a.id, b.combine_level`);
+    return [param[0] ?? null, rows];
+  }
+
+  /** The `partTie` filter of loadPartArmor / reloadArmor, or null for an unknown index. */
+  private fusionFilter(partTie: unknown, reload: boolean): RawBuilder<unknown> | null {
+    const key = phpString(partTie);
+    if (key === '0') {
+      return sql`(a.tieid in (${sql.join(reload ? RELOAD_ALL_TIES : FUSION_TIES)})
+        or a.id in (${sql.join(FUSION_IDS)}))`;
+    }
+    if (key === '10') return sql`a.id in (${sql.join(FUSION_IDS)})`;
+    const tie = FUSION_FILTER_TIE[key];
+    return tie === undefined ? null : sql`a.tieid = ${tie}`;
+  }
+
+  /** `[part, partTie]`: the unworn fusable pieces of one part and set filter. */
+  @GlobalCommand()
+  async loadPartArmor(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const part = phpIntval(param[0]);
+    const partTie = param[1] ?? null;
+    const filter = this.fusionFilter(partTie, false);
+    // An unknown filter leaves the list unset, and the original's foreach over it warns.
+    if (!filter) throw GameError.raw(FOREACH_WARNING);
+    const armors = await this.rows(sql`select * from cfg_armor a
+      left join sys_user_armor b on a.id = b.armorid where b.uid = ${ctx.uid} and a.part <> '12'
+      and a.part = ${part} and b.hid = '0' and ${filter} order by b.combine_level desc`);
+    return [part, partTie, ...(await this.armors.armorListReply(armors))];
+  }
+
+  /** `[chosenSids, part, partTie]`: loadPartArmor without the pieces already in the 熔炼 slots. */
+  @GlobalCommand()
+  async reloadArmor(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const chosen = Array.isArray(param[0]) ? (param[0] as unknown[]) : [];
+    const part = phpIntval(param[1]);
+    const partTie = param[2] ?? null;
+    const sids = [0, 1, 2].map((i) => phpIntval(chosen[i]));
+    const filter = this.fusionFilter(partTie, true);
+    if (!filter) throw GameError.raw(FOREACH_WARNING);
+    const armors = await this.rows(sql`select * from cfg_armor a
+      left join sys_user_armor b on a.id = b.armorid where b.uid = ${ctx.uid} and a.part <> '12'
+      and a.part = ${part} and b.hid = '0' and b.sid not in (${sql.join(sids)}) and ${filter}
+      order by b.combine_level desc`);
+    return [part, partTie, ...(await this.armors.armorListReply(armors))];
+  }
+
+  /** Copies one piece into log_armor_combine before 熔炼 consumes it. */
+  private async logCombine(sid: number, usegoods: number, success: number, mainSid: number) {
+    await sql`insert into log_armor_combine (sid, uid, armorid, hp, hp_max, hid, strong_level,
+      strong_value, embed_pearls, embed_holes, deified, active_special, strong_times,
+      combine_level, usegoods, success, mainsid, time)
+      select sid, uid, armorid, hp, hp_max, hid, strong_level, strong_value, embed_pearls,
+      embed_holes, deified, active_special, strong_times, combine_level, ${String(usegoods)},
+      ${String(success)}, ${String(mainSid)}, unix_timestamp() from sys_user_armor
+      where sid = ${sid}`.execute(this.scope.db);
+  }
+
+  /**
+   * `[mainSid, 1, subSid1, subSid2, useProtect]`: fuse three equal pieces of one combine level.
+   * Success raises the main piece a level and consumes the two others; failure without the
+   * 熔炼保护符 loses all three. Answers `[1, protectGoods, newArmor, ...otherInfo]` or
+   * `[0, protectGoods, useProtect]`.
+   */
+  @GlobalCommand()
+  async combineArmor(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const { uid } = ctx;
+    if (param.length < 5) throw GameError.lang('useMojiaGoods.invalid_param');
+    const mainSid = phpIntval(param[0]);
+    if (!phpLooseEquals(param[1], 1)) throw GameError.lang('useMojiaGoods.invalid_param');
+    const sub1 = phpIntval(param[2]);
+    const sub2 = phpIntval(param[3]);
+    const goodsFlag = param[4];
+    const flag = phpNum(goodsFlag);
+    if (sub1 === 0 || sub2 === 0) throw GameError.lang('waigua.invalid');
+    if (flag > 1 || flag < 0) throw GameError.lang('waigua.invalid');
+    if (mainSid === sub1 || mainSid === sub2 || sub1 === sub2) {
+      throw GameError.lang('waigua.invalid');
+    }
+
+    return this.scope.transaction(async () => {
+      const db = this.scope.db;
+      const mainArmorId = await this.cell(sql`select armorid from sys_user_armor
+        where sid = ${mainSid} and uid = ${uid}`);
+      if (phpEmpty(mainArmorId)) throw GameError.lang('waigua.invalid');
+      const part = await this.cell(sql`select a.part from cfg_armor a, sys_user_armor b
+        where a.id = b.armorid and b.sid = ${mainSid}`);
+      if (phpLooseEquals(part, PART_HORSE)) throw GameError.lang('combine.zuoji');
+      const sub = (sid: number) =>
+        this.row(sql`select * from sys_user_armor where uid = ${uid} and sid = ${sid}
+          and armorid = ${mainArmorId}`);
+      if (!(await sub(sub1)) || !(await sub(sub2))) throw GameError.lang('waigua.invalid');
+      if (await this.row(sql`select * from sys_hero_armor where sid in (${sub1}, ${sub2})`)) {
+        throw GameError.lang('equipment.armor_in_hero');
+      }
+
+      const levelOf = (sid: number) =>
+        this.cell(sql`select combine_level from sys_user_armor where sid = ${sid}`);
+      const level = await levelOf(mainSid);
+      const level1 = await levelOf(sub1);
+      const level2 = await levelOf(sub2);
+      if (!phpLooseEquals(level, level1) || !phpLooseEquals(level, level2)) {
+        throw GameError.lang('combine.level_not_eq');
+      }
+      const combineLevel = phpIntval(level);
+      if (combineLevel >= 7) throw GameError.lang('useGoods.hero_card_6');
+
+      const goodsCell = (gid: number) =>
+        this.cell(sql`select count from sys_goods where uid = ${uid} and gid = ${gid}`);
+      const mustGoods = combineLevel >= 3 ? GOODS_FUSION_HIGH : GOODS_FUSION_LOW;
+      if (phpEmpty(await goodsCell(mustGoods))) {
+        throw GameError.lang(
+          mustGoods === GOODS_FUSION_LOW
+            ? 'equipment.not_enough_fusionGood1'
+            : 'equipment.not_enough_fusionGood2',
+        );
+      }
+      // The original "spends" gid -11 when no protection is used, leaving a -1 row behind.
+      let usegoods = -11;
+      if (flag === 1) {
+        usegoods = GOODS_FUSION_PROTECT;
+        if (phpEmpty(await goodsCell(usegoods))) {
+          throw GameError.raw(`not_enough_goods${usegoods}`);
+        }
+      }
+
+      const rate = FUSION_RATE[combineLevel + 1] ?? 0;
+      const success = this.random.randRange(1, 10000) < rate * 100 ? 1 : 0;
+      if (success === 1) {
+        await sql`update sys_user_armor set combine_level = least(7, combine_level + 1)
+          where sid = ${mainSid}`.execute(db);
+        await this.logCombine(sub1, usegoods, success, mainSid);
+        await this.logCombine(sub2, usegoods, success, mainSid);
+        await sql`delete from sys_user_tie_deify_attribute
+          where sid in (${sub1}, ${sub2})`.execute(db);
+        await sql`delete from sys_user_armor where sid in (${sub1}, ${sub2})`.execute(db);
+      } else if (flag === 0) {
+        await this.logCombine(mainSid, usegoods, success, mainSid);
+        await this.logCombine(sub1, usegoods, success, mainSid);
+        await this.logCombine(sub2, usegoods, success, mainSid);
+        await sql`delete from sys_user_tie_deify_attribute
+          where sid in (${sub1}, ${sub2}, ${mainSid})`.execute(db);
+        await sql`delete from sys_user_armor where sid in (${sub1}, ${sub2}, ${mainSid})`.execute(
+          db,
+        );
+      }
+      if (success === 1 && combineLevel >= 3) {
+        const userName = await this.cell(sql`select name from sys_user where uid = ${uid}`);
+        const armorName = await this.cell(
+          sql`select name from cfg_armor where id = ${mainArmorId}`,
+        );
+        const levels = this.lang.value<Record<string, unknown>>('combine')?.['armor_level'] as
+          Record<string, string> | undefined;
+        const levelName = phpString(levels?.[String(combineLevel + 1)]);
+        await this.users.sendSysInform({
+          type: 0,
+          inuse: 1,
+          starttime: 0,
+          endtime: 60,
+          interval: 0,
+          scrollcount: 1,
+          color: INFORM_COLOR,
+          msg: this.msg('combine.upgrade_armor', userName, levelName + phpString(armorName)),
+        });
+      }
+      await this.goods.addGoods(uid, mustGoods, -1, 0);
+      await this.goods.addGoods(uid, usegoods, -1, 0);
+
+      const fusionPro =
+        (await this.row(sql`select c.*, g.count from cfg_goods c
+          left join sys_goods g on g.gid = c.gid and g.uid = ${uid}
+          where c.gid = ${GOODS_FUSION_PROTECT}`)) ?? false;
+      if (success === 1) {
+        const newArmor = await this.rows(sql`select * from cfg_armor a
+          left join sys_user_armor b on a.id = b.armorid where b.uid = ${uid}
+          and b.sid = ${mainSid}`);
+        return [success, fusionPro, ...(await this.armors.armorListReply(newArmor))];
+      }
+      return [success, fusionPro, goodsFlag];
+    });
+  }
+
+  // ------------------------------------------------------------- 装备升级
+
+  /**
+   * ArmorFunc.php::checkAndReduceUpgradeGood: spend the two materials (and the 保护符) of a set's
+   * upgrade, answering the `gid,count,...` string of what is left.
+   */
+  private async reduceUpgradeGoods(uid: number, tieid: number, protect: boolean): Promise<string> {
+    const pair = UPGRADE_GOODS[tieid];
+    if (!pair) throw GameError.lang('upgradeArmor.armor_cannot_upgrade');
+    const [gid1, gid2] = pair;
+    const owned = (gid: number) =>
+      this.cell(sql`select count from sys_goods where uid = ${uid} and gid = ${gid}`);
+    const c1 = await owned(gid1);
+    if (phpEmpty(c1) || phpIntval(c1) < 1) {
+      throw GameError.lang('upgradeArmor.material_not_enough');
+    }
+    const c2 = await owned(gid2);
+    if (phpEmpty(c2) || phpIntval(c2) < 1) {
+      throw GameError.lang('upgradeArmor.material_not_enough');
+    }
+    if (protect) {
+      const c = await owned(GOODS_UPGRADE_PROTECT);
+      if (phpEmpty(c) || phpIntval(c) < 1) {
+        throw GameError.lang('upgradeArmor.protect_not_enough');
+      }
+      await this.goods.addGoods(uid, GOODS_UPGRADE_PROTECT, -1, LOG_UPGRADE);
+    }
+    await this.goods.addGoods(uid, gid1, -1, LOG_UPGRADE);
+    await this.goods.addGoods(uid, gid2, -1, LOG_UPGRADE);
+    const left = async (gid: number) =>
+      phpString(
+        await this.cell(sql`select greatest(0, count) from sys_goods
+          where uid = ${uid} and gid = ${gid}`),
+      );
+    return `${gid1},${await left(gid1)},${gid2},${await left(gid2)},${GOODS_UPGRADE_PROTECT},${await left(GOODS_UPGRADE_PROTECT)}`;
+  }
+
+  /**
+   * `[sid, isProtected]`: upgrade an unworn 名将 / 冰封 / 神武 piece into the next set (30 / 20 /
+   * 15%). A failure destroys the piece unless protected (名将 keeps it 20% of the time). Answers
+   * `[msg, goodsLeft, isProtected, isSucc, [armors, ...otherInfo]]`.
+   */
+  @GlobalCommand()
+  async doUpgradeArmor(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const { uid } = ctx;
+    const sid = phpIntval(param[0]);
+    const isProtected = param[1] ?? null;
+    const protect = !phpEmpty(isProtected);
+    if (sid <= 0) throw GameError.lang('hero.xidian_unvalid');
+    return this.scope.transaction(async () => {
+      const db = this.scope.db;
+      const armor = await this.row(sql`select c.tieid, s.* from cfg_armor c, sys_user_armor s
+        where c.id = s.armorid and s.uid = ${uid} and s.sid = ${sid} and s.hid = 0`);
+      if (!armor) throw GameError.lang('equipArmor.arm_not_exist');
+      const tieid = phpIntval(armor.tieid);
+      const goodStr = await this.reduceUpgradeGoods(uid, tieid, protect);
+
+      const rate = UPGRADE_RATE[tieid];
+      const roll = this.random.mtRand(1, 100);
+      let isSucc = 0;
+      let target = 0;
+      let cut = false;
+      if (rate !== undefined && roll <= rate) {
+        isSucc = 1;
+        target = phpIntval(armor.armorid) + (UPGRADE_ID_ADD[tieid] ?? 0);
+      } else {
+        cut = true;
+        if (tieid === 11002 && this.random.mtRand(1, 100) <= 20) cut = false;
+        if (protect) cut = false;
+      }
+      if (isSucc === 1) {
+        await sql`update sys_user_armor set armorid = ${target} where sid = ${sid} limit 1`.execute(
+          db,
+        );
+        // 冰封 -> 冰魂 and 神武 -> 神龙 gain the 聚魂 hole and more durability.
+        if (tieid === 12003) {
+          await sql`update sys_user_armor set embed_holes = '0,0,0,0,4', hp_max = '300',
+            hp = '3000' where sid = ${sid} limit 1`.execute(db);
+        } else if (tieid === 10008) {
+          await sql`update sys_user_armor set embed_holes = '0,0,0,0,4', hp_max = '200',
+            hp = '2000' where sid = ${sid} limit 1`.execute(db);
+        }
+      } else if (cut) {
+        await sql`delete from sys_user_armor where sid = ${sid} limit 1`.execute(db);
+      }
+
+      let msg: string;
+      if (isSucc === 1) {
+        const name = await this.cell(sql`select name from cfg_armor where id = ${target} limit 1`);
+        msg = this.msg('upgradeArmor.upgrade_succ', phpString(name));
+      } else {
+        msg = this.msg(protect ? 'upgradeArmor.upgrade_fail_1' : 'upgradeArmor.upgrade_fail_2');
+      }
+      const one = await this.rows(sql`select * from sys_user_armor a
+        left join cfg_armor c on c.id = a.armorid where a.uid = ${uid} and a.sid = ${sid} limit 1`);
+      return [msg, goodStr, isProtected, isSucc, await this.armors.armorListReply(one)];
+    });
+  }
+
+  // ------------------------------------------------------- 未激活装备 / 坐骑
+
+  /** `[part, type]`: the player's unworn, not yet activated gear of one part (type 0 = all). */
+  @GlobalCommand()
+  async loadUnActivePartArmor(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const part = phpIntval(param[0]);
+    const type = phpIntval(param[1]);
+    const typeFilter = type === 0 ? sql`` : sql`and c.type = ${String(type)}`;
+    const armors = await this.rows(sql`select * from sys_user_armor s
+      left join cfg_armor c on s.armorid = c.id where uid = ${ctx.uid}
+      and (embed_holes = '' or embed_holes is null) and hid = 0 and c.part = ${String(part)}
+      ${typeFilter}`);
+    return this.armors.armorListReply(armors);
+  }
+
+  /** The player's untamed mounts (no holes yet), for the barn's 驯服 tab. */
+  @GlobalCommand()
+  async loadUnActiveHorseArmor(ctx: CommandContext): Promise<unknown[]> {
+    const armors = await this.rows(sql`select * from sys_user_armor s
+      left join cfg_armor c on s.armorid = c.id where uid = ${ctx.uid}
+      and (embed_holes = '' or embed_holes is null) and hid = 0 and c.part = 12`);
+    return this.armors.armorListReply(armors);
   }
 
   /** A lang string, matching PHP's sprintf-on-throw use for the inline `[0, msg]` replies. */

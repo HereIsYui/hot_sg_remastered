@@ -18,13 +18,84 @@ export const BLACKSMITH_TABS = {
 /** 坐骑 part id; the smithy handles only gear. */
 export const PART_HORSE = 12;
 
-/** The 强化/镶嵌/合成/技能书 tabs are ported; the rest show a not-yet-open notice. */
-export const PORTED_TABS = new Set<number>([
-  BLACKSMITH_TABS.Strong,
-  BLACKSMITH_TABS.Embed,
-  BLACKSMITH_TABS.PearlUpgrade,
-  BLACKSMITH_TABS.SkillBook,
-]);
+/** `xilianChoose`: the three 洗练 stones by index, and how many one use spends. */
+export const XILIAN_GOODS: readonly {
+  gid: number;
+  label: string;
+  count: (type: number) => number;
+}[] = [
+  { gid: 12079, label: 'xilian_goods_zhurong', count: () => 1 },
+  { gid: 12080, label: 'xilian_goods_qingxi', count: () => 1 },
+  { gid: 12081, label: 'xilian_goods_xilian', count: (type) => xilianStoneCount(type) },
+];
+
+/** `useXilian`: 洗练符 per re-roll by colour (0 when the colour cannot be re-rolled). */
+export function xilianStoneCount(type: number): number {
+  if (type >= 1 && type <= 3) return 1;
+  return ({ 4: 2, 5: 3, 6: 4 } as Record<number, number>)[type] ?? 0;
+}
+
+/**
+ * `useZhurong` / `useQingxi` / `useXilian` guards: the alert that blocks using stone `index`
+ * with `count` owned on a piece whose 极品 attribute is `best`, or null. The original never
+ * checks the 洗练符 count (its test is inverted); the server's buy popup covers it.
+ */
+export function xilianBlockReason(index: number, count: number, best: string): string | null {
+  const has = best !== '';
+  if (index === 0) {
+    if (count <= 0) return i18n('xilian_lack_zhurong');
+    if (has) return i18n('xilian_exist');
+  } else if (index === 1) {
+    if (count <= 0) return i18n('xilian_lack_qingxi');
+    if (!has) return i18n('xilian_not_exist');
+  } else if (!has) {
+    return i18n('xilian_not_exist');
+  }
+  return null;
+}
+
+/** 熔炼保护符, shown in the 熔炼 tab from loadEquitmentInfor. */
+export const GOODS_FUSION_PROTECT = 10778;
+
+/**
+ * `ArmorItem.menuHandler`: why a listed piece cannot go into a 熔炼 slot — the slot is taken, or
+ * it differs in piece / combine level from those already chosen — as an i18n key, or null.
+ */
+export function fusionSlotError(chosen: Row[], slotFilled: boolean, row: Row): string | null {
+  if (slotFilled) return 'BlackSmith_FusionArmorHasExist';
+  const first = chosen[0];
+  if (
+    first &&
+    (int(first.armorid) !== int(row.armorid) || int(first.combine_level) !== int(row.combine_level))
+  ) {
+    return 'BlackSmith_FusionArmorNotUnify_1';
+  }
+  return null;
+}
+
+/** `doFusion`: the three slots must be filled with the same piece; an i18n key, or null. */
+export function fusionSubmitError(slots: readonly (Row | null)[]): string | null {
+  if (slots.some((s) => !s)) return 'BlackSmith_FusionArmorNotFull';
+  if (new Set(slots.map((s) => int(s!.armorid))).size > 1) return 'BlackSmith_FusionArmorNotUnify';
+  return null;
+}
+
+/** 升级保护符. */
+export const GOODS_UPGRADE_PROTECT = 12157;
+
+/** `setUpgradeArmorMater`: the [set material, 龙骨玉] an upgradable set needs, else null. */
+export function upgradeMaterials(tieid: number): [number, number] | null {
+  const own = ({ 11002: 12159, 12003: 12160, 10008: 12161 } as Record<number, number>)[tieid];
+  return own ? [own, 12158] : null;
+}
+
+/** `parsePropGood`: the `gid,count,gid,count,...` left-over string of doUpgradeArmor. */
+export function parseGoodsCounts(s: unknown): Map<number, number> {
+  const out = new Map<number, number>();
+  const parts = (s == null ? '' : String(s)).split(',');
+  for (let i = 0; i + 1 < parts.length; i += 2) out.set(int(parts[i]), int(parts[i + 1]));
+  return out;
+}
 
 /**
  * `BSCommandDialog.parseEmbedHoles`: an `embed_holes` string into five hole codes.

@@ -1786,6 +1786,219 @@ export const cases: DiffCase[] = [
     },
   },
   {
+    name: 'smithy 洗练 / 熔炼 / 装备升级 and the barn tames, strengthens and dresses mounts',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const LORD = 80213;
+      const cmd = (func: string, ...args: unknown[]) => s.command(session, func, ...args);
+      // Lists sorted by combine level only (or not at all) have no deterministic tie order.
+      const list = async (from: number, func: string, ...args: unknown[]) => {
+        await cmd(func, ...args);
+        for (let i = from; i < from + 7; i++) s.unordered(4, i);
+      };
+      const combine = async (...args: unknown[]) => {
+        await cmd('combineArmor', ...args);
+        for (let i = 2; i < 9; i++) s.unordered(4, i);
+      };
+      const upgrade = async (...args: unknown[]) => {
+        await cmd('doUpgradeArmor', ...args);
+        for (let i = 0; i < 7; i++) s.unordered(4, 4, i);
+      };
+      const give = async (gid: number, count: number) => {
+        await s.query(
+          `insert into sys_goods (uid, gid, count) values (?, ?, ?)
+           on duplicate key update count = ?`,
+          [uid, gid, count, count],
+        );
+      };
+      const XILIAN = 900701;
+      const F = [900711, 900712, 900713, 900714, 900715, 900716];
+      const F_HIGH = [900721, 900722, 900723];
+      const F_MAX = [900724, 900725, 900726];
+      const F_LEVEL1 = 900727;
+      const F_OTHER = 900728;
+      const MINGJIANG = [900731, 900732, 900733];
+      const SHENWU = 900734;
+      const LONGYUAN = 900735;
+      const WORN = 900736;
+      const HORSE = 900741;
+      const HORSE_BLUE = 900742;
+      const pieces: [
+        sid: number,
+        armorid: number,
+        holes: string,
+        level: number,
+        combine: number,
+      ][] = [
+        [XILIAN, 53001, '0,0,0,0,3', 0, 0],
+        ...F.map((sid): [number, number, string, number, number] => [sid, 10103, '', 0, 0]),
+        ...F_HIGH.map((sid): [number, number, string, number, number] => [sid, 10103, '', 0, 3]),
+        ...F_MAX.map((sid): [number, number, string, number, number] => [sid, 10103, '', 0, 7]),
+        [F_LEVEL1, 10103, '', 0, 1],
+        [F_OTHER, 10191, '', 0, 0],
+        ...MINGJIANG.map((sid): [number, number, string, number, number] => [sid, 10191, '', 0, 0]),
+        [SHENWU, 12001, '', 0, 0],
+        [LONGYUAN, 53029, '', 0, 0],
+        [WORN, 10191, '', 0, 0],
+        [HORSE, 12011, '', 0, 0],
+        [HORSE_BLUE, 10098, '0,0,0,0,0', 10, 0],
+      ];
+      for (const [sid, armorid, holes, level, combine] of pieces) {
+        await s.query(
+          `insert into sys_user_armor (sid, uid, armorid, hp, hp_max, hid, strong_level,
+             strong_value, embed_holes, embed_pearls, combine_level)
+           values (?, ?, ?, 1000, 100, 0, ?, 0, ?, '0,0,0,0,0', ?)`,
+          [sid, uid, armorid, level, holes, combine],
+        );
+      }
+      await s.query('update sys_user_armor set hid = ? where sid = ?', [LORD, WORN]);
+
+      // 洗练: 祝融之符 adds a 极品 attribute, 清洗符 wipes it, 洗练符 re-rolls it.
+      for (const index of [0, 1, 2, 3]) await cmd('loadXilianGoods', index);
+      await cmd('doXilian', 0, 12079);
+      await cmd('doXilian', 1, 12079, XILIAN);
+      await cmd('doXilian', 0, 12079, 999999);
+      await cmd('doXilian', 0, 12079, XILIAN);
+      await give(12079, 2);
+      await give(12080, 1);
+      await give(12081, 1);
+      await cmd('doXilian', 1, 12080, XILIAN);
+      s.rng([0, 4, 1, 1]);
+      await cmd('doXilian', 0, 12079, XILIAN);
+      await cmd('doXilian', 0, 12079, XILIAN);
+      await cmd('doXilian', 2, 12081, XILIAN);
+      await give(12081, 5);
+      s.rng([0, 9, 2, 1]);
+      await cmd('doXilian', 2, 12081, XILIAN);
+      s.stopRng();
+      await cmd('doXilian', 1, 12080, XILIAN);
+      await cmd('doXilian', 1, 12080, XILIAN);
+
+      // 熔炼 lists: groups by (piece, level), and part / set filters minus the chosen slots.
+      await cmd('loadFusionableArmor', 1);
+      await list(2, 'loadPartArmor', 1, 0);
+      await list(2, 'loadPartArmor', 1, 6);
+      await list(2, 'loadPartArmor', 1, 10);
+      await cmd('loadPartArmor', 1, 99);
+      await list(2, 'reloadArmor', [F[0], F[1]], 1, 6);
+
+      // 熔炼 checks the parameters, the pieces, their levels and the stones.
+      await combine(F[0], 1, F[1], F[2]);
+      await combine(F[0], 0, F[1], F[2], 0);
+      await combine(F[0], 1, 0, F[2], 0);
+      await combine(F[0], 1, F[1], F[2], 2);
+      await combine(F[0], 1, F[0], F[2], 0);
+      await combine(999999, 1, F[1], F[2], 0);
+      await combine(HORSE, 1, F[1], F[2], 0);
+      await combine(F[0], 1, F_OTHER, F[2], 0);
+      await s.query(
+        'insert into sys_hero_armor (hid, spart, sid, armorid) values (?, 999, ?, 10103)',
+        [LORD, F[1]],
+      );
+      await combine(F[0], 1, F[1], F[2], 0);
+      await s.query('delete from sys_hero_armor where sid = ?', [F[1]]);
+      await combine(F[0], 1, F[1], F_LEVEL1, 0);
+      await combine(F_MAX[0], 1, F_MAX[1], F_MAX[2], 0);
+      await combine(F[0], 1, F[1], F[2], 0);
+      await combine(F_HIGH[0], 1, F_HIGH[1], F_HIGH[2], 0);
+      await give(10776, 3);
+      await give(10777, 1);
+      await combine(F[0], 1, F[1], F[2], 1);
+
+      // Success raises the main piece; failure keeps all with the 保护符, loses all without.
+      await give(10778, 1);
+      s.rng([9999]);
+      await combine(F[0], 1, F[1], F[2], 1);
+      s.rng([0]);
+      await combine(F[0], 1, F[1], F[2], 0);
+      s.rng([9999]);
+      await combine(F[3], 1, F[4], F[5], 0);
+      s.rng([0]);
+      await combine(F_HIGH[0], 1, F_HIGH[1], F_HIGH[2], 0);
+      s.stopRng();
+      await cmd('loadFusionableArmor', 1);
+
+      // 装备升级: 名将 -> 冰封 -> 冰魂, 神武 -> 神龙; failures lose the piece unless protected.
+      await upgrade(0, false);
+      await upgrade(999999, false);
+      await upgrade(WORN, false);
+      await upgrade(F[0], false);
+      await upgrade(MINGJIANG[0], false);
+      await give(12158, 10);
+      await give(12159, 3);
+      await give(12160, 1);
+      await give(12161, 3);
+      await upgrade(MINGJIANG[0], true);
+      await give(12157, 1);
+      s.rng([29]);
+      await upgrade(MINGJIANG[0], false);
+      s.rng([0]);
+      await upgrade(MINGJIANG[0], false);
+      s.rng([50, 10]);
+      await upgrade(MINGJIANG[1], false);
+      s.rng([50, 50]);
+      await upgrade(MINGJIANG[2], false);
+      s.rng([99]);
+      await upgrade(SHENWU, true);
+      s.rng([0]);
+      await upgrade(SHENWU, false);
+      s.rng([0]);
+      await upgrade(LONGYUAN, false);
+      s.stopRng();
+
+      // Unactivated gear and mounts; taming costs 黄金 and logs its own action.
+      await list(0, 'loadUnActivePartArmor', 1, 0);
+      await list(0, 'loadUnActivePartArmor', 1, 4);
+      await list(0, 'loadUnActivePartArmor', 12, 0);
+      await list(0, 'loadUnActiveHorseArmor');
+      await s.query('update mem_city_resource set gold = 10000000 where cid = ?', [cid]);
+      await cmd('initHoles', cid, HORSE);
+      await cmd('initHoles', cid, HORSE);
+      await upgrade(HORSE, false);
+
+      // The barn strengthens with 灵通甘草 under 驯马技巧; mounts past 10 have their own odds.
+      await cmd('doStrong', cid, 212, 0, 213, 0, HORSE, 0);
+      await cmd('doStrong', cid, 212, 0, 213, 0, XILIAN, 1);
+      await cmd('doStrong', cid, 212, 0, 213, 0, 999999, 1);
+      await cmd('doStrong', cid, 212, 0, 213, 0, HORSE, 1);
+      await give(214, 5);
+      await cmd('doStrong', cid, 212, 1, 213, 0, HORSE, 1);
+      await cmd('doStrong', cid, 212, 0, 213, 0, HORSE, 1);
+      await s.query(
+        `insert into sys_city_technic (cid, tid, level) values (?, 22, 10)
+         on duplicate key update level = 10`,
+        [cid],
+      );
+      await give(212, 1);
+      await give(213, 1);
+      s.rng([0, 50]);
+      await cmd('doStrong', cid, 212, 1, 213, 0, HORSE, 1);
+      s.rng([9999, 50]);
+      await cmd('doStrong', cid, 212, 0, 213, 1, HORSE, 1);
+      await cmd('doStrong', cid, 212, 0, 213, 0, HORSE_BLUE, 1);
+      await give(11171, 2);
+      s.rng([499, 0, 0, 0, 0]);
+      await cmd('doStrong', cid, 212, 0, 213, 0, HORSE_BLUE, 1);
+      s.rng([500, 0]);
+      await cmd('doStrong', cid, 212, 0, 213, 0, HORSE_BLUE, 1);
+      s.stopRng();
+
+      // 马装 go in their own hole, need the mount's level, and some fit one mount only.
+      await give(402, 1);
+      await give(409, 1);
+      await give(442, 0);
+      await cmd('doEmbed', HORSE, 1, 402, 1);
+      await cmd('doEmbed', HORSE, 1, 422, 1);
+      await cmd('doEmbed', HORSE, 0, 409, 1);
+      await cmd('doEmbed', HORSE, 2, 442, 1);
+      await cmd('doEmbed', HORSE, 0, 402, 0);
+      await cmd('doEmbed', HORSE, 0, 402, 1);
+      await cmd('loadZuojiArmor', 1, 12011);
+    },
+  },
+  {
     name: 'hero skills are learnt, books worn and taken off, the shelf grows and books sell',
     run: async (s) => {
       const session = await s.login(EXISTING_PLAYER);

@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue';
 import { armorInfo, dealWithOtherInfoOfArmor, parseArmor, type Armor } from '../../game/armor';
 import {
   BLACKSMITH_TABS,
-  PORTED_TABS,
+  GOODS_FUSION_PROTECT,
   canMergeBook,
   dismantleNeedCount,
   parseEmbedHoles,
@@ -23,10 +23,14 @@ import FxLabel from '../../ui/FxLabel.vue';
 import FxText from '../../ui/FxText.vue';
 import FxTextInput from '../../ui/FxTextInput.vue';
 import UseHuaShiFenDialog from '../goods/UseHuaShiFenDialog.vue';
+import FusionTab from './FusionTab.vue';
+import UnActiveArmorDialog from './UnActiveArmorDialog.vue';
+import UpgradeArmorTab from './UpgradeArmorTab.vue';
+import XilianTab from './XilianTab.vue';
 
 /**
- * BlackSmith.BSCommandDialog: the 铁匠铺 command dialog. 强化 / 镶嵌 / 合成 / 技能书合并 are
- * ported; 洗练 / 熔炼 / 装备升级 show a not-yet-open notice (owned by other flows / later stages).
+ * BlackSmith.BSCommandDialog: the 铁匠铺 command dialog — 洗练 / 强化 / 镶嵌 / 合成 / 技能书合并 /
+ * 熔炼 / 装备升级; 镶嵌 also opens the 装备激活 list (UnActiveArmorDialog).
  */
 const emit = defineEmits<{ close: [] }>();
 
@@ -48,11 +52,12 @@ const usePearlProtect = ref(false);
 const useQiaoShou = ref(false);
 const useSkillProtect = ref(true);
 
-/** 强化 / 镶嵌 selected piece. */
+/** The piece of the 洗练 / 强化 / 镶嵌 / 装备升级 tabs. */
 const picked = shallowRef<Armor | null>(null);
 /** The inline part picker (reuses loadUserPartArmor). */
 const picking = ref<number | null>(null);
 const partArmors = shallowRef<Armor[]>([]);
+const activating = ref(false);
 
 /** 镶嵌: the five holes + pearls of the picked piece, and the pearl list to drop in. */
 const embedHoles = ref<number[]>([3, 3, 3, 3, 3]);
@@ -221,6 +226,12 @@ function chooseArmor(a: Armor) {
   }
 }
 
+// ------------------------------------------------------------------ 洗练
+
+function setBest(quality: string) {
+  if (picked.value) picked.value.row.best_quality = quality as never;
+}
+
 // ------------------------------------------------------------------ 强化
 
 function doStrong() {
@@ -387,7 +398,7 @@ function mergeBook() {
 </script>
 
 <template>
-  <FxCanvas :x="(736 - 650) / 2" :y="(556 - 370) / 2" :w="650" :h="370" style-name="PopupDialog">
+  <FxCanvas :x="14" :y="75" :w="650" :h="370" style-name="PopupDialog">
     <FxButton :right="8" :y="6" style-name="Close" @click="emit('close')" />
 
     <!-- tab bar -->
@@ -406,23 +417,29 @@ function mergeBook() {
       />
     </FxCanvas>
 
-    <!-- not-ported tabs -->
-    <FxCanvas
-      v-if="!PORTED_TABS.has(tab)"
-      :x="4"
-      :y="55"
-      :w="642"
-      :h="310"
-      style-name="BoardListUp"
-    >
-      <FxLabel
-        :x="40"
-        :y="140"
-        :w="560"
-        :fx="{ textAlign: 'center' }"
-        :text="i18n('BlackSmith_NotYetValid')"
-      />
-    </FxCanvas>
+    <XilianTab
+      v-if="tab === BLACKSMITH_TABS.Xilian"
+      :armor="picked"
+      @pick="pickArmor()"
+      @best="setBest"
+    />
+
+    <FusionTab
+      v-else-if="tab === BLACKSMITH_TABS.Fusion"
+      :protect="aid(GOODS_FUSION_PROTECT)"
+      @refresh="refreshAids()"
+    />
+
+    <UpgradeArmorTab
+      v-else-if="tab === BLACKSMITH_TABS.UpgradeArmor"
+      action="blacksmith"
+      :armor="picked"
+      :goods="aids"
+      :desc="i18n('BlackSmith_upgradeArmorDesc')"
+      @pick="pickArmor()"
+      @replace="picked = $event"
+      @refresh="refreshAids()"
+    />
 
     <!-- 强化 -->
     <FxCanvas
@@ -505,6 +522,14 @@ function mergeBook() {
         :h="32"
         :label="embedPearls[pos - 1] ? '●' : embedHoles[pos - 1] === 0 ? '○' : '×'"
         @click="selectHole(pos - 1)"
+      />
+      <FxButton
+        :x="150"
+        :y="250"
+        :w="100"
+        style-name="ButtonYellow"
+        :label="i18n('BS_UnActiveArmor')"
+        @click="activating = true"
       />
       <FxText :x="440" :y="20" :w="190" :h="270" :html="i18n('BlackSmith_EmbedDesc')" />
       <!-- pearl chooser -->
@@ -676,6 +701,8 @@ function mergeBook() {
         />
       </FxCanvas>
     </FxCanvas>
+
+    <UnActiveArmorDialog v-if="activating" @close="activating = false" />
 
     <UseHuaShiFenDialog
       v-if="huaShiFen"

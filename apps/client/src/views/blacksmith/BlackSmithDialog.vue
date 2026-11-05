@@ -1,38 +1,29 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import { i18n } from '../../i18n';
+import { useGame } from '../../game/game';
 import type { BuildingState } from '../../stores/city';
-import FxButton from '../../ui/FxButton.vue';
 import UpgradeBuildingDialog from '../building/UpgradeBuildingDialog.vue';
 import BlackSmithCommandPanel from './BlackSmithCommandPanel.vue';
 
 /**
- * BlackSmith.CityInnerPanel_blacksmith: the 铁匠铺's upgrade dialog with a button that opens the
- * BSCommandDialog (强化 / 镶嵌 / 合成 / 技能书合并).
+ * BlackSmith.BSDialog: the 铁匠铺's upgrade dialog. The original overlays its BSCommandDialog on
+ * `onShow`, so the command panel sits on top once the building is built.
  */
 defineProps<{ x: number; y: number; building: BuildingState }>();
 const emit = defineEmits<{ destroyPanel: [handlers: { all: () => void; level: () => void }] }>();
 
-const open = ref(false);
+const game = useGame();
 </script>
 
 <template>
   <UpgradeBuildingDialog
     :x="x"
     :y="y"
+    :h="492"
     :building="building"
     @destroy-panel="emit('destroyPanel', $event)"
   >
     <template #default="{ level }">
-      <FxButton
-        v-if="level > 0"
-        :x="20"
-        :y="120"
-        style-name="ButtonGreen"
-        :label="i18n('BlackSmith_enter')"
-        @click="open = true"
-      />
+      <BlackSmithCommandPanel v-if="level > 0" @close="game.closeDialog()" />
     </template>
   </UpgradeBuildingDialog>
-  <BlackSmithCommandPanel v-if="open" @close="open = false" />
 </template>

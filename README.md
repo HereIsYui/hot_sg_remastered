@@ -247,6 +247,7 @@ legacy/          本地生成的原版文件（不提交）
 
 - W1 完成：采集 `gatherFieldStart` / `gatherFieldEnd` / `gatherStartAll` / `gatherEndAll`（`world/gather.commands.ts`，含藏宝图、寻宝与采集活动礼包、古朴木匣、名将任务道具；原版 `gatherEndAll` 无排序、按 MyISAM 插入顺序结算，这里按部队 id 排序）、`allowAutoDiscard`、宝物合成 `goodsCompose`。客户端：军队对话框四个采集回包的提示、收获确认带采集时长、全部采集不再二次确认；合成结果框修复（原先把物品列表多包了一层，结果框为空）。差分 2 组新用例（采集时长的秒数会跨秒，比较时抹掉）。
 - W2 完成：装备仓库 `loadUserArmor` / `loadUserActivedArmor` / `sellArmor`（含回收装备活动礼包）/ `zhuangbeichaijie` / `multipAnalyzeArmor` / `loadActiveArmorSpecialGoods` / `activeArmorSpecial`（末日之刃四种特效重随），在 `hero/armor.commands.ts`。注意：原版 `0704` 作为 PHP 参数是八进制（log_goods 记 452），写在 SQL 字符串里是十进制（log_armor 记 704）；`loadUserActivedArmor` 传 0/1/2 以外的类型时原版 foreach 警告变成错误回包，这里照抄。客户端新增 `views/armor/`（ArmorDialog / UserArmorItem / ActiveArmorSpecial），信息面板「装备」按钮打开；部位、品质过滤，分页，回收、分解、特效、激活、拆解菜单，批量选择分解，全部修理 / 全部修复，武器架加栏位，蓝装以上走二级密码。「展示」需要聊天物品链接，聊天还没有，菜单项置灰。差分 1 组新用例。
+- W3 完成：铁匠铺洗练 `loadXilianGoods` / `doXilian`、熔炼 `loadFusionableArmor` / `loadPartArmor` / `reloadArmor` / `combineArmor`、装备升级 `doUpgradeArmor`、未激活列表 `loadUnActivePartArmor` / `loadUnActiveHorseArmor`；`doStrong` / `doEmbed` / `initHoles` 补上坐骑分支（灵通甘草、驯马技巧上限、马装孔位与专属限制）。修了 `doStrong` 失败时回包的极品属性（原版失败回 null）。客户端：铁匠铺补齐洗练、熔炼、装备升级三个页签，镶嵌页可打开装备激活列表（原版这个对话框没有入口）；马厩补齐驯服、强化、马装选择和升级，升级页与铁匠铺共用。铁匠铺和马厩对话框高度按原版改为 492，命令面板不再被裁掉，铁匠铺去掉了原版没有的「进入」按钮。差分 1 组新用例。
 - 待做：W3 铁匠铺洗练/熔炼/升级与坐骑、W4 迁城令/免战牌/休假/离间符/宣战/援助、W5 武魂与卡牌、W6 君主学习/战术/赞扬/赏赐/战报历练、W7 名将与委托任务、W8 登录奖励/签到/活动栏与沙场、VIP 抛错桩。
 
 ## 开发流程

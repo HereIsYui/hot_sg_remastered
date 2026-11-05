@@ -825,6 +825,11 @@ export class ArmorCommands {
     ];
   }
 
+  /** `[armors, ...otherInfo]` with no hero: the reply shape of every smithy / barn armor list. */
+  async armorListReply(armors: Row[]): Promise<unknown[]> {
+    return [await this.addSpecial(armors), ...(await this.otherInfo(armors, -1))];
+  }
+
   /** The tables after the armor list that `Global.dealWithOtherInfoOfArmor` caches. */
   private async otherInfo(armors: Row[], hid: number): Promise<unknown[]> {
     return [

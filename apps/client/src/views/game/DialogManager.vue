@@ -227,7 +227,7 @@ function choose(action: 'all' | 'level') {
       v-else-if="dialog?.name === 'building' && ownDialog(dialog.building, BUILDING_BLACKSMITH)"
       :key="`blacksmith ${buildingKey}`"
       :x="0"
-      :y="130"
+      :y="0"
       :building="dialog.building"
       @destroy-panel="destroy = $event"
     />

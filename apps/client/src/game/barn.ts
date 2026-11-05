@@ -1,11 +1,10 @@
 /**
- * Barn.BarnCommandDialog: the pure logic of the 粮仓/马厩 command dialog. The original has four
- * tabs — 激活(active) / 强化(strong) / 镶嵌(embed) / 升级(upgrade). Only the 镶嵌 tab's unembed
- * path (`loadZuojiArmor` + `doUnlade`) and the goods list (`loadBarnGoods`) have ported server
- * commands; the strengthen / activate / upgrade / embed-insert actions are not ported and show a
- * not-yet-open notice.
+ * Barn.BarnCommandDialog: the pure logic of the 粮仓/马厩 command dialog, with four tabs —
+ * 驯服 (initHoles), 强化 (doStrong with is_zuoji = 1), 镶嵌 (doEmbed / doUnlade of 马装) and
+ * 升级 (doUpgradeArmor).
  */
 
+import { i18n } from '../i18n';
 import { parseEmbedHoles, parseEmbedPearls } from './blacksmith';
 
 type Row = Record<string, unknown>;
@@ -19,11 +18,30 @@ export const BARN_TABS = {
   Upgrade: 3,
 } as const;
 
-/** The tabs whose server commands are ported. Only 镶嵌 can act (unlade); the rest are notices. */
-export const BARN_PORTED_TABS = new Set<number>([BARN_TABS.Embed]);
+/** 伯乐符 / 师皇针 / 灵通甘草 / 高级灵通甘草 of the 强化 tab. */
+export const GOODS_BOLE = 212;
+export const GOODS_SHIHUANG = 213;
+export const GOODS_LINGTONG = 214;
+export const GOODS_HIGH_LINGTONG = 11171;
 
-/** The 坐骑装备 type the embed picker filters by (loadZuojiArmor's first arg). */
-export const ZUOJI_ARMOR_TYPE = 1;
+/**
+ * `BarnCommandDialog.doStrong`: what strengthening a mount at its level means before sending —
+ * a blocking alert, a confirm (from level 3 a failure may drop it), or nothing.
+ */
+export function horseStrongCheck(
+  row: Row | null,
+  stone: number,
+  highStone: number,
+): { block: string } | { confirm: string } | null {
+  if (!row || int(row.sid) === 0) return { block: i18n('Barn_NoHorse') };
+  const level = int(row.strong_level);
+  if (level >= 15) return { block: i18n('Barn_Remind_3') };
+  if (level <= 9 && stone <= 0) return { block: i18n('Barn_NoStrongGoods') };
+  if (level >= 10 && highStone <= 0) return { block: i18n('Barn_NoHighStrongGoods') };
+  if (level >= 6) return { confirm: i18n('Barn_Remind_2').replace('%d', String(level + 1)) };
+  if (level >= 3) return { confirm: i18n('Barn_Remind_1').replace('%d', String(level + 1)) };
+  return null;
+}
 
 /** The five embed-hole button positions (`embedArmorPearlN` x/y), hole order 0..4. */
 export const EMBED_HOLE_POS: readonly { x: number; y: number }[] = [
@@ -63,8 +81,8 @@ export function barnHolePearls(armor: ZuojiArmor | null): number[] {
 }
 
 /**
- * `BarnCommandDialog.selectEmbedZuoji`: what clicking hole `pos` means — unlade an embedded pearl
- * (the only ported action), embed into an open hole (not ported), or nothing on a sealed hole.
+ * `BarnCommandDialog.selectEmbedZuoji`: what clicking hole `pos` means — unlade an embedded
+ * 马装, pick one for an open hole, or nothing on a sealed hole.
  */
 export function holeAction(
   armor: ZuojiArmor | null,

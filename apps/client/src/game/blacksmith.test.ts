@@ -1,17 +1,21 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { setStrings } from '../i18n';
 import {
-  BLACKSMITH_TABS,
-  PORTED_TABS,
   canMergeBook,
   couldSynthStuff,
   dismantleNeedCount,
+  fusionSlotError,
+  fusionSubmitError,
   parseBestQuality,
   parseEmbedHoles,
   parseEmbedPearls,
+  parseGoodsCounts,
   parseStuffRecipe,
   strongBlockReason,
   strongResultText,
+  upgradeMaterials,
+  xilianBlockReason,
+  xilianStoneCount,
 } from './blacksmith';
 
 beforeAll(() => {
@@ -20,6 +24,10 @@ beforeAll(() => {
     BlackSmith_StrongFailure1: '强化失败，装备强化等级归零',
     BlackSmith_StrongFailure2: '强化失败，装备强化等级降一级',
     BlackSmith_StrongFailure3: '强化失败，装备无损失',
+    xilian_lack_zhurong: '缺铸熔石',
+    xilian_lack_qingxi: '缺清洗石',
+    xilian_exist: '已有极品',
+    xilian_not_exist: '没有极品',
   });
 });
 
@@ -121,12 +129,57 @@ describe('canMergeBook', () => {
   });
 });
 
-describe('tab metadata', () => {
-  it('ports 强化/镶嵌/合成/技能书 and leaves 洗练/熔炼/装备升级 out', () => {
-    expect(PORTED_TABS.has(BLACKSMITH_TABS.Strong)).toBe(true);
-    expect(PORTED_TABS.has(BLACKSMITH_TABS.SkillBook)).toBe(true);
-    expect(PORTED_TABS.has(BLACKSMITH_TABS.Xilian)).toBe(false);
-    expect(PORTED_TABS.has(BLACKSMITH_TABS.Fusion)).toBe(false);
-    expect(PORTED_TABS.has(BLACKSMITH_TABS.UpgradeArmor)).toBe(false);
+describe('xilian', () => {
+  it('spends 洗练符 by colour', () => {
+    expect([1, 3, 4, 5, 6, 0, 7].map(xilianStoneCount)).toEqual([1, 1, 2, 3, 4, 0, 0]);
+  });
+
+  it('guards each stone like useZhurong / useQingxi / useXilian', () => {
+    expect(xilianBlockReason(0, 0, '')).toBe('缺铸熔石');
+    expect(xilianBlockReason(0, 1, '1,5')).toBe('已有极品');
+    expect(xilianBlockReason(0, 1, '')).toBeNull();
+    expect(xilianBlockReason(1, 0, '1,5')).toBe('缺清洗石');
+    expect(xilianBlockReason(1, 1, '')).toBe('没有极品');
+    expect(xilianBlockReason(1, 1, '1,5')).toBeNull();
+    expect(xilianBlockReason(2, 0, '')).toBe('没有极品');
+    expect(xilianBlockReason(2, 0, '1,5')).toBeNull();
+  });
+});
+
+describe('fusion', () => {
+  const a = { armorid: 52001, combine_level: 1 };
+  it('fills a slot only when free and matching the chosen pieces', () => {
+    expect(fusionSlotError([], false, a)).toBeNull();
+    expect(fusionSlotError([a], true, a)).toBe('BlackSmith_FusionArmorHasExist');
+    expect(fusionSlotError([a], false, { armorid: 12009, combine_level: 1 })).toBe(
+      'BlackSmith_FusionArmorNotUnify_1',
+    );
+    expect(fusionSlotError([a], false, { armorid: 52001, combine_level: 2 })).toBe(
+      'BlackSmith_FusionArmorNotUnify_1',
+    );
+    expect(fusionSlotError([a], false, { ...a })).toBeNull();
+  });
+
+  it('submits three of the same piece', () => {
+    expect(fusionSubmitError([a, a, null])).toBe('BlackSmith_FusionArmorNotFull');
+    expect(fusionSubmitError([a, a, { armorid: 1 }])).toBe('BlackSmith_FusionArmorNotUnify');
+    expect(fusionSubmitError([a, a, a])).toBeNull();
+  });
+});
+
+describe('upgrade', () => {
+  it('maps a set to its materials', () => {
+    expect(upgradeMaterials(11002)).toEqual([12159, 12158]);
+    expect(upgradeMaterials(10008)).toEqual([12161, 12158]);
+    expect(upgradeMaterials(1)).toBeNull();
+  });
+
+  it('parses the left-over goods string', () => {
+    expect([...parseGoodsCounts('12159,3,12158,0,12157,2')]).toEqual([
+      [12159, 3],
+      [12158, 0],
+      [12157, 2],
+    ]);
+    expect(parseGoodsCounts('').size).toBe(0);
   });
 });
