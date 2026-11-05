@@ -80,19 +80,19 @@ legacy/          本地生成的原版文件（不提交）
 
 阶段划分见 [开发计划](design/02-开发计划.md) 第 7 节。每完成一个功能点就单独提交并推送到 `main`，提交历史就是最细的进度记录（`git log --oneline`）。
 
-| 阶段                                                                                   | 状态       |
-| -------------------------------------------------------------------------------------- | ---------- |
-| 0 基础设施与资料提取                                                                   | 完成       |
-| 1 后端基础框架（命令网关、会话、用户锁、Tick、推送骨架、登录与创建角色、差分测试工具） | 完成       |
-| 2 前端框架（舞台、素材加载、Fx 皮肤组件、DialogManager、登录到主界面）                 | 完成       |
-| 3 城池经济                                                                             | 完成       |
-| 4 将领与道具（主体完成，剩余见下）                                                     | 完成       |
-| 5 世界与战斗（波 1–4 前后端完成并实测，占城/抓将已比对，MVP 串跑通过）                 | 完成       |
-| 6 社交与经济（好友/聊天/联盟/市场完成；既有差分与界面细化待做）                        | **进行中** |
-| 7 成长与荣誉（排行榜、领奖、统计、成就、计谋、抽奖、君主荣誉及客户端全部完成）         | 完成       |
-| 8 玩法活动（过关斩将/竞技场/洛阳/婚姻完成；沙场与闹钟原版不可达，未移植）              | 完成       |
-| 9 独立战场（四本地 PVE 战场后端+核心客户端完成；官渡/董卓照原版关闭）                  | 完成       |
-| 10 GM 工具（运维 API + 单页后台完成）                                                  | 完成       |
+| 阶段                                                                                                        | 状态       |
+| ----------------------------------------------------------------------------------------------------------- | ---------- |
+| 0 基础设施与资料提取                                                                                        | 完成       |
+| 1 后端基础框架（命令网关、会话、用户锁、Tick、推送骨架、登录与创建角色、差分测试工具）                      | 完成       |
+| 2 前端框架（舞台、素材加载、Fx 皮肤组件、DialogManager、登录到主界面）                                      | 完成       |
+| 3 城池经济                                                                                                  | 完成       |
+| 4 将领与道具（主体完成，剩余见下）                                                                          | 完成       |
+| 5 世界与战斗（波 1–4 前后端完成并实测，占城/抓将已比对，MVP 串跑通过）                                      | 完成       |
+| 6 社交与经济（好友/聊天/联盟/市场完成；既有差分与界面细化待做）                                             | **进行中** |
+| 7 成长与荣誉（排行榜、领奖、统计、成就、计谋、抽奖、君主荣誉及客户端全部完成）                              | 完成       |
+| 8 玩法活动（过关斩将/竞技场/洛阳/婚姻完成；沙场与闹钟原版不可达，未移植）                                   | 完成       |
+| 9 独立战场（四本地 PVE 战场后端+核心客户端完成；官渡/董卓照原版关闭）                                       | 完成       |
+| 10 GM 工具（运维 API + 单页后台完成）                                                                       | 完成       |
 | 11 测试与发布（一键全栈 compose/备份恢复/部署文档/GM 补齐完成；全量浏览器走查通过；24h 对比与性能基准待做） | **进行中** |
 
 ### 阶段 3 已完成
@@ -103,19 +103,15 @@ legacy/          本地生成的原版文件（不提交）
 
 - 宝物对话框：物品列表、使用礼包与礼匣、出售。
 - 物品加速（鲁班 / 墨家道具）、增益道具（神农锄、鲁班斧、战鼓、阵图、青囊书、徭役令、推恩令、典民令、安民告示等）、默认宝箱。
-- 客栈：招募列表、刷新、招募将领、招贤榜。
 - 将领详情：升级、加点、洗点、改名、赏赐、解雇。
 - 将领装备：穿戴、卸下、修理、修复（元宝 / 礼金）、一键修理 / 修复 / 卸下。
 - 将领技能：领悟、穿戴 / 卸下技能书；宝物里的「技能书」页（筛选、回收、扩充书栏）。
-
-代码里尚未移植的分支都会抛出 `... not ported` 错误或显示 `NotYetValid` 提示，可用 `rg "not ported|NotYetValid" apps` 查找。其中委托任务、世界事件任务、名将任务、洛阳相关奖励属于后续阶段。
-
 - 将领详情按钮：体力 / 精力药、经验书、统率 / 攻击 / 防御宝物，俘虏招降 / 释放，投奔接纳 / 回绝，名将说明，君主改名。
 - 将领历练：开始、取消、加速、结算、奇遇。
 - 铁匠铺：强化、打孔、镶嵌、合成、技能书合并；打孔器、化石粉在铁匠铺内可用。
 - 商城：元宝 / 礼金购买、限购、买了就用、礼券兑换；物品不足时弹出购买框。
 - 特殊物品：旌旗、名帖（含君主改名）、盟主令、武器架、打孔器、化石粉。
-- 客栈：招募、结交名将、市井传闻（服务端与对话框）、鉴定宝藏、五铢钱商店。
+- 客栈：招募列表与刷新、招募将领、招贤榜、结交名将、市井传闻、鉴定宝藏、五铢钱商店。
 - 仓库打包资源、粮仓查看与卸下、将领「宝物」按钮（增益、倒计时、续买）。
 
 ### 阶段 4 剩余（未做）
@@ -123,9 +119,11 @@ legacy/          本地生成的原版文件（不提交）
 1. 君主「学习」面板、君主经验书、君主战术。
 2. 坐骑相关：粮仓的激活、强化、升级；铁匠铺的洗练、熔炼、装备升级三个页签，目前显示"暂未开放"。
 3. 客栈：查看名将详情、领取任务暂未开放；名将任务与传闻里的任务、军队依赖后续阶段；游说原版即关闭，未做。
-4. 迁城令、免战牌、离间符：依赖出征与战斗，入口尚未接入。
+4. 迁城令、免战牌、离间符：服务端分支与客户端对话框都还没做；它们依赖的出征与战斗已在阶段 5 完成，可以开工。
 5. 武魂（卡在成就扣物品一步）、卡牌合成（原版单机关闭）。
 6. 将领历练的活动奇遇、君主历练的开始；活动招将（平时无活动，未做）。
+
+代码里尚未移植的分支都会抛出 `... not ported` 错误或显示 `NotYetValid` 提示，可用 `rg "not ported|NotYetValid" apps` 查找。
 
 ### 阶段 5 已完成（收官实测：MVP 建城 → 造兵 → 出征 → 占野地 → 收战报 全流程串跑通过）
 
@@ -193,27 +191,7 @@ legacy/          本地生成的原版文件（不提交）
 
 本轮完整回归：服务端 420 项、客户端 333 项、tools 60 项单元测试全过，差分 149/149 组通过；格式检查、Lint、类型检查和构建通过。已知波动：rank_hero 并列排名（904-906 名）在 MySQL 5.7 与 8.4 间的行序 rotates，差分偶发 1 组失败（两边引擎均逐行忠实于 ReportCron.php:412）。
 
-### 阶段 9 完成（独立战场，方案 A 变体）
-
-工作流并行移植（六切片 + 战场客户端 + 集成差分）：
-
-- S1 战场大厅（battlefield/）：15 条 openfunc 命令——getBattleInfo 四类型 + 倍率活动、getBattleNetUrl 单机关闭恒回空、PVPBattleInfo 四阵营、勋章行情、清战重置；44 单测。
-- S2 生命周期（battle/）：createBattle/joinToBattle/joinToPVPBattle/getBattleInvite + battlefield-helpers/-utils 共享助手；关键差分固定点：原版 `rand()%(10-total)` 数学事实使收缩分支恒死，逐次 draw 对齐；39 单测。
-- S2b 退盟/邀请（battle/）：quitBattle 完整 337 行（倍率、援军折算荣誉、黄巾刷子检测、勋章、防沉迷、关场）+ 邀请四命令 + act-battle 助手；31 单测。
-- S3 战场 Tick（正式动刀点落地）：troop.tick.ts task 7/8 到达分支 + state-1 返回特例替换原「搁置」；battle-result.ts type-4 终局全量（mem_war_event 战况、事件触发器、winpoint、伤兵过滤）；新增 battle-field-uid.ts（resetBattleFieldUid 四态）与 battle-event.ts（cfg_battle_event 双位触发器）；41 单测。忠实复刻三处原版 bug：winpoint LEAST/GREATEST 死代码块（`$unionid==3?4:3` loose 陷阱）、cfg_js.php:550 坏列插入按可观察效果跳过、check1001 返回 2 恒真放行。
-- S4 行军与交战（battlefield/）：startBattleTroop/battleTroopDispatch/battleAttack/battlePatrol 等 11 命令 + canGoto 邻接四态；22 单测。
-- S4b 援军/召军/加速/探索（battle/）：11 命令 + 共享助手导出（firstGetUserBattleInfo/ifFrozeExit/enoughIntervalFromLastMark/resetBattleFieldUid/enhanceArmy 等）；34 单测。
-- S5 战场周边（battle/）：任务面板（ALARM_TIDS 60901-60919）、将领对话、功勋统计、成员列表、战场商城（buyBattleGoods 12 条购买路径 + updateBattleOpenState 开战场链）；37 单测。
-- S6 推送消费（push/）：mem_war_event 排空→proc 52 广播（WarEventService.drain，参战者定位 + 送达即删 + 离线保留重试）；proc 53 有意不接线（本地无生产者）。
-- 战场客户端核心流（22 文件 + 27 单测）：BattlePanel 战场大地图（等距据点/军旗/军粮条/30s 轮询/退出结算）、Create/Join/SelectUnion/BattleFiledViewDialog（派遣/侦察/攻击/交谈/详情/探索/征召）、兵力调度五对话框、军队详情两卡、BattleChatDialog、退出结算。未做：AttackTacticsDialog（白名单外死命令）、战况页签、组队邀请三件、商店/勋章三件、周边排行/趋势图（列在客户端 unresolved）。
-- 集成：6 模块注册、11 组差分用例、2 轮修复——battlePatrol 渲染参数丢失（lang.t 已是 sprintf，去掉外层无参 sprintf）、createBattle 去事务对齐原版半成品语义、新增 @RejectedCommand 装饰器（白名单外命令抛 `funcName+你异常了!!!`，同时修正好友/联盟同类偏差）、deps.cell 空值 false 语义、AMF 信封索引修正；单测修正三处与原版 PHP 不符的断言（getUserBattleInfo 空赤壁态回 [0,0]、joinToPVPBattle 闭盟 `count(1)<null` 实测 1064 → PearDB 文案、battlePatrol 断言的就是 bug）。
-
-### 阶段 11 进行中（测试与发布）
-
-- 发布准备完成：docker/prod 一键全栈 compose（db/server/nginx web 三服务，/ws 同源代理，客户端与 GM 静态同源托管；端到端实测六项冒烟全过）；scripts/backup-db.sh（mysqldump + 裁剪）与 restore-db.sh（MyISAM→InnoDB 在线转换，沙箱实测）；docs/deploy.md 部署文档；package.json 增 prod:up/prod:down/db:backup/db:restore。
-- GM 补齐（走查前置能力）：登录公告（announce/login 查看与设置）、任务/活动开关（mem_state 读写）、史诗任务进度（sys_user_goal 查询/设置）——13 项新单测，总 41/41。
-- 全量浏览器走查通过（2026-11-05，[走查记录](docs/阶段11-浏览器走查记录.md)）：阶段 7/8/9 累积 15 项面板/链路全部验证——排行榜/统计/成就/计谋/君主信息、抽奖关闭态与 GM 开关后轮盘、过关斩将、洛阳归属、婚姻、竞技场（爵位门槛两侧）、战场大厅→新建战场→黄巾之乱大地图（含道具校验与创建成功链）、GM 后台六分区、登录公告登录页可见；发现并修复战场描述富文本渲染（FxLabel→FxText :html），竞技场 face=0 破图为原版同现数据工件不改；差分遗留战场数据触发 sys_battle_city 主键冲突按原版 PearDB 文案报错（错误路径实测确认），已清理；走查数据全部还原。
-- 未做（长时/人工项）：差分 24 小时结算对比、性能与兼容性基准、可选桌面壳。
+### 阶段 8 完成（玩法活动）
 
 工作流并行移植（调研→按家族并行→客户端→集成差分→回归门）：
 
@@ -229,6 +207,39 @@ legacy/          本地生成的原版文件（不提交）
 本轮完整回归：服务端 566 项、客户端 386 项、tools 60 项单元测试全过，差分 157/157 组通过；格式检查、Lint、类型检查和构建通过。
 
 未覆盖：洛阳派兵的周三 19 点成功路径差分依赖 DB 时钟不可夹具（已测拒绝分支与全部其他闸门）；提亲守护 NPC 战的胜仗分支不可达（PK 引擎已由竞技场/过关斩将用例逐刀比对）。五家族新面板的浏览器实测已于阶段 11 走查完成（见 [走查记录](docs/阶段11-浏览器走查记录.md)，15 项全过）。
+
+### 阶段 9 完成（独立战场，方案 A 变体）
+
+工作流并行移植（六切片 + 战场客户端 + 集成差分）：
+
+- S1 战场大厅（battlefield/）：15 条 openfunc 命令——getBattleInfo 四类型 + 倍率活动、getBattleNetUrl 单机关闭恒回空、PVPBattleInfo 四阵营、勋章行情、清战重置；44 单测。
+- S2 生命周期（battle/）：createBattle/joinToBattle/joinToPVPBattle/getBattleInvite + battlefield-helpers/-utils 共享助手；关键差分固定点：原版 `rand()%(10-total)` 数学事实使收缩分支恒死，逐次 draw 对齐；39 单测。
+- S2b 退盟/邀请（battle/）：quitBattle 完整 337 行（倍率、援军折算荣誉、黄巾刷子检测、勋章、防沉迷、关场）+ 邀请四命令 + act-battle 助手；31 单测。
+- S3 战场 Tick（正式动刀点落地）：troop.tick.ts task 7/8 到达分支 + state-1 返回特例替换原「搁置」；battle-result.ts type-4 终局全量（mem_war_event 战况、事件触发器、winpoint、伤兵过滤）；新增 battle-field-uid.ts（resetBattleFieldUid 四态）与 battle-event.ts（cfg_battle_event 双位触发器）；41 单测。忠实复刻三处原版 bug：winpoint LEAST/GREATEST 死代码块（`$unionid==3?4:3` loose 陷阱）、cfg_js.php:550 坏列插入按可观察效果跳过、check1001 返回 2 恒真放行。
+- S4 行军与交战（battlefield/）：startBattleTroop/battleTroopDispatch/battleAttack/battlePatrol 等 11 命令 + canGoto 邻接四态；22 单测。
+- S4b 援军/召军/加速/探索（battle/）：11 命令 + 共享助手导出（firstGetUserBattleInfo/ifFrozeExit/enoughIntervalFromLastMark/resetBattleFieldUid/enhanceArmy 等）；34 单测。
+- S5 战场周边（battle/）：任务面板（ALARM_TIDS 60901-60919）、将领对话、功勋统计、成员列表、战场商城（buyBattleGoods 12 条购买路径 + updateBattleOpenState 开战场链）；37 单测。
+- S6 推送消费（push/）：mem_war_event 排空→proc 52 广播（WarEventService.drain，参战者定位 + 送达即删 + 离线保留重试）；proc 53 有意不接线（本地无生产者）。
+- 战场客户端核心流（22 文件 + 27 单测）：BattlePanel 战场大地图（等距据点/军旗/军粮条/30s 轮询/退出结算）、Create/Join/SelectUnion/BattleFiledViewDialog（派遣/侦察/攻击/交谈/详情/探索/征召）、兵力调度五对话框、军队详情两卡、BattleChatDialog、退出结算。未做：AttackTacticsDialog（白名单外死命令）、战况页签、组队邀请三件、商店/勋章三件、周边排行/趋势图（列在客户端 unresolved）。
+- 集成：6 模块注册、11 组差分用例、2 轮修复——battlePatrol 渲染参数丢失（lang.t 已是 sprintf，去掉外层无参 sprintf）、createBattle 去事务对齐原版半成品语义、新增 @RejectedCommand 装饰器（白名单外命令抛 `funcName+你异常了!!!`，同时修正好友/联盟同类偏差）、deps.cell 空值 false 语义、AMF 信封索引修正；单测修正三处与原版 PHP 不符的断言（getUserBattleInfo 空赤壁态回 [0,0]、joinToPVPBattle 闭盟 `count(1)<null` 实测 1064 → PearDB 文案、battlePatrol 断言的就是 bug）。
+
+### 阶段 10 完成（GM 工具）
+
+- 服务端 `apps/server/src/gm/`：独立的 `/api/gm/*` 接口，请求头 `x-gm-token` 校验，未配置 `GM_TOKEN` 时一律拒绝（403）；不走游戏命令网关。
+- 后台 `apps/gm`：单页六个分区（玩家、城池、将领、宝物、公告、状态），`pnpm dev:gm` 启动，`VITE_GM_TOKEN`、`VITE_ASSET_URL` 见 `apps/gm/.env.example`。
+- 玩家：按账号 / 君主名搜索，改元宝、礼金、声望、爵位、官职（带日志），封禁与解封，测试玩家数据清理。
+- 城池：按城名或坐标搜索，建筑与科技一键满级。
+- 将领：玩家将领与名将列表，改等级、经验、四维后重算属性，放入城池。
+- 宝物：物品与装备模糊搜索、图片预览、发放、删除。
+- 公告与世界：滚动公告、GM 喊话（推送 proc 14）、登录公告、任务 / 活动开关（`mem_state`）、史诗任务进度、手动刷新野地、在线人数与主表行数概览。
+- GM 属于运维功能，参照修改器实现，不做差分测试；单元测试 41 项。
+
+### 阶段 11 进行中（测试与发布）
+
+- 发布准备完成：docker/prod 一键全栈 compose（db/server/nginx web 三服务，/ws 同源代理，客户端与 GM 静态同源托管；端到端实测六项冒烟全过）；scripts/backup-db.sh（mysqldump + 裁剪）与 restore-db.sh（MyISAM→InnoDB 在线转换，沙箱实测）；docs/deploy.md 部署文档；package.json 增 prod:up/prod:down/db:backup/db:restore。
+- GM 补齐（走查前置能力）：登录公告（announce/login 查看与设置）、任务/活动开关（mem_state 读写）、史诗任务进度（sys_user_goal 查询/设置）——13 项新单测，总 41/41。
+- 全量浏览器走查通过（2026-11-05，[走查记录](docs/阶段11-浏览器走查记录.md)）：阶段 7/8/9 累积 15 项面板/链路全部验证——排行榜/统计/成就/计谋/君主信息、抽奖关闭态与 GM 开关后轮盘、过关斩将、洛阳归属、婚姻、竞技场（爵位门槛两侧）、战场大厅→新建战场→黄巾之乱大地图（含道具校验与创建成功链）、GM 后台六分区、登录公告登录页可见；发现并修复战场描述富文本渲染（FxLabel→FxText :html），竞技场 face=0 破图为原版同现数据工件不改；差分遗留战场数据触发 sys_battle_city 主键冲突按原版 PearDB 文案报错（错误路径实测确认），已清理；走查数据全部还原。
+- 未做（长时/人工项）：差分 24 小时结算对比、性能与兼容性基准、可选桌面壳。
 
 ## 开发流程
 
