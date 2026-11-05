@@ -92,6 +92,56 @@ export function needsRenovate(a: Armor): boolean {
   return a.hpMax < a.oriHpMax || a.hp < a.hpMax;
 }
 
+/** `UserArmorItem.setItem`: name colours by armor type; others keep the grey of type 1. */
+const ITEM_TYPE_COLORS: Partial<Record<string, number>> = {
+  1: 7368816,
+  2: 16777215,
+  3: 3385344,
+  4: 37119,
+  5: 10040319,
+  6: 16776960,
+};
+
+/** `UserArmorItem.setItem`: the name under the picture, with the 熔炼 quality in front. */
+export function armorItemName(row: Row): string {
+  const level = str(row.combine_level);
+  const prefix = /^[1-7]$/.test(level) ? i18n(`BlackSmith_ArmorQuailtyDesc_${level}`) : '';
+  return prefix + str(row.name);
+}
+
+export function armorItemColor(row: Row): number {
+  return ITEM_TYPE_COLORS[str(row.type)] ?? 7368816;
+}
+
+/** `UserArmorItem.canActiveArmorIdArray`: the pieces whose special a 神兵鉴符 activates. */
+export const ACTIVATABLE_ARMOR_IDS: readonly number[] = [52001, 12009, 12010, 12012, 12018, 12016];
+/** 末日之刃: activating re-rolls its effect, so the panel stays open. */
+export const MORIZHIREN_ID = 12016;
+
+/** `ArmorDialog.showTab`: the store filtered by part (1-12) and type (1-6); 0 keeps all. */
+export function filterStoreArmors(armors: Armor[], part: number, type: number): Armor[] {
+  return armors.filter(
+    (a) => (part === 0 || int(a.row.part) === part) && (type === 0 || int(a.row.type) === type),
+  );
+}
+
+/** `ArmorDialog.onClickSell`: 500 黄金 per point of value, more for over-full durability. */
+export function sellPrice(a: Armor): number {
+  const times = a.oriHpMax > 0 ? Math.floor(a.hp / a.oriHpMax) : 0;
+  return Math.max(1, times) * int(a.row.value) * 500;
+}
+
+/** `ArmorDialog.doTestArmorMatri`: gems, strengthening or 熔炼 are lost when it is analyzed. */
+export function isEnhanced(row: Row): boolean {
+  return (
+    str(row.embed_pearls)
+      .split(',')
+      .some((gid) => int(gid) > 0) ||
+    int(row.strong_level) >= 1 ||
+    int(row.combine_level) >= 1
+  );
+}
+
 /** The tables `Global.dealWithOtherInfoOfArmor` caches for tooltips, shared by every dialog. */
 export interface ArmorInfo {
   /** cfg_armor_attribute rows by armor id. */

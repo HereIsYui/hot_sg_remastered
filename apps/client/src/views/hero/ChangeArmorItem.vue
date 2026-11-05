@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { armorInfo, armorTip, armorTipRow, type Armor } from '../../game/armor';
+import {
+  armorInfo,
+  armorItemColor,
+  armorItemName,
+  armorTip,
+  armorTipRow,
+  type Armor,
+} from '../../game/armor';
 import { skillImage, skillTip } from '../../game/skill';
 import { i18n } from '../../i18n';
 import FxCanvas from '../../ui/FxCanvas.vue';
@@ -17,23 +24,9 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ pick: [] }>();
 
-/** `setItem`: name colours by armor type; others keep the first one. */
-const TYPE_COLORS: Partial<Record<string, number>> = {
-  1: 7368816,
-  2: 16777215,
-  3: 3385344,
-  4: 37119,
-  5: 10040319,
-  6: 16776960,
-};
-
 const row = computed(() => props.armor?.row ?? props.book ?? {});
-const name = computed(() => {
-  const level = String(row.value.combine_level ?? '');
-  const prefix = /^[1-7]$/.test(level) ? i18n(`BlackSmith_ArmorQuailtyDesc_${level}`) : '';
-  return prefix + String(row.value.name ?? '');
-});
-const color = computed(() => TYPE_COLORS[String(row.value.type)] ?? 7368816);
+const name = computed(() => armorItemName(row.value));
+const color = computed(() => armorItemColor(row.value));
 const image = computed(() =>
   props.armor ? props.armor.imageName : skillImage(row.value.bid, row.value.level),
 );

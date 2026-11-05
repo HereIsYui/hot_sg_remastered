@@ -188,7 +188,7 @@ const cityIndex = computed({
         <FxButton v-if="row.plus" :x="150" :y="8" style-name="Plus" :tip="i18n(row.plus)" />
       </FxCanvas>
       <FxButton :x="13" :y="102" style-name="King" />
-      <FxButton :x="13" :y="135" style-name="Armor" />
+      <FxButton :x="13" :y="135" style-name="Armor" @click="game.showDialog('armor')" />
       <FxButton :x="13" :y="168" style-name="Inventory" @click="game.showDialog('myGoods')" />
     </FxCanvas>
 

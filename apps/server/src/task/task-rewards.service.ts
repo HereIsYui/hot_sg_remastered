@@ -237,13 +237,18 @@ export class TaskRewards {
   }
 
   /** TaskFunc.php::cutArmorBySid: removes one piece of gear. */
-  async cutArmorBySid(uid: number, armorid: unknown, sid: unknown): Promise<void> {
+  async cutArmorBySid(
+    uid: number,
+    armorid: unknown,
+    sid: unknown,
+    logType = TASK_LOG_TYPE,
+  ): Promise<void> {
     const db = this.scope.db;
     await sql`delete from sys_user_armor where uid = ${uid} and sid = ${sid} and hid = 0`.execute(
       db,
     );
     await sql`insert into log_armor (uid, armorid, count, time, type)
-      values (${uid}, ${armorid}, -1, unix_timestamp(), ${TASK_LOG_TYPE})`.execute(db);
+      values (${uid}, ${armorid}, -1, unix_timestamp(), ${logType})`.execute(db);
   }
 
   /** HeroFunc.php::deleteHero: a free, non-lord hero leaves for the wild. */

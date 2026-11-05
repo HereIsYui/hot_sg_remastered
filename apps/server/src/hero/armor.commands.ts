@@ -12,6 +12,7 @@ import { RandomService } from '../core/random.service';
 import { UserRules } from '../core/user-rules.service';
 import { DbScope } from '../db/database.module';
 import { GlobalCommand, type CommandContext } from '../gateway/decorators';
+import { DefaultBoxService } from '../goods/default-box.service';
 import { TaskRewards } from '../task/task-rewards.service';
 
 type Row = Record<string, unknown>;
@@ -28,10 +29,74 @@ const ACTION_DEIFY = 13;
 /** 君主 gear (15000-15999) fits only the lord. */
 const LORD_ARMOR_MIN = 15000;
 const LORD_ARMOR_MAX = 16000;
+/** ID_BUILDING_MARKET: selling gear needs a level 5 市场. */
+const BUILDING_MARKET = 13;
+/** 神兵鉴符, used up by activating a special. */
+const GOODS_SPECIAL_KEY = 10522;
+/** 末日之刃: its special can be re-rolled. */
+const MORIZHIREN = 12016;
+const GOODS_STRONG_ORB = 205;
+const GOODS_HIGH_STRONG_ORB = 11170;
+/** 装备碎片 (a sys_things tid). */
+const THINGS_ARMOR_CHIP = 10400;
+/** 11th-level gems drop to their 10th-level gid, which is not gid - 1. */
+const ELEVENTH_GEM_DOWN: Record<number, number> = {
+  17500: 309,
+  17505: 319,
+  17510: 329,
+  17515: 339,
+  17520: 349,
+  17525: 359,
+  17530: 369,
+  17535: 379,
+};
+/** log_armor types and log reasons of the gear store. */
+const LOG_ARMOR_SOLD = 9;
+const LOG_ARMOR_CHAIJIE = 11;
+const LOG_THINGS_CHAIJIE = 9;
+const LOG_GOODS_CHAIJIE = 23;
+/** `0704` is octal as a PHP argument (log_goods) but decimal inside the log_armor SQL text. */
+const LOG_GOODS_ANALYZE = 0o704;
+const LOG_ARMOR_ANALYZE = 704;
+const ACTION_CHAIJIE = 24;
+/** cfg_act type of the 回收装备 event is 6400 + the armor type; its gift box srctype. */
+const ACT_ARMOR_RECYCLE = 6400;
+const SRC_ARMOR_ACT = 6000;
+/** loadUserActivedArmor type 1 (upgrading): the sets that can be upgraded. */
+const UPGRADABLE_TIES = ['12003', '10008', '11002', '12006', '12007'];
+/** multipAnalyzeArmor: the 强化宝珠 chance (out of 0..100) and count by armor type. */
+const ANALYZE_REWARD: Record<string, [number, number]> = {
+  1: [30, 1],
+  2: [50, 1],
+  3: [70, 1],
+  4: [65, 2],
+  5: [100, 5],
+  6: [100, 10],
+};
+/** Some blue 君主 sets (15000-15032) analyze at only 30%. */
+const LORD_BLUE_MIN = 15000;
+const LORD_BLUE_MAX = 15032;
 
 /** HeroFunc.php::isHeroInCity: free, city chief, general or adviser. */
 function isHeroInCity(state: unknown): boolean {
   return [0, 1, 7, 8].some((s) => phpLooseEquals(state, s));
+}
+
+/**
+ * ArmorFunc.php::getSuipian: 装备碎片 for a broken piece, one per 10 weighted points of its
+ * level (x4), 统帅 (x2), 内政 (x4), 勇武 (x8), 智谋 (x4) and 速度 (x3), rounded up.
+ */
+export function armorChips(cfg: Row | undefined): number {
+  const weights: Record<number, number> = { 1: 2, 2: 4, 3: 8, 4: 4, 11: 3 };
+  let value = phpNum(cfg?.hero_level) * 4;
+  const parts = phpString(cfg?.attribute).split(',');
+  const length = phpNum(parts.shift());
+  for (let i = 0; i < length; i++) {
+    const item = phpIntval(parts.shift());
+    const num = phpNum(parts.shift());
+    value += num * (weights[item] ?? 0);
+  }
+  return value === 0 ? 1 : phpIntval(Math.ceil(value / 10));
 }
 
 /** The `sid in (...)` list the client sends as `"sid,sid,..."`. */
@@ -39,7 +104,10 @@ function sidList(ids: unknown): RawBuilder<unknown> {
   return sql.join(phpString(ids).split(',').map(phpIntval));
 }
 
-/** ArmorFunc.php: a hero's gear, equipping, repairing (黄金) and renovating (元宝 or 礼金). */
+/**
+ * ArmorFunc.php: a hero's gear, equipping, repairing (黄金) and renovating (元宝 or 礼金), and
+ * the 装备仓库 (selling, breaking up, analyzing, activating specials).
+ */
 @Injectable()
 export class ArmorCommands {
   constructor(
@@ -53,6 +121,7 @@ export class ArmorCommands {
     private readonly ownership: OwnershipService,
     private readonly rewards: TaskRewards,
     private readonly random: RandomService,
+    private readonly boxes: DefaultBoxService,
   ) {}
 
   private async rows(query: RawBuilder<unknown>): Promise<Row[]> {
@@ -325,6 +394,299 @@ export class ArmorCommands {
       await this.users.logUserAction(uid, ACTION_DEIFY);
       return reply;
     });
+  }
+
+  /** The 装备仓库: `[armor_column, armors, ...otherInfo]` of every unworn piece. */
+  @GlobalCommand()
+  async loadUserArmor(ctx: CommandContext): Promise<unknown[]> {
+    const armors = await this.rows(sql`select * from sys_user_armor a
+      left join cfg_armor c on c.id = a.armorid where a.uid = ${ctx.uid} and a.hid = 0
+      order by a.strong_level desc, a.combine_level desc`);
+    return this.storeReply(ctx.uid, armors);
+  }
+
+  /**
+   * `[type]`: the activated unworn pieces the blacksmith picks from (0, 2), or for upgrading (1)
+   * those of the upgradable sets; any other type lists nothing.
+   */
+  @GlobalCommand()
+  async loadUserActivedArmor(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const type = param[0] ?? null;
+    const base = sql`select * from sys_user_armor a left join cfg_armor c on c.id = a.armorid
+      where a.uid = ${ctx.uid}`;
+    const order = sql`order by a.strong_level desc, a.combine_level desc`;
+    let armors: Row[];
+    if (phpLooseEquals(type, 0) || phpLooseEquals(type, 2)) {
+      armors = await this.rows(sql`${base} and a.hid = 0 and embed_holes != '' ${order}`);
+    } else if (phpLooseEquals(type, 1)) {
+      armors = await this.rows(sql`${base} and c.tieid in (${sql.join(UPGRADABLE_TIES)})
+        and a.hid = 0 and embed_holes != '' ${order}`);
+    } else {
+      // addSpecialArr walks the unset list; legacy's error handler turns the warning into a reply.
+      throw GameError.raw('Invalid argument supplied for foreach()');
+    }
+    return this.storeReply(ctx.uid, armors);
+  }
+
+  /** `[sid]`: the 神兵鉴符 row with the player's count. */
+  @GlobalCommand()
+  async loadActiveArmorSpecialGoods(ctx: CommandContext): Promise<unknown[]> {
+    const goods = await this.row(sql`select c.*, ifnull(g.count, 0) as count from cfg_goods c
+      left join sys_goods g on c.gid = g.gid and g.uid = ${ctx.uid}
+      where c.gid = ${GOODS_SPECIAL_KEY}`);
+    return [goods ?? false];
+  }
+
+  /**
+   * `[sid]`: one 神兵鉴符 activates the piece's special; 末日之刃 may be re-rolled and gets a
+   * random effect. Answers `[[armor], message]`.
+   */
+  @GlobalCommand()
+  async activeArmorSpecial(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const { uid } = ctx;
+    const sid = phpIntval(param[0]);
+    return this.scope.transaction(async () => {
+      const armor = await this.row(sql`select a.*, c.* from sys_user_armor a
+        left join cfg_armor c on c.id = a.armorid where a.uid = ${uid} and a.sid = ${sid}`);
+      if (!armor) throw GameError.lang('equipArmor.arm_not_exist');
+      if (!phpLooseEquals(armor.active_special, 0) && !phpLooseEquals(armor.armorid, MORIZHIREN)) {
+        throw GameError.lang('active_special.already_active');
+      }
+      if (!(await this.goods.checkGoods(uid, GOODS_SPECIAL_KEY))) {
+        throw GameError.lang('active_special.not_enough_goods');
+      }
+      await this.goods.reduceGoods(uid, GOODS_SPECIAL_KEY, 1);
+      await sql`update sys_user_armor set active_special = 1
+        where uid = ${uid} and sid = ${sid}`.execute(this.scope.db);
+      armor.active_special = 1;
+      const extra = phpLooseEquals(armor.armorid, MORIZHIREN)
+        ? await this.activeMorizhiren(sid)
+        : '';
+      return [await this.addSpecial([armor]), this.lang.t('active_special.success') + extra];
+    });
+  }
+
+  /**
+   * `[cid, sid]`: the piece is recycled for 黄金 (500 per point of value) in a city with a
+   * level 5 市场. Answers `[sid, cid, gold]` and the 回收装备 event gift, if any.
+   */
+  @GlobalCommand()
+  async sellArmor(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const { uid } = ctx;
+    const cid = phpIntval(param[0]);
+    const sid = phpIntval(param[1]);
+    return this.scope.transaction(async () => {
+      const db = this.scope.db;
+      const market = await this.cell(sql`select level from sys_building
+        where cid = ${cid} and bid = ${BUILDING_MARKET}`);
+      if (market === false || phpNum(market) < 5) {
+        throw GameError.lang('sellArmor.market_level_low');
+      }
+      const nobility = await this.cell(sql`select nobility from sys_user where uid = ${uid}`);
+      if ((await this.users.bufferNobility(uid, nobility)) < 1) {
+        throw GameError.lang('sellArmor.nobility_low');
+      }
+      const armor = await this.row(sql`select * from sys_user_armor u, cfg_armor c
+        where u.sid = ${sid} and u.uid = ${uid} and c.id = u.armorid`);
+      if (!armor) throw GameError.lang('equipArmor.arm_not_exist');
+      if (phpLooseEquals(armor.part, 12)) {
+        for (const pearl of phpString(armor.embed_pearls).split(',')) {
+          if (phpNum(pearl) > 0) throw GameError.lang('sellArmor.exist_zuoji_embed');
+        }
+      }
+      const hp = Math.ceil(phpNum(armor.hp) / 10);
+      const oriHpMax = phpNum(armor.ori_hp_max);
+      // PHP's division by zero yields false, which floors to 0.
+      const times = Math.max(1, oriHpMax === 0 ? 0 : Math.floor(hp / oriHpMax));
+      const goldAdd = phpIntval(times * phpNum(armor.value)) * 500;
+      await sql`update mem_city_resource set gold = gold + ${goldAdd}
+        where cid = ${cid}`.execute(db);
+      await sql`insert into log_selled_armor (sid, uid, armorid, hp, hp_max, hid, strong_level,
+          strong_value, embed_pearls, embed_holes, deified, time)
+        (select sid, uid, armorid, hp, hp_max, hid, strong_level, strong_value, embed_pearls,
+          embed_holes, deified, unix_timestamp() from sys_user_armor where sid = ${sid})`.execute(
+        db,
+      );
+      await sql`delete from sys_user_armor where sid = ${sid}`.execute(db);
+      await sql`insert into log_armor (uid, armorid, count, time, type)
+        values (${uid}, ${armor.armorid}, -1, unix_timestamp(), ${LOG_ARMOR_SOLD})`.execute(db);
+      const reply: unknown[] = [sid, cid, await this.cityGold(cid)];
+      const msg = await this.armorRecycleAct(uid, phpNum(armor.type));
+      if (msg) reply.push(msg);
+      return reply;
+    });
+  }
+
+  /**
+   * `[sid]`: an activated piece breaks into 装备碎片, 强化宝珠 for its strengthening and (half
+   * the time each) its gems or the gems a level down. Answers `[message]`.
+   */
+  @GlobalCommand()
+  async zhuangbeichaijie(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const { uid } = ctx;
+    const sid = phpIntval(param[0]);
+    return this.scope.transaction(async () => {
+      const armor = await this.row(sql`select * from sys_user_armor a
+        left join cfg_armor ca on ca.id = a.armorid where a.sid = ${sid} and a.uid = ${uid} limit 1`);
+      if (!armor) throw GameError.lang('equipArmor.arm_not_exist');
+      if (!phpLooseEquals(armor.hid, 0)) throw GameError.lang('equipArmor.arm_in_use');
+      if (phpEmpty(armor.embed_holes)) throw GameError.lang('equipArmor.can_not_chaijie');
+      if (phpLooseEquals(armor.part, 12)) throw GameError.lang('equipArmor.horse');
+
+      const cfg = await this.row(sql`select hero_level, attribute from cfg_armor
+        where id = ${armor.armorid}`);
+      const chips = armorChips(cfg);
+      let itemstr = this.lang.t('equipArmor.armor_chip') + chips;
+      await this.goods.addThings(uid, THINGS_ARMOR_CHIP, chips, LOG_THINGS_CHAIJIE);
+
+      let orbs = 0;
+      let highOrbs = 0;
+      const strongLevel = phpNum(armor.strong_level);
+      if (strongLevel > 0) {
+        const probability = await this.rows(sql`select * from cfg_strong_probability
+          order by level`);
+        const perLevel = (i: number) => {
+          const suc = phpNum(probability[i - 1]?.suc_value);
+          return suc === 0 ? 0 : 100.0 / suc;
+        };
+        for (let i = 1; i <= Math.min(strongLevel, 10); i++) orbs += Math.floor(perLevel(i));
+        for (let i = 11; i <= strongLevel; i++) highOrbs += Math.floor(perLevel(i) * 0.2);
+      }
+      const items = new Map<number, number>();
+      if (orbs > 0) items.set(GOODS_STRONG_ORB, orbs);
+      if (highOrbs > 0) items.set(GOODS_HIGH_STRONG_ORB, highOrbs);
+      const bump = (gid: number, extra: () => number) =>
+        items.set(gid, items.get(gid) ? items.get(gid)! + extra() : 1);
+      if (phpString(armor.embed_pearls) !== '') {
+        for (const pearl of phpString(armor.embed_pearls).split(',')) {
+          const gid = phpIntval(pearl);
+          let level: number;
+          if (gid >= 300 && gid <= 379) level = (gid % 10) + 1;
+          else if (gid >= 17500 && gid <= 17539) level = (gid % 5) + 11;
+          else continue;
+          if (this.random.mtRand(0, 99) < 50) {
+            bump(gid, () => 1);
+          } else if (ELEVENTH_GEM_DOWN[gid] !== undefined) {
+            bump(ELEVENTH_GEM_DOWN[gid], () => this.random.mtRand(1, 2));
+          } else if (level > 1) {
+            bump(gid - 1, () => this.random.mtRand(1, 2));
+          }
+        }
+      }
+
+      await this.rewards.cutArmorBySid(uid, armor.armorid, sid, LOG_ARMOR_CHAIJIE);
+      for (const [gid, count] of items) {
+        if (count === 0) continue;
+        const good = await this.row(sql`select * from cfg_goods where gid = ${gid}`);
+        if (!good) continue;
+        itemstr += `, ${phpString(good.name)} ${count}`;
+        await this.goods.addGoods(uid, gid, count, LOG_GOODS_CHAIJIE);
+      }
+      const msg =
+        this.lang.t('equipArmor.get_sth_from_chaijie') +
+        itemstr +
+        this.lang.t('equipArmor.get_sth_from_chaijie_end');
+      await this.users.logUserAction(uid, ACTION_CHAIJIE);
+      return [msg];
+    });
+  }
+
+  /**
+   * `[sid, ...]`: each unworn piece is analyzed away, giving 强化宝珠 by chance and type.
+   * Answers `[message]`.
+   */
+  @GlobalCommand()
+  async multipAnalyzeArmor(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const { uid } = ctx;
+    return this.scope.transaction(async () => {
+      const db = this.scope.db;
+      const load = (sid: unknown) =>
+        this.row(sql`select a.*, c.* from sys_user_armor a
+          left join cfg_armor c on c.id = a.armorid where a.uid = ${uid} and a.sid = ${phpString(sid)}`);
+      for (const sid of param) {
+        const armor = await load(sid);
+        if (!armor) throw GameError.lang('equipArmor.Multip_arm_not_exist');
+        if (phpIntval(armor.hid) > 0) throw GameError.lang('equipArmor.can_not_on_hero');
+      }
+      let count = 0;
+      let reward: Row | undefined;
+      for (const sid of param) {
+        const armor = (await load(sid)) ?? {};
+        const type = phpString(armor.type);
+        const armorId = phpIntval(armor.armorid);
+        const rate = this.random.mtRand(0, 100);
+        reward = await this.row(sql`select * from cfg_goods where gid = ${GOODS_STRONG_ORB}`);
+        const rule = ANALYZE_REWARD[type];
+        if (!rule) throw GameError.lang('analyzeArmor.type_not_exist');
+        const [chance, n] =
+          type === '4' && armorId >= LORD_BLUE_MIN && armorId <= LORD_BLUE_MAX ? [30, 2] : rule;
+        if (rate <= chance) {
+          await this.goods.addGoods(uid, GOODS_STRONG_ORB, n, LOG_GOODS_ANALYZE);
+          count += n;
+        }
+        await sql`delete from sys_user_armor where sid = ${phpString(sid)}`.execute(db);
+        await sql`delete from sys_user_tie_deify_attribute where sid = ${phpString(sid)}`.execute(
+          db,
+        );
+        await sql`insert into log_armor (uid, armorid, count, time, type)
+          values (${uid}, ${armor.armorid}, -1, unix_timestamp(), ${LOG_ARMOR_ANALYZE})`.execute(
+          db,
+        );
+      }
+      const msg =
+        count === 0
+          ? this.lang.t('analyzeArmor.analyze_succ')
+          : this.lang.t('analyzeArmor.analyze_succ_reward', reward?.name, count);
+      return [msg];
+    });
+  }
+
+  /** `[armor_column, armors, ...otherInfo]` of the store lists. */
+  private async storeReply(uid: number, armors: Row[]): Promise<unknown[]> {
+    const column = await this.cell(sql`select armor_column from sys_user where uid = ${uid}`);
+    return [column, await this.addSpecial(armors), ...(await this.otherInfo(armors, -1))];
+  }
+
+  /** ArmorFunc.php::activeMorizhiren: re-rolls 末日之刃's effect, answering its text. */
+  private async activeMorizhiren(sid: number): Promise<string> {
+    const db = this.scope.db;
+    const roll = this.random.mtRand(1, 100);
+    const type = roll >= 96 ? 4 : roll >= 86 ? 3 : roll >= 81 ? 2 : 1;
+    await sql`delete from sys_armor_addon where sid = ${sid}`.execute(db);
+    await sql`delete from sys_armor_special where sid = ${sid}`.execute(db);
+    let msg: string;
+    if (type === 1) {
+      const attack = this.random.mtRand(0, 1) === 1;
+      const value = this.random.mtRand(1, 10);
+      const attid = attack ? 10008 : 10009;
+      msg = this.lang.t(
+        attack ? 'active_special.attack_success' : 'active_special.defence_success',
+        value,
+        '%',
+      );
+      await sql`insert into sys_armor_addon (sid, attid, value) values (${sid}, ${attid}, ${value})
+        on duplicate key update attid = ${attid}, value = ${value}`.execute(db);
+    } else if (type === 4) {
+      await sql`insert into sys_armor_addon (sid, attid, value) values (${sid}, 11, 1)
+        on duplicate key update attid = 11, value = 1`.execute(db);
+      msg = this.lang.t('morizhiren.add_speed');
+    } else if (type === 2) {
+      msg = this.lang.t('morizhiren.add_health');
+    } else {
+      msg = this.lang.t('morizhiren.add_degrade_building_level');
+    }
+    await sql`insert into sys_armor_special (sid, type) values (${sid}, ${type})`.execute(db);
+    return msg;
+  }
+
+  /** ActFunc.php::checkAndDoArmorRecycleAct: the 回收装备 event's gift for a sold piece. */
+  private async armorRecycleAct(uid: number, armorType: number): Promise<string | false> {
+    const act = await this.row(sql`select actid, rate from cfg_act
+      where type = ${phpIntval(armorType + ACT_ARMOR_RECYCLE)}
+        and starttime <= unix_timestamp() and endtime >= unix_timestamp() limit 1`);
+    if (!act) return false;
+    if (phpNum(act.rate) < this.random.mtRand(1, 100)) return false;
+    return this.boxes.openEvent(uid, 0, phpIntval(act.actid), SRC_ARMOR_ACT);
   }
 
   /** The hero to change gear on: the player's own, in one of its cities. */

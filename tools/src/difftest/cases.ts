@@ -1679,6 +1679,113 @@ export const cases: DiffCase[] = [
     },
   },
   {
+    name: 'gear store lists, sells, breaks up, analyzes and activates specials',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      const LORD = 80213;
+      const cmd = (func: string, ...args: unknown[]) => s.command(session, func, ...args);
+      // Equal-strength pieces and their parallel tables have no deterministic secondary order.
+      const list = async (func: string, ...args: unknown[]) => {
+        await cmd(func, ...args);
+        for (let i = 1; i < 8; i++) s.unordered(4, i);
+      };
+      const GREY = 900601;
+      const WHITE = 900602;
+      const GREEN = 900603;
+      const LORD_BLUE = 900604;
+      const BLUE = 900605;
+      const PURPLE = 900606;
+      const MORIZHIREN = 900607;
+      const HORSE = 900608;
+      const BREAK = 900609;
+      const UNKNOWN = 900610;
+      const GREY_2 = 900611;
+      const TIE_PIECE = 900612;
+      const pieces: [sid: number, armorid: number, holes: string, pearls: string, level: number][] =
+        [
+          [GREY, 1, '', '', 0],
+          [WHITE, 5, '', '', 0],
+          [GREEN, 29, '', '', 0],
+          [LORD_BLUE, 15001, '', '', 0],
+          [BLUE, 15040, '', '', 0],
+          [PURPLE, 12009, '', '', 0],
+          [MORIZHIREN, 12016, '', '', 0],
+          [HORSE, 1381, '0,0,0,0,0', '0,502,0,0,0', 0],
+          [BREAK, 12010, '0,0,0,0,0', '305,17505,300,17500,305,17505', 12],
+          [UNKNOWN, 999999, '', '', 0],
+          [GREY_2, 1, '', '', 0],
+          [TIE_PIECE, 10191, '0,0,0', '', 3],
+        ];
+      for (const [sid, armorid, holes, pearls, level] of pieces) {
+        await s.query(
+          `insert into sys_user_armor (sid, uid, armorid, hp, hp_max, hid, strong_level,
+             strong_value, embed_holes, embed_pearls)
+           values (?, ?, ?, 1000, 100, 0, ?, 0, ?, ?)`,
+          [sid, uid, armorid, level, holes, pearls],
+        );
+      }
+
+      await list('loadUserArmor');
+      await list('loadUserActivedArmor', 0);
+      await list('loadUserActivedArmor', 1);
+      await list('loadUserActivedArmor', 5);
+
+      // 神兵鉴符 activates a special; 末日之刃 re-rolls one of four effects each time.
+      await s.query('delete from sys_goods where uid = ? and gid = 10522', [uid]);
+      await cmd('loadActiveArmorSpecialGoods', PURPLE);
+      await cmd('activeArmorSpecial', 999999);
+      await cmd('activeArmorSpecial', PURPLE);
+      await s.query('insert into sys_goods (uid, gid, count) values (?, 10522, 9)', [uid]);
+      await cmd('loadActiveArmorSpecialGoods', PURPLE);
+      await cmd('activeArmorSpecial', PURPLE);
+      await cmd('activeArmorSpecial', PURPLE);
+      for (const draws of [[49, 1, 6], [49, 0, 2], [82], [89], [98]]) {
+        s.rng(draws);
+        await cmd('activeArmorSpecial', MORIZHIREN);
+      }
+      s.stopRng();
+
+      // Selling needs a level 5 市场 and 公士; a 坐骑 must have its pearls taken off first.
+      await s.query('update sys_building set level = 4 where cid = ? and bid = 13', [cid]);
+      await cmd('sellArmor', cid, GREY);
+      await s.query('update sys_building set level = 15 where cid = ? and bid = 13', [cid]);
+      await s.query('update sys_user set nobility = 0 where uid = ?', [uid]);
+      await cmd('sellArmor', cid, GREY);
+      await s.query('update sys_user set nobility = 1 where uid = ?', [uid]);
+      await cmd('sellArmor', cid, 999999);
+      await cmd('sellArmor', cid, HORSE);
+      s.rng([0]);
+      await cmd('sellArmor', cid, GREY);
+      await s.query('update cfg_act set endtime = 0 where type = 6402');
+      await cmd('sellArmor', cid, WHITE);
+      s.stopRng();
+
+      // Breaking up gives 装备碎片, 强化宝珠 and (half the time each) gems or lower gems.
+      await cmd('zhuangbeichaijie', 999999);
+      await s.query('update sys_user_armor set hid = ? where sid = ?', [LORD, BLUE]);
+      await cmd('zhuangbeichaijie', BLUE);
+      await cmd('zhuangbeichaijie', GREEN);
+      await cmd('zhuangbeichaijie', HORSE);
+      s.rng([10, 60, 70, 20, 30, 80, 1]);
+      await cmd('zhuangbeichaijie', BREAK);
+      s.stopRng();
+
+      // Analyzing checks every piece first, then rolls 0..100 for each.
+      await cmd('multipAnalyzeArmor', 999999);
+      await cmd('multipAnalyzeArmor', GREEN, BLUE);
+      await s.query('update sys_user_armor set hid = 0 where sid = ?', [BLUE]);
+      s.rng([40, 70, 31, 65, 100, 0]);
+      await cmd('multipAnalyzeArmor', GREY_2, GREEN, LORD_BLUE, BLUE, PURPLE, MORIZHIREN);
+      s.rng([66]);
+      await cmd('multipAnalyzeArmor', TIE_PIECE);
+      await cmd('multipAnalyzeArmor', UNKNOWN);
+      s.stopRng();
+      await list('loadUserArmor');
+    },
+  },
+  {
     name: 'hero skills are learnt, books worn and taken off, the shelf grows and books sell',
     run: async (s) => {
       const session = await s.login(EXISTING_PLAYER);

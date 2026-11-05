@@ -246,7 +246,8 @@ legacy/          本地生成的原版文件（不提交）
 客户端引用但服务端未实现的接口按 8 波补齐，每波：读原版 → 服务端与单测 → 差分用例 → 客户端 → 全量检查 → 浏览器实测并还原数据 → 提交。
 
 - W1 完成：采集 `gatherFieldStart` / `gatherFieldEnd` / `gatherStartAll` / `gatherEndAll`（`world/gather.commands.ts`，含藏宝图、寻宝与采集活动礼包、古朴木匣、名将任务道具；原版 `gatherEndAll` 无排序、按 MyISAM 插入顺序结算，这里按部队 id 排序）、`allowAutoDiscard`、宝物合成 `goodsCompose`。客户端：军队对话框四个采集回包的提示、收获确认带采集时长、全部采集不再二次确认；合成结果框修复（原先把物品列表多包了一层，结果框为空）。差分 2 组新用例（采集时长的秒数会跨秒，比较时抹掉）。
-- 待做：W2 装备仓库、W3 铁匠铺洗练/熔炼/升级与坐骑、W4 迁城令/免战牌/休假/离间符/宣战/援助、W5 武魂与卡牌、W6 君主学习/战术/赞扬/赏赐/战报历练、W7 名将与委托任务、W8 登录奖励/签到/活动栏与沙场、VIP 抛错桩。
+- W2 完成：装备仓库 `loadUserArmor` / `loadUserActivedArmor` / `sellArmor`（含回收装备活动礼包）/ `zhuangbeichaijie` / `multipAnalyzeArmor` / `loadActiveArmorSpecialGoods` / `activeArmorSpecial`（末日之刃四种特效重随），在 `hero/armor.commands.ts`。注意：原版 `0704` 作为 PHP 参数是八进制（log_goods 记 452），写在 SQL 字符串里是十进制（log_armor 记 704）；`loadUserActivedArmor` 传 0/1/2 以外的类型时原版 foreach 警告变成错误回包，这里照抄。客户端新增 `views/armor/`（ArmorDialog / UserArmorItem / ActiveArmorSpecial），信息面板「装备」按钮打开；部位、品质过滤，分页，回收、分解、特效、激活、拆解菜单，批量选择分解，全部修理 / 全部修复，武器架加栏位，蓝装以上走二级密码。「展示」需要聊天物品链接，聊天还没有，菜单项置灰。差分 1 组新用例。
+- 待做：W3 铁匠铺洗练/熔炼/升级与坐骑、W4 迁城令/免战牌/休假/离间符/宣战/援助、W5 武魂与卡牌、W6 君主学习/战术/赞扬/赏赐/战报历练、W7 名将与委托任务、W8 登录奖励/签到/活动栏与沙场、VIP 抛错桩。
 
 ## 开发流程
 

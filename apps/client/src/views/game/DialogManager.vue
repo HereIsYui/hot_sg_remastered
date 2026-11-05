@@ -43,6 +43,7 @@ import MailWriteDialog from '../mail/MailWriteDialog.vue';
 import MarketDialog from '../market/MarketDialog.vue';
 import ModifyPasswordDialog from '../system/ModifyPasswordDialog.vue';
 import OpenLockDialog from '../system/OpenLockDialog.vue';
+import ArmorDialog from '../armor/ArmorDialog.vue';
 import BuyAndUseGoodsDialog from '../shop/BuyAndUseGoodsDialog.vue';
 import ShopDialog from '../shop/ShopDialog.vue';
 import StoreDialog from '../store/StoreDialog.vue';
@@ -121,6 +122,7 @@ function choose(action: 'all' | 'level') {
     <ModifyPasswordDialog v-else-if="dialog?.name === 'modifyPassword'" />
     <TaskDialog v-else-if="dialog?.name === 'task'" />
     <MyGoodsDialog v-else-if="dialog?.name === 'myGoods'" />
+    <ArmorDialog v-else-if="dialog?.name === 'armor'" />
     <CampaignFavouritesDialog v-else-if="dialog?.name === 'favourites'" />
     <WorldActionDialog
       v-else-if="dialog?.name === 'worldAction'"

@@ -15,6 +15,7 @@ export type PlainDialog =
   | 'modifyPassword'
   | 'task'
   | 'myGoods'
+  | 'armor'
   | 'favourites'
   | 'friend'
   | 'union'
