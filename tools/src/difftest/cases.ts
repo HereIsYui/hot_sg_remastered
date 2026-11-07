@@ -649,6 +649,15 @@ export const cases: DiffCase[] = [
         cid,
       ]);
       await s.command(session, 'changeCityName', cid, '又城');
+      const fields = await s.query<{ wid: string }>(
+        'select wid from mem_world where ownercid = ?',
+        [cid],
+      );
+      for (const field of fields) {
+        await s.query('delete from sys_troops where targetcid = ? and state = 4', [
+          wid2cid(Number(field.wid)),
+        ]);
+      }
       await s.query('delete from cfg_soldier_special_city where cid = ?', [cid]);
 
       for (const resid of [0, 1, 2, 3, 4, 9]) {
@@ -747,6 +756,15 @@ export const cases: DiffCase[] = [
         cid,
       ]);
       await s.command(session, 'discardCity', cid);
+      const fields = await s.query<{ wid: string }>(
+        'select wid from mem_world where ownercid = ?',
+        [cid],
+      );
+      for (const field of fields) {
+        await s.query('delete from sys_troops where targetcid = ? and state = 4', [
+          wid2cid(Number(field.wid)),
+        ]);
+      }
       await s.query('delete from cfg_soldier_special_city where cid = ?', [cid]);
 
       const [field] = await s.query<{ wid: string }>(
@@ -7797,6 +7815,375 @@ export const cases: DiffCase[] = [
       await s.command(session, 'getPageRank', 0, 'battle_week');
     },
   },
+
+  // W4: keep response errors exact; successful writes are compared by the normal table delta.
+  {
+    name: 'W4 relocation: ordinary validation order and unique random destination',
+    tables: { log_move_city: { offsets: ['time'] } },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const cid = await lastCity(s, session.uid);
+      const target = await w4MoveDestination(s, cid);
+      await s.query('delete from sys_goods where uid = ? and gid = 24', [session.uid]);
+      await s.command(session, 'changeCityPosition', 99, 999999); // province before goods/owner
+      await s.query('update mem_world set state = 1 where wid = ?', [cid2wid(target)]);
+      await s.command(session, 'changeCityPosition', 18, 999999); // land exists, none usable
+      await s.query('update mem_world set state = 0 where wid = ?', [cid2wid(target)]);
+      await s.command(session, 'changeCityPosition', 18, 999999); // goods before ownership
+      await w4Goods(s, session.uid, 24, 2);
+      await s.command(session, 'changeCityPosition', 18, 999999);
+      await s.query('update mem_world set state = 1 where wid = ?', [cid2wid(cid)]);
+      await s.command(session, 'changeCityPosition', 18, cid); // own city in battle
+      await s.query('update mem_world set state = 0 where wid = ?', [cid2wid(cid)]);
+      s.rng([17]); // province 0 draws province 18; SQL RAND is pinned by the unique candidate
+      w4Success(await s.command(session, 'changeCityPosition', 0, cid));
+      await w4Number(
+        s,
+        'select lastcid as value from sys_user where uid = ?',
+        [session.uid],
+        target,
+      );
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 24',
+        [session.uid],
+        1,
+      );
+      await w4Number(
+        s,
+        'select ownercid as value from mem_world where wid = ?',
+        [cid2wid(target)],
+        target,
+      );
+      // Both ids are deterministic and deliberately not aliased: cid/wid alias collisions cannot hide a write.
+    },
+  },
+  {
+    name: 'W4 relocation: advanced coordinates, item before owner, schedule and inventory',
+    tables: {
+      log_move_city: { offsets: ['time'] },
+      mem_city_schedule: {
+        ignore: ['next_good_event', 'next_bad_event'],
+        offsets: ['last_anming', 'last_reset_recruit', 'last_adv_move'],
+      },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const cid = await lastCity(s, session.uid);
+      const target = await w4MoveDestination(s, cid);
+      const x = target % 1000;
+      const y = Math.floor(target / 1000);
+      await s.query('delete from sys_goods where uid = ? and gid = 82', [session.uid]);
+      await s.command(session, 'changeCityPositionPointing', -1, y, 999999);
+      await s.command(session, 'changeCityPositionPointing', 501, y, 999999);
+      await s.command(session, 'changeCityPositionPointing', x, y, 999999);
+      await w4Goods(s, session.uid, 82, 2);
+      await s.command(session, 'changeCityPositionPointing', x, y, 999999);
+      await s.command(
+        session,
+        'changeCityPositionPointing',
+        cid % 1000,
+        Math.floor(cid / 1000),
+        cid,
+      );
+      w4Success(await s.command(session, 'changeCityPositionPointing', x, y, cid));
+      await w4Number(
+        s,
+        'select lastcid as value from sys_user where uid = ?',
+        [session.uid],
+        target,
+      );
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 82',
+        [session.uid],
+        1,
+      );
+      await w4Number(
+        s,
+        'select (last_adv_move >= unix_timestamp() - 10) as value from mem_city_schedule where cid = ?',
+        [target],
+        1,
+      );
+    },
+  },
+  {
+    name: 'W4 protection: free extension, paid cooldown bypass, recovery and allowPK upsert',
+    tables: {
+      log_action_time: { offsets: ['time'] },
+      sys_user_action_log: { offsets: ['time'] },
+    },
+    run: async (s) => {
+      s.rng([0]); // Pin giveDalibao's mt_rand(0, 1) to gid 50186 on both servers.
+      const session = await s.login(EXISTING_PLAYER);
+      s.stopRng();
+      const uid = session.uid;
+      await w4Idle(s, uid);
+      await s.query('update mem_state set value = 0 where state = 197');
+      await s.query("delete from sys_user_action_log where uid = ? and action = 'usemianzhan'", [
+        uid,
+      ]);
+      await w4Goods(s, uid, 12, 10);
+      await s.command(session, 'changeUserState', -1, 0);
+      await s.command(session, 'changeUserState', 4, 0);
+      await s.command(session, 'changeUserState', 0, 0); // already normal
+      await s.command(session, 'loadMianZhanEndTime'); // absent buffer and counter
+      w4Success(await s.command(session, 'changeUserState', 1, 0));
+      // loadUserGoods: things only ORDER BY cfg_things.position (ties may permute).
+      // Keep goods at [4][1][0] ordered: cfg_goods.group,gid includes the unique gid.
+      s.unordered(4, 1, 1);
+      w4Success(await s.command(session, 'changeUserState', 1, 0)); // second use consumes two
+      s.unordered(4, 1, 1);
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 12',
+        [uid],
+        7,
+      );
+      await s.command(session, 'loadMianZhanEndTime');
+      s.offset(4, 0);
+      w4Success(await s.command(session, 'changeUserState', 0, 0));
+      s.unordered(4, 1, 1);
+      await s.query('update mem_user_buffer set endtime = 1 where uid = ? and buftype = 8', [uid]);
+      await s.command(session, 'changeUserState', 1, 0); // expired row still blocks (existence check)
+      s.mask(1); // negative MakeTimeLeft embeds the call's second
+      await s.query('update sys_user set money = 299 where uid = ?', [uid]);
+      await s.command(session, 'changeUserState', 3, 0);
+      await s.query('update sys_user set money = 500 where uid = ?', [uid]);
+      await s.query(
+        'insert into mem_user_buffer (uid, buftype, endtime) values (?, 913, unix_timestamp() + 10000)',
+        [uid],
+      );
+      w4Success(await s.command(session, 'changeUserState', 3, 0)); // clears both 8 and 913
+      s.unordered(4, 1, 1);
+      await w4Number(s, 'select money as value from sys_user where uid = ?', [uid], 200);
+      await s.query(
+        'insert into sys_allowpk (uid, allow) values (?, 0) on duplicate key update allow = 0',
+        [uid],
+      );
+      w4Success(await s.command(session, 'allowPK'));
+      w4Success(await s.command(session, 'allowPK'));
+      await w4Number(s, 'select allow as value from sys_allowpk where uid = ?', [uid], 1);
+    },
+  },
+  {
+    name: 'W4 vacation: validation order, buffer 23 versus 913, begin and early recovery',
+    tables: { sys_user_state: { offsets: ['vacstart', 'vacend'] } },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await w4Idle(s, uid);
+      await s.query('update sys_user set money = 0 where uid = ?', [uid]);
+      await s.command(session, 'changeUserState', 2, 1);
+      await s.command(session, 'changeUserState', 2, 100);
+      await s.query('update sys_technic set state = 1 where uid = ?', [uid]);
+      await s.query('update sys_building set state = 1 where cid = ?', [cid]);
+      await s.command(session, 'changeUserState', 2, 2); // technic before building/money
+      await s.query('update sys_technic set state = 0 where uid = ?', [uid]);
+      await s.command(session, 'changeUserState', 2, 2);
+      await s.query('update sys_building set state = 0 where cid = ?', [cid]);
+      await s.command(session, 'changeUserState', 2, 2); // money
+      await s.query('update sys_user set money = 500 where uid = ?', [uid]);
+      await s.query(
+        'insert into mem_user_buffer (uid, buftype, bufparam, endtime) values (?, 23, 7, 1)',
+        [uid],
+      );
+      await s.command(session, 'changeUserState', 2, 2); // even an expired 23 blocks
+      s.mask(1); // negative MakeTimeLeft embeds the call's second
+      await s.query('delete from mem_user_buffer where uid = ? and buftype = 23', [uid]);
+      await s.query('insert into mem_user_buffer (uid, buftype, endtime) values (?, 913, 1)', [
+        uid,
+      ]);
+      w4Success(await s.command(session, 'changeUserState', 2, 2)); // 913 does not block vacation
+      await w4Number(s, 'select money as value from sys_user where uid = ?', [uid], 470);
+      await w4Number(s, 'select vacation as value from mem_city_resource where cid = ?', [cid], 1);
+      await w4Number(s, 'select state as value from sys_user where uid = ?', [uid], 0); // PHP never sets state=6
+      await w4Number(
+        s,
+        'select (endtime > unix_timestamp() + 172800) as value from mem_user_buffer where uid = ? and buftype = 913',
+        [uid],
+        1,
+      );
+      await s.query(
+        'update sys_user_state set vacstart = unix_timestamp() - 3 * 86400, vacend = unix_timestamp() + 86400 where uid = ?',
+        [uid],
+      );
+      w4Success(await s.command(session, 'changeUserState', 0, 0));
+      await w4Number(s, 'select vacation as value from mem_city_resource where cid = ?', [cid], 0);
+    },
+  },
+  {
+    name: 'W4 lijian: coordinate, city, inventory, union gates and global loyalty update',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const other = await s.login('judingwan');
+      const target = await lastCity(s, other.uid);
+      const x = target % 1000;
+      const y = Math.floor(target / 1000);
+      await s.query('update sys_user set union_id = 0 where uid in (?, ?)', [uid, other.uid]);
+      await s.query('delete from sys_goods where uid = ? and gid in (160035, 160036, 160037)', [
+        uid,
+      ]);
+      await s.command(session, 'useLiJianFu', -1, y, 160035);
+      await s.command(session, 'useLiJianFu', 500, 500, 160035);
+      await s.command(session, 'useLiJianFu', x, y, 160035);
+      await w4Goods(s, uid, 160035, 2);
+      await s.command(session, 'useLiJianFu', x, y, 160035); // equal union 0 rejects
+      await s.query('update sys_user set union_id = 990041 where uid = ?', [other.uid]);
+      // Guarantee exactly one eligible target hero, plus an unrelated hero to catch missing-WHERE semantics.
+      await s.query('delete from sys_city_hero where cid = ?', [target]);
+      await s.query(
+        `insert into sys_city_hero (hid, uid, name, sex, face, cid, loyalty) values (990041, ?, '离间目标', 0, 0, ?, 80), (990042, ?, '无关武将', 0, 0, 0, 60)`,
+        [other.uid, target, uid],
+      );
+      s.rng([0]);
+      for (const [gid, drop] of [
+        [160035, 1],
+        [160036, 3],
+        [160037, 5],
+      ] as const) {
+        await w4Goods(s, uid, gid, 2);
+        const [before] = await s.query<{ value: string }>(
+          'select sum(loyalty) as value from sys_city_hero',
+        );
+        const [count] = await s.query<{ value: string }>(
+          'select count(*) as value from sys_city_hero',
+        );
+        w4Success(await s.command(session, 'useLiJianFu', x, y, gid));
+        await w4Number(
+          s,
+          'select sum(loyalty) as value from sys_city_hero',
+          [],
+          Number(before!.value) - Number(count!.value) * drop,
+        );
+      }
+      await w4Number(s, 'select loyalty as value from sys_city_hero where hid = 990042', [], 51);
+    },
+  },
+  {
+    name: 'W4 war: declaration order, reverse duplicate and reports',
+    tables: {
+      mem_user_inwar: { offsets: ['endtime'] },
+      sys_report: { offsets: ['time'], map: { content: w4ReportClock } },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const other = await s.login('judingwan');
+      const target = await lastCity(s, other.uid);
+      await s.query('delete from mem_user_inwar where uid in (?, ?) or targetuid in (?, ?)', [
+        session.uid,
+        other.uid,
+        session.uid,
+        other.uid,
+      ]);
+      await s.query('update sys_user set state = 1, union_id = 0 where uid in (?, ?)', [
+        session.uid,
+        other.uid,
+      ]);
+      await s.command(session, 'startWar', other.uid, target); // own protection first
+      await s.query('update sys_user set state = 0 where uid = ?', [session.uid]);
+      await s.command(session, 'startWar', other.uid, target);
+      await s.query('update sys_user set state = 0 where uid = ?', [other.uid]);
+      w4Success(await s.command(session, 'startWar', other.uid, target));
+      s.unordered(4);
+      await w4Number(
+        s,
+        'select count(*) as value from mem_user_inwar where uid = ? and targetuid = ? and state = 0',
+        [session.uid, other.uid],
+        1,
+      );
+      await s.query('update sys_user set state = 1 where uid = ?', [other.uid]);
+      await s.command(other, 'startWar', session.uid, await lastCity(s, session.uid)); // duplicate before newbie
+    },
+  },
+  {
+    name: 'W4 taoni: goods before war, target city owner, refresh and no prestige deduction',
+    tables: {
+      mem_user_trickwar: { offsets: ['endtime'] },
+      sys_report: { offsets: ['time'], map: { content: w4ReportClock } },
+    },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const other = await s.login('judingwan');
+      const uid = session.uid;
+      const target = await lastCity(s, other.uid);
+      await s.query('delete from mem_user_inwar where uid = ? or targetuid = ?', [uid, uid]);
+      await s.query('delete from sys_goods where uid = ? and gid = 157', [uid]);
+      await s.query('update sys_user set state = 1 where uid in (?, ?)', [uid, other.uid]);
+      await s.command(session, 'useTaoNiShengZhi', other.uid, target);
+      await w4Goods(s, uid, 157, 3);
+      await s.command(session, 'useTaoNiShengZhi', other.uid, target);
+      await s.query('update sys_user set state = 0, prestige = 10000 where uid = ?', [uid]);
+      await s.command(session, 'useTaoNiShengZhi', other.uid, target);
+      await s.query('update sys_user set state = 0, prestige = 100 where uid = ?', [other.uid]);
+      // Supplied uid checks protection; actual war/report target is re-read from the city.
+      w4Success(await s.command(session, 'useTaoNiShengZhi', uid, target));
+      w4Success(await s.command(session, 'useTaoNiShengZhi', other.uid, target));
+      await w4Number(s, 'select prestige as value from sys_user where uid = ?', [uid], 10000);
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 157',
+        [uid],
+        1,
+      );
+      await w4Number(
+        s,
+        'select count(*) as value from mem_user_trickwar where uid = ? and targetuid = ?',
+        [uid, other.uid],
+        1,
+      );
+      await s.query(
+        'insert into mem_user_inwar (uid, targetuid, state, endtime) values (?, ?, 0, 1)',
+        [other.uid, uid],
+      );
+      await s.command(session, 'useTaoNiShengZhi', other.uid, target); // reversed, expired war still blocks
+    },
+  },
+  {
+    name: 'W4 unionAssit: city, position, union, buffers, war, money and extension',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const other = await s.login('judingwan');
+      const uid = session.uid;
+      const target = await lastCity(s, other.uid);
+      await w4Idle(s, other.uid);
+      await s.query(
+        'update sys_user set union_id = 990041, union_pos = 0, money = 0 where uid = ?',
+        [uid],
+      );
+      await s.query('update sys_user set union_id = 990042 where uid = ?', [other.uid]);
+      await s.command(session, 'unionAssit', 999999);
+      await s.command(session, 'unionAssit', target);
+      await s.query('update sys_user set union_pos = 4 where uid = ?', [uid]);
+      await s.command(session, 'unionAssit', target);
+      await s.query('update sys_user set union_id = 990041 where uid = ?', [other.uid]);
+      await s.query(
+        'insert into mem_user_buffer (uid, buftype, endtime) values (?, 8, unix_timestamp() + 3600)',
+        [other.uid],
+      );
+      await s.command(session, 'unionAssit', target);
+      await s.query('delete from mem_user_buffer where uid = ? and buftype = 8', [other.uid]);
+      await s.query('update sys_city set type = 0 where cid = ?', [target]);
+      await s.query('update mem_world set state = 1 where wid = ?', [cid2wid(target)]);
+      await s.command(session, 'unionAssit', target);
+      await s.query('update mem_world set state = 0 where wid = ?', [cid2wid(target)]);
+      await s.command(session, 'unionAssit', target);
+      await s.query('update sys_user set money = 500 where uid = ?', [uid]);
+      w4Success(await s.command(session, 'unionAssit', target));
+      await s.query('update sys_user set union_pos = 5 where uid = ?', [uid]);
+      w4Success(await s.command(session, 'unionAssit', target));
+      await w4Number(s, 'select money as value from sys_user where uid = ?', [uid], 100);
+      await w4Number(s, 'select state as value from sys_user where uid = ?', [other.uid], 2);
+      await w4Number(
+        s,
+        'select (endtime between unix_timestamp() + 14380 and unix_timestamp() + 14400) as value from mem_user_buffer where uid = ? and buftype = 7',
+        [other.uid],
+        1,
+      );
+    },
+  },
 ];
 
 async function seedScoutPatrol(
@@ -8010,4 +8397,115 @@ async function lastCity(side: Side, uid: number): Promise<number> {
     [uid],
   );
   return Number(row?.lastcid ?? 0);
+}
+
+/** Assert success as well as parity: two matching errors must not pass a successful-write case. */
+function w4Success(response: unknown): void {
+  if (!Array.isArray(response) || Number(response[0]) !== 1) {
+    throw new Error(`W4 expected command success: ${JSON.stringify(response)}`);
+  }
+}
+
+async function w4Number(s: Side, sql: string, params: unknown[], expected: number): Promise<void> {
+  const [row] = await s.query<{ value: string }>(sql, params);
+  if (!row || Number(row.value) !== expected) {
+    throw new Error(`W4 invariant failed: ${sql}; expected ${expected}, got ${row?.value}`);
+  }
+}
+
+async function w4Goods(s: Side, uid: number, gid: number, count: number): Promise<void> {
+  await s.query(
+    'insert into sys_goods (uid, gid, count) values (?, ?, ?) on duplicate key update count = values(count)',
+    [uid, gid, count],
+  );
+}
+
+/** Remove only the tested user's activity so protection/relocation checks reach their intended gate. */
+async function w4Idle(s: Side, uid: number): Promise<void> {
+  await s.query('update sys_user set state = 0 where uid = ?', [uid]);
+  await s.query('delete from sys_user_state where uid = ?', [uid]);
+  await s.query('delete from mem_user_buffer where uid = ? and buftype in (7, 8, 23, 913)', [uid]);
+  await s.query('delete from sys_troops where uid = ?', [uid]);
+  await s.query('delete from sys_luoyang_troops where uid = ?', [uid]);
+  await s.query('update sys_technic set state = 0 where uid = ?', [uid]);
+  await s.query(
+    'update sys_building set state = 0 where cid in (select cid from sys_city where uid = ?)',
+    [uid],
+  );
+  for (const table of ['sys_city_draftqueue', 'sys_city_reinforcequeue']) {
+    await s.query(`delete from ${table} where cid in (select cid from sys_city where uid = ?)`, [
+      uid,
+    ]);
+  }
+  await s.query(
+    'update mem_world set state = 0 where ownercid in (select cid from sys_city where uid = ?)',
+    [uid],
+  );
+}
+
+async function w4MoveDestination(s: Side, cid: number): Promise<number> {
+  const [owner] = await s.query<{ uid: string }>('select uid from sys_city where cid = ?', [cid]);
+  await w4Idle(s, Number(owner!.uid));
+  await s.query('update mem_state set value = 0 where state = 197');
+  // Deterministic ORDER BY, no aliasing; filter cid==wid to avoid both placeholder collisions.
+  const rows = await s.query<{ wid: string }>(
+    'select w.wid from mem_world w where w.type = 1 and w.ownercid = 0 and w.wid > 0 and not exists (select 1 from sys_city c where c.cid = (floor(w.wid / 10000) * 10 + floor((w.wid % 100) / 10)) * 1000 + floor((w.wid % 10000) / 100) * 10 + (w.wid % 10)) order by w.wid',
+  );
+  const row = rows.find(
+    (r) => wid2cid(Number(r.wid)) !== Number(r.wid) && wid2cid(Number(r.wid)) !== cid,
+  );
+  if (!row) throw new Error('W4 needs a free relocation tile');
+  const wid = Number(row.wid);
+  const target = wid2cid(wid);
+  // Free NPC tiles retain data. Clear the destination before either server performs deletes/updates.
+  for (const table of [
+    'sys_city',
+    'sys_building',
+    'mem_building_destroying',
+    'mem_building_upgrading',
+    'mem_technic_upgrading',
+    'sys_city_technic',
+    'sys_technic',
+    'mem_city_buffer',
+    'sys_city_soldier',
+    'sys_city_draftqueue',
+    'mem_city_draft',
+    'mem_city_wounded',
+    'mem_city_captive',
+    'mem_city_lamster',
+    'sys_city_defence',
+    'sys_city_reinforcequeue',
+    'mem_city_reinforce',
+    'sys_city_hero',
+    'sys_city_tactics',
+    'sys_city_res_add',
+    'mem_city_resource',
+    'mem_city_schedule',
+    'sys_city_rumor',
+    'sys_recruit_hero',
+  ])
+    await s.query(`delete from ${table} where cid = ?`, [target]);
+  await s.query('delete from sys_troops where cid = ? or targetcid = ?', [target, target]);
+  await s.query('delete from sys_troops where targetcid = ? and state = 4', [cid]);
+  const fields = await s.query<{ wid: string }>('select wid from mem_world where ownercid = ?', [
+    cid,
+  ]);
+  for (const field of fields) {
+    await s.query('delete from sys_troops where targetcid = ? and state = 4', [
+      wid2cid(Number(field.wid)),
+    ]);
+  }
+  await s.query('delete from cfg_soldier_special_city where cid = ?', [cid]);
+  await s.query('update sys_city set type = 0 where cid = ?', [cid]);
+  await s.query('update mem_world set state = 1 where province = 18 and type = 1 and ownercid = 0');
+  await s.query(
+    'update mem_world set province = 18, type = 1, state = 0, ownercid = 0 where wid = ?',
+    [wid],
+  );
+  return target;
+}
+
+/** Preserve report wording, users and dates: only the wall-clock HH:MM:SS is nondeterministic. */
+function w4ReportClock(value: unknown): unknown {
+  return typeof value === 'string' ? value.replace(/\b\d{2}:\d{2}:\d{2}\b/g, '<clock>') : value;
 }

@@ -24,6 +24,10 @@ import { UseGoodsType } from './goods';
 import { GuideManager } from './guide';
 import { loadLoginPrefs, saveLoginPrefs, type LoginPrefs } from './loginPrefs';
 import { HERO_TYPE_KING } from './units';
+import { DEFAULT_USER_RULE } from './userRules';
+import { stateReply } from './userState';
+import { useWorldStore } from '../stores/world';
+import { parseWorldCityInfo } from './world';
 import { PUSH_ENDPOINT } from '@hot/shared';
 
 type Row = Record<string, unknown>;
@@ -74,6 +78,12 @@ export class Game {
   private pollCountdown = { resource: 15, units: 60, time: 600 };
   private buildingWait = { seconds: 0, slot: '' };
   private showingFault = false;
+  private pendingStatePurchase: {
+    gids: number[];
+    action: string;
+    command: string;
+    args: CommandArg[];
+  } | null = null;
   private readonly dialogReceivers = new Set<DialogReceiver>();
   private readonly globalReceivers = new Map<string, Set<GlobalReceiver>>();
   /** The action guarded by the open 2级密码 dialog (`BloodWar.unLockType` dispatch). */
@@ -119,6 +129,8 @@ export class Game {
     this.session.dialog = null;
     this.session.useGoods = null;
     this.session.screen = 'login';
+    this.session.userRule = false;
+    this.pendingStatePurchase = null;
     setAlertLabels({
       ok: i18n('Login_LoginDialogSrc_4'),
       yes: i18n('Login_LoginDialogSrc_2'),
@@ -163,6 +175,8 @@ export class Game {
     this.user.userCardId = result.cardId;
     this.user.isAdult = result.isAdult;
     this.user.lastUpdateServerId = result.lastUpdateServerId;
+    this.session.userRule = result.showRule;
+    this.session.userRuleContent = this.userRuleContent();
     this.loginGameNow();
   }
 
@@ -332,6 +346,31 @@ export class Game {
   }
 
   onGlobalCommand(action: string, command: string, data: unknown): void {
+    if (action === 'buybeforeuse' && command === 'buyGoodsBeforeUse' && Array.isArray(data)) {
+      const pending = this.pendingStatePurchase;
+      if (pending?.gids.includes(int(data[0]))) {
+        this.pendingStatePurchase = null;
+        this.sendGlobalCommand(pending.action, pending.command, pending.args);
+      }
+    }
+    if (
+      action === 'world' &&
+      (command === 'startWar' || command === 'useTaoNiShengZhi' || command === 'unionAssit')
+    ) {
+      this.pendingStatePurchase = null;
+      if (command === 'startWar') {
+        const world = useWorldStore(this.pinia);
+        for (const info of parseWorldCityInfo(data)) world.cityInfo.set(info.cid, info);
+        gameAlert(i18n('World_WorldPanelSrc_9'));
+      } else if (command === 'useTaoNiShengZhi')
+        void showAlert(String((data as unknown[])[0] ?? ''));
+      else {
+        gameAlert(String((data as unknown[])[0] ?? ''));
+        this.refreshResource();
+      }
+      if (command !== 'unionAssit' && this.session.dialog?.name === 'worldAction')
+        this.closeDialog();
+    }
     if (action === 'user') this.onUserCommand(command, data);
     else if (action === 'city') this.onCityCommand(command, data);
     else if (action === 'openlock') this.onOpenLock(data);
@@ -376,6 +415,49 @@ export class Game {
         this.global.applyProvinceInfo(d);
         this.session.provinceLoaded = true;
       }
+    }
+    if (command === 'useTypeGoods' && Array.isArray(data) && [12, 143].includes(int(data[0]))) {
+      this.pendingStatePurchase = null;
+      this.refreshResource();
+      this.sendGlobalCommand('user', 'loadMianZhanEndTime');
+    }
+    if (command === 'allowPK') this.session.userRule = false;
+    if (command === 'changeUserState') {
+      this.pendingStatePurchase = null;
+      const reply = stateReply(data);
+      if (reply?.kind === 'vacation') {
+        this.user.ustate = 6;
+        this.user.locked = true;
+        this.closeDialog();
+        this.session.useGoods = null;
+        this.session.vacation = {
+          start: serverTime(),
+          end: serverTime() + reply.seconds,
+          started: true,
+        };
+      } else if (
+        reply?.kind === 'cancelVacation' ||
+        (reply?.kind === 'state' && reply.state === 0 && this.user.locked)
+      ) {
+        this.session.vacation = null;
+        this.user.locked = false;
+        this.user.ustate = 0;
+        this.loadUserInfo();
+      } else if (reply?.kind === 'state') {
+        this.user.ustate = reply.state;
+        this.refreshResource();
+        gameAlert(i18n('_BloodWarSrc_13'));
+      }
+    }
+    if (command === 'useLiJianFu') {
+      gameAlert(i18n('Good_Use_LiJianFu'));
+      this.sendGlobalCommand('goods', 'loadUserGoods');
+    }
+    if (command === 'changeCityPosition' || command === 'changeCityPositionPointing') {
+      const cid = int((data as unknown[])?.[0]);
+      if (cid) useWorldStore(this.pinia).centre = { x: cid % 1000, y: Math.floor(cid / 1000) };
+      this.loadUserInfo();
+      gameAlert(i18n('_BloodWarSrc_16'));
     }
     if (command === 'createRole' || command === 'createCity') this.loadUserInfo();
     if (command === 'createRole') this.session.welcome = true;
@@ -623,6 +705,50 @@ export class Game {
    */
   showUseGoodsDialog(time: number, type: number, param: (number | string)[] = []): void {
     this.session.useGoods = { time, type, param };
+  }
+
+  openChangeState(): void {
+    if (this.user.ustate === 1) {
+      void showAlert(i18n('Goods_MyGoodsDialogSrc_10'));
+      return;
+    }
+    this.showDialog('changeState');
+  }
+
+  changeUserState(index: number, days: string): void {
+    const args: CommandArg[] = [index, days];
+    this.pendingStatePurchase = {
+      gids: index === 1 ? [12] : [],
+      action: 'user',
+      command: 'changeUserState',
+      args,
+    };
+    this.sendGlobalCommand('user', 'changeUserState', args);
+  }
+
+  cancelStatePurchase(): void {
+    this.pendingStatePurchase = null;
+  }
+
+  useStateGoods(type: number, gid: number, cid: number, extra: CommandArg[]): void {
+    const args: CommandArg[] = [type, gid, cid, ...extra];
+    this.pendingStatePurchase = { gids: [gid], action: 'user', command: 'useTypeGoods', args };
+    this.sendGlobalCommand('user', 'useTypeGoods', args);
+  }
+
+  declareWar(uid: number, cid: number, useGoods: boolean): void {
+    const command = useGoods ? 'useTaoNiShengZhi' : 'startWar';
+    this.pendingStatePurchase = useGoods
+      ? { gids: [157], action: 'world', command, args: [uid, cid] }
+      : null;
+    this.sendWorldCommand(command, [uid, cid]);
+  }
+
+  /** Legacy page supplied getUserRule; use the page override when provided, otherwise the bundled original rules. */
+  private userRuleContent(): string {
+    const host =
+      typeof window !== 'undefined' ? (window as Window & { getUserRule?: () => string }) : null;
+    return host?.getUserRule?.() ?? DEFAULT_USER_RULE;
   }
 
   /** `DialogManager.showShopDialog`: opens the 商城 over the scene, optionally on a given tab. */
@@ -888,12 +1014,16 @@ export class Game {
     this.startTimer();
 
     if (vacation && int(vacation.vacend) !== 0) {
-      // Vacation (休假) dialog is not ported yet; the account stays locked.
       user.ustate = 6;
       user.locked = true;
-      void showAlert(i18n('_CommandSrc_2'));
+      this.session.vacation = {
+        start: int(vacation.vacstart),
+        end: int(vacation.vacend),
+        started: false,
+      };
       return;
     }
+    this.session.vacation = null;
     if (user.ustate === 3 || user.ustate === 4) {
       this.guide.justCreatedRole = user.ustate === 3;
       this.session.createRoleFirstTime = user.ustate === 3;
@@ -1071,6 +1201,9 @@ export class Game {
   // ---- errors (Command.onReceivedCommand / faultHandler) ----
 
   private onFailure(f: CommandFailure): void {
+    if (f.kind !== 'notEnoughGoods' || !this.pendingStatePurchase?.gids.includes(f.gid)) {
+      this.pendingStatePurchase = null;
+    }
     switch (f.kind) {
       case 'needRefresh':
       case 'invalidAuth':

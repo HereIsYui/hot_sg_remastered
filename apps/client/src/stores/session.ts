@@ -16,6 +16,7 @@ export type PlainDialog =
   | 'task'
   | 'myGoods'
   | 'armor'
+  | 'changeState'
   | 'favourites'
   | 'friend'
   | 'union'
@@ -86,6 +87,9 @@ export interface CampaignRequest {
 export const useSessionStore = defineStore('session', {
   state: () => ({
     screen: 'loading' as Screen,
+    vacation: null as { start: number; end: number; started: boolean } | null,
+    userRule: false,
+    userRuleContent: '',
     loadProgress: 0,
     /** Pending requests with `showBusyCursor`. */
     busy: 0,

@@ -11,10 +11,14 @@ import { ReportService } from './report.service';
 import { RewardRules } from './reward-rules.service';
 import { ScriptedRandomMiddleware } from './scripted-random.middleware';
 import { TaskRules } from './task-rules.service';
+import { CityRelocation } from './city-relocation.service';
+import { UserProtection } from './user-protection.service';
 import { UserRules } from './user-rules.service';
 
 const providers = [
   CityRules,
+  CityRelocation,
+  UserProtection,
   GameStateService,
   GoodsRules,
   HeroRules,

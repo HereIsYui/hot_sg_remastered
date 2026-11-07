@@ -25,13 +25,15 @@ import ChangeFlagDialog from './ChangeFlagDialog.vue';
 import ChangeUserNameDialog from './ChangeUserNameDialog.vue';
 import SellGoodsPanel from './SellGoodsPanel.vue';
 import TreasureGetDialog from './TreasureGetDialog.vue';
+import ChangeCityPositionDialog from './ChangeCityPositionDialog.vue';
+import LiJianFuPanel from './LiJianFuPanel.vue';
+import ChangeStateDialog from '../user/ChangeStateDialog.vue';
 import UserGoodsItem from './UserGoodsItem.vue';
 
 /**
  * Goods.MyGoodsDialog: the player's items by kind, 21 to a page, to use or sell. 旌旗 (39) and
  * 名帖 (84) open a dialog of their own (ChangeFlagDialog / ChangeUserNameDialog); the other
- * items with a dedicated dialog (迁城令, 免战牌, 武魂, 离间符 ...), card mixing and recharging
- * are not ported; the skill books open in a dialog of their own.
+ * W4 items open their own migration/state/alienation forms; skill books have their own dialog.
  */
 const game = useGame();
 const user = useUserStore();
@@ -77,6 +79,9 @@ const skillOpen = ref(false);
 /** 旌旗 (39) and 名帖 (84) each open a dialog of their own instead of the use-confirm. */
 const changeFlagOpen = ref(false);
 const changeNameOpen = ref(false);
+const moving = shallowRef<GoodsItem | null>(null);
+const lijian = shallowRef<GoodsItem | null>(null);
+const stateOpen = ref(false);
 
 function loadUserGoods() {
   game.sendGlobalCommand('goods', 'loadUserGoods');
@@ -135,6 +140,23 @@ async function useGoods(item: GoodsItem) {
   }
   if (item.gid === GOODS_MINGTIE) {
     changeNameOpen.value = true;
+    return;
+  }
+  if (item.gid === 24 || item.gid === 82) {
+    moving.value = item;
+    return;
+  }
+  if (item.gid === 12) {
+    if (user.ustate === 1) void showAlert(src(10));
+    else stateOpen.value = true;
+    return;
+  }
+  if (item.gid >= 160035 && item.gid <= 160037) {
+    lijian.value = item;
+    return;
+  }
+  if (item.gid === 160052) {
+    game.showCityMergeDialog();
     return;
   }
   const box = (item.gid >= 16 && item.gid <= 18) || item.gid === 119;
@@ -244,6 +266,16 @@ const unregister = game.addGlobalReceiver('goods', (command, data) => {
     loadUserGoods();
   }
 });
+const unregisterUser = game.addGlobalReceiver('user', (command, data) => {
+  if (
+    command === 'changeUserState' &&
+    Array.isArray(data) &&
+    Number(data[0]) !== 6 &&
+    data.length > 1
+  )
+    onLoadUserGoods(data[1]);
+});
+onUnmounted(unregisterUser);
 onMounted(loadUserGoods);
 onUnmounted(unregister);
 
@@ -349,6 +381,14 @@ const remembered = { type: 0, page: 0 };
     <TreasureGetDialog v-if="treasure" :items="treasure" @close="treasure = null" />
     <SellGoodsPanel v-if="selling" :goods="selling" @sell="doSellGoods" @close="selling = null" />
   </FxCanvas>
+  <ChangeCityPositionDialog
+    v-if="moving"
+    :advanced="moving.gid === 82"
+    :description="moving.description"
+    @close="moving = null"
+  />
+  <LiJianFuPanel v-if="lijian" :goods="lijian" @close="lijian = null" />
+  <ChangeStateDialog v-if="stateOpen" @close="stateOpen = false" />
   <MySkillDialog v-if="skillOpen" @close="skillOpen = false" />
   <ChangeFlagDialog v-if="changeFlagOpen" @change="onChangeFlag" @close="changeFlagOpen = false" />
   <ChangeUserNameDialog

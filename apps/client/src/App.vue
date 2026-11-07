@@ -6,6 +6,8 @@ import CreateRoleView from './views/CreateRoleView.vue';
 import GameView from './views/GameView.vue';
 import GuideLayer from './views/guide/GuideLayer.vue';
 import JackarooDialog from './views/guide/JackarooDialog.vue';
+import VacationDialog from './views/user/VacationDialog.vue';
+import UserRule from './views/user/UserRule.vue';
 import LoginView from './views/LoginView.vue';
 
 const session = useGame().session;
@@ -23,6 +25,8 @@ const session = useGame().session;
     <GameView v-else-if="session.screen === 'game'" />
     <GuideLayer />
     <JackarooDialog v-if="session.welcome" />
+    <VacationDialog v-if="session.vacation" v-bind="session.vacation" />
+    <UserRule v-if="session.userRule" />
     <OverlayLayer />
   </GameStage>
 </template>

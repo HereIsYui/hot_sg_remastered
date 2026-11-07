@@ -8,6 +8,7 @@ import { OwnershipService } from '../core/ownership.service';
 import { phpEmpty, phpIntval, phpLooseEquals, phpNum } from '../core/php';
 import { RandomService } from '../core/random.service';
 import { TaskRules } from '../core/task-rules.service';
+import { UserProtection } from '../core/user-protection.service';
 import { UserRules } from '../core/user-rules.service';
 import { DbScope } from '../db/database.module';
 import { GlobalCommand, type CommandContext } from '../gateway/decorators';
@@ -130,7 +131,7 @@ const ANNOUNCED_GIDS = new Set([
 type DropRate = Row;
 
 /**
- * Items useGoods handles in a branch of their own that is not ported yet (迁城令, 免战牌, 盟主令,
+ * Items useGoods handles in a branch of their own that is not ported yet (
  * gear and hero boxes, 武魂, skill books, event items ...); everything else opens as a default
  * box.
  */
@@ -180,6 +181,7 @@ export class GoodsCommands {
     private readonly random: RandomService,
     private readonly buffers: BufferGoods,
     private readonly defaultBox: DefaultBoxService,
+    private readonly protection: UserProtection,
   ) {}
 
   /** `[goods, things]` the player owns, in cfg order. */
@@ -346,6 +348,12 @@ export class GoodsCommands {
       const count = await this.addArmorShelf(uid, gid);
       return [UseReply.Message, this.lang.t('goods.armor_column_add', count)];
     }
+    if (gid === 12)
+      return [
+        2,
+        this.lang.t('useGoods.MianZhanPai_valid_date'),
+        phpIntval(await this.protection.use(uid, 1)),
+      ];
     if (hasOwnUse(gid)) throw GameError.lang('useGoods.func_not_in_use');
     const opened = await this.defaultBox.open(uid, cid, gid);
     return opened instanceof CommittedMessage ? opened : [UseReply.Items, opened];

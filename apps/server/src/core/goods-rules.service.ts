@@ -49,10 +49,15 @@ export class GoodsRules {
 
   /** utils.php::checkGoods: owns at least one. */
   async checkGoods(uid: number, gid: number): Promise<boolean> {
+    return this.checkGoodsCount(uid, gid, 1);
+  }
+
+  /** utils.php::checkGoodsCount. */
+  async checkGoodsCount(uid: number, gid: number, needed: number): Promise<boolean> {
     const row = await sql<{ count: unknown }>`select count from sys_goods
       where uid = ${uid} and gid = ${gid}`.execute(this.scope.db);
     const count = row.rows[0]?.count;
-    return (phpEmpty(count) ? 0 : phpNum(count)) >= 1;
+    return (phpEmpty(count) ? 0 : phpNum(count)) >= needed;
   }
 
   /**

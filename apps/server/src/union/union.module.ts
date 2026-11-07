@@ -12,6 +12,7 @@ import { TaskModule } from '../task/task.module';
 /** UnionFunc.php: founding, membership, profiles, diplomacy, reports and union-city views. */
 @Module({
   imports: [TaskModule],
+  exports: [UnionRules],
   providers: [
     UnionCommands,
     UnionRules,

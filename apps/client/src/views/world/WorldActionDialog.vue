@@ -21,6 +21,7 @@ import FxButton from '../../ui/FxButton.vue';
 import FxCanvas from '../../ui/FxCanvas.vue';
 import FxLabel from '../../ui/FxLabel.vue';
 import FxText from '../../ui/FxText.vue';
+import XuanZhanDialog from './XuanZhanDialog.vue';
 import GovernPanel from './GovernPanel.vue';
 
 /**
@@ -45,6 +46,38 @@ const cell = computed(() => world.cells.get(props.cid));
 const cityInfo = computed(() => world.cityInfo.get(props.cid));
 /** getWorldFieldInfo reply for a field cell (type > 0). */
 const field = ref<WorldFieldInfo | null>(null);
+const warOpen = ref(false);
+const canDeclareWar = computed(
+  () =>
+    isCity.value && [3, 7].includes(cityInfo.value?.flag ?? -1) && (cityInfo.value?.uid ?? 0) > 0,
+);
+const canAssist = computed(
+  () =>
+    isCity.value &&
+    user.unionid > 0 &&
+    [4, 5].includes(user.unionpos) &&
+    cityInfo.value?.unionId === user.unionid,
+);
+async function assist() {
+  if (
+    (await showAlert(
+      i18n('World_WorldActionDialog_assist_1') +
+        ' ' +
+        ownerName.value +
+        ' ' +
+        i18n('World_WorldActionDialog_assist_2'),
+      '',
+      ['yes', 'no'],
+    )) !== 'yes'
+  )
+    return;
+  if (
+    cityInfo.value?.userstate === 2 &&
+    (await showAlert(i18n('World_WorldActionDialog_assist_3'), '', ['yes', 'no'])) !== 'yes'
+  )
+    return;
+  game.sendWorldCommand('unionAssit', [props.cid]);
+}
 
 const isCity = computed(() => cell.value?.type === 0);
 
@@ -214,7 +247,7 @@ onUnmounted(unregister);
 </script>
 
 <template>
-  <FxCanvas :x="168" :y="98" :w="400" :h="360" style-name="PopupDialog" :fx="{ fontSize: 12 }">
+  <FxCanvas :x="168" :y="98" :w="400" :h="400" style-name="PopupDialog" :fx="{ fontSize: 12 }">
     <FxButton
       style-name="Close"
       :right="16"
@@ -289,6 +322,24 @@ onUnmounted(unregister);
       @click="onSendMessage"
     />
 
+    <FxButton
+      v-if="canDeclareWar"
+      :x="20"
+      :y="354"
+      :w="100"
+      style-name="ButtonRed"
+      :label="i18n('World_XuanZhanDialog_1_1')"
+      @click="warOpen = true"
+    />
+    <FxButton
+      v-if="canAssist"
+      :x="140"
+      :y="354"
+      :w="100"
+      style-name="ButtonGreen"
+      :label="i18n('World_WorldActionDialog_46_1')"
+      @click="assist"
+    />
     <!-- own field: 进入 (the detail dialog, where a flatland offers 筑城) + 派遣 -->
     <div v-if="isOwnField" class="actions">
       <FxButton
@@ -369,6 +420,13 @@ onUnmounted(unregister);
       />
     </div>
   </FxCanvas>
+  <XuanZhanDialog
+    v-if="warOpen && cityInfo"
+    :uid="cityInfo.uid"
+    :cid="cid"
+    :username="ownerName"
+    @close="warOpen = false"
+  />
   <!-- `mGovernPanel` (AS3 2654-2665): the embedded 下达政令 pop-up covering the dialog area -->
   <GovernPanel
     v-if="governInfo"

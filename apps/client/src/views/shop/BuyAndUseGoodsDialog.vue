@@ -46,10 +46,11 @@ function onSubmit() {
     count.value,
     payType.value,
   ]);
-  close();
+  close(false);
 }
 
-function close() {
+function close(cancel = true) {
+  if (cancel) game.cancelStatePurchase();
   game.session.buyAndUse = null;
 }
 
@@ -174,7 +175,7 @@ onUnmounted(unregister);
         :bottom="10"
         style-name="Cancel"
         :fx="{ fontSize: 16 }"
-        @click="close"
+        @click="close()"
       />
     </FxCanvas>
   </FxCanvas>

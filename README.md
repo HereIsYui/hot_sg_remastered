@@ -57,7 +57,7 @@ pnpm difftest                 # 全部用例；pnpm difftest createRole 只跑�
 pnpm difftest --resnapshot    # 两边数据库重新导入后，重建快照
 ```
 
-差分测试要求两边数据库从同一份导出开始：先 `pnpm legacy:reset && pnpm legacy:up`、`pnpm db:migrate`，再立即运行（原版的结算进程会改动数据，`difftest` 启动时会先停掉它）。首次运行会把每张表复制成 `__snap_*` 快照表，每个用例结束后按快照回滚，因此可以重复运行。新服务端由脚本以 `TICK_ENABLED=false` 在 3998 端口启动，日志在 `legacy/.cache/difftest-server.log`。
+差分测试要求两边数据库从同一份导出开始：先 `pnpm legacy:reset && pnpm legacy:up`、`pnpm db:migrate`，再立即运行（原版的结算进程会改动数据，`difftest` 启动时会先停掉它）。首次运行会把每张表复制成 `__snap_*` 快照表，每个用例结束后按快照回滚，因此可以重复运行。新服务端由脚本以 `TICK_ENABLED=false` 在 3998 端口启动，日志在 `legacy/.cache/difftest-server.log`。回归期间，其他连接开发库的服务也必须禁用自动结算和野地刷新（`TICK_ENABLED=false WORLD_REFRESH_ENABLED=false`），避免开发服务与差分进程同时写库。
 
 客户端登录页的“注册”“官网”按钮默认隐藏，在 `apps/client/.env.local` 中设置 `VITE_REGISTER_URL`、`VITE_HOME_LABEL`、`VITE_HOME_URL` 后显示。
 
@@ -248,7 +248,8 @@ legacy/          本地生成的原版文件（不提交）
 - W1 完成：采集 `gatherFieldStart` / `gatherFieldEnd` / `gatherStartAll` / `gatherEndAll`（`world/gather.commands.ts`，含藏宝图、寻宝与采集活动礼包、古朴木匣、名将任务道具；原版 `gatherEndAll` 无排序、按 MyISAM 插入顺序结算，这里按部队 id 排序）、`allowAutoDiscard`、宝物合成 `goodsCompose`。客户端：军队对话框四个采集回包的提示、收获确认带采集时长、全部采集不再二次确认；合成结果框修复（原先把物品列表多包了一层，结果框为空）。差分 2 组新用例（采集时长的秒数会跨秒，比较时抹掉）。
 - W2 完成：装备仓库 `loadUserArmor` / `loadUserActivedArmor` / `sellArmor`（含回收装备活动礼包）/ `zhuangbeichaijie` / `multipAnalyzeArmor` / `loadActiveArmorSpecialGoods` / `activeArmorSpecial`（末日之刃四种特效重随），在 `hero/armor.commands.ts`。注意：原版 `0704` 作为 PHP 参数是八进制（log_goods 记 452），写在 SQL 字符串里是十进制（log_armor 记 704）；`loadUserActivedArmor` 传 0/1/2 以外的类型时原版 foreach 警告变成错误回包，这里照抄。客户端新增 `views/armor/`（ArmorDialog / UserArmorItem / ActiveArmorSpecial），信息面板「装备」按钮打开；部位、品质过滤，分页，回收、分解、特效、激活、拆解菜单，批量选择分解，全部修理 / 全部修复，武器架加栏位，蓝装以上走二级密码。「展示」需要聊天物品链接，聊天还没有，菜单项置灰。差分 1 组新用例。
 - W3 完成：铁匠铺洗练 `loadXilianGoods` / `doXilian`、熔炼 `loadFusionableArmor` / `loadPartArmor` / `reloadArmor` / `combineArmor`、装备升级 `doUpgradeArmor`、未激活列表 `loadUnActivePartArmor` / `loadUnActiveHorseArmor`；`doStrong` / `doEmbed` / `initHoles` 补上坐骑分支（灵通甘草、驯马技巧上限、马装孔位与专属限制）。修了 `doStrong` 失败时回包的极品属性（原版失败回 null）。客户端：铁匠铺补齐洗练、熔炼、装备升级三个页签，镶嵌页可打开装备激活列表（原版这个对话框没有入口）；马厩补齐驯服、强化、马装选择和升级，升级页与铁匠铺共用。铁匠铺和马厩对话框高度按原版改为 492，命令面板不再被裁掉，铁匠铺去掉了原版没有的「进入」按钮。差分 1 组新用例。
-- 待做：W3 铁匠铺洗练/熔炼/升级与坐骑、W4 迁城令/免战牌/休假/离间符/宣战/援助、W5 武魂与卡牌、W6 君主学习/战术/赞扬/赏赐/战报历练、W7 名将与委托任务、W8 登录奖励/签到/活动栏与沙场、VIP 抛错桩。
+- W4 实现：普通/高级迁城、免战与续期、元宝免战、休假与提前解除、离间符、宣战/讨逆圣旨、联盟援助及对战确认；宝物、君主状态和世界地图已接入对应界面，登录休假账号显示解除/退出面板。保留原版离间符全局扣忠诚、休假冷却编号等兼容行为。新增 8 组差分用例覆盖成功写库及校验顺序。
+- 待做：W5 武魂与卡牌、W6 君主学习/战术/赞扬/赏赐/战报历练、W7 名将与委托任务、W8 登录奖励/签到/活动栏与沙场、VIP 抛错桩。
 
 ## 开发流程
 

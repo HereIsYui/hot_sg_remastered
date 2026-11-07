@@ -34,8 +34,7 @@ const WAR_GRACE = 8 * 3600;
  * influence view) — live here too, with their getProvinceCityOwner / getUnionMarkCity /
  * getUnionArea helpers.
  *
- * The action commands `createCityFromLand`, `governOthers`, `startWar`, `unionAssit` and
- * `mergeCity` are left for a later wave; see `world-stub.commands.ts`.
+ * Action commands live in city-found, govern, city-merge and world-stub.commands.ts.
  */
 @Injectable()
 export class WorldCommands {

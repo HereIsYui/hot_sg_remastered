@@ -1,3 +1,5 @@
+import { TaskModule } from '../task/task.module';
+import { UnionModule } from '../union/union.module';
 import { Module } from '@nestjs/common';
 import { CityFoundCommands } from './city-found.commands';
 import { CityMergeCommands } from './city-merge.commands';
@@ -10,9 +12,10 @@ import { WorldStubCommands } from './world-stub.commands';
  * WorldFunc.php (and the 野地 parts of utils.php / UtilsExtend.php): the world-map query and
  * utility commands, plus the 8-hour wild-field refresh job. 野地建城 (createCityFromLand) lives
  * in CityFoundCommands, 政令 (governOthers) in GovernCommands and 合城 (mergeCity) in
- * CityMergeCommands; the remaining stubs (startWar, unionAssit) wait for a later wave.
+ * CityMergeCommands; personal war and union assistance live in WorldStubCommands.
  */
 @Module({
+  imports: [UnionModule, TaskModule],
   providers: [
     WorldCommands,
     WorldStubCommands,

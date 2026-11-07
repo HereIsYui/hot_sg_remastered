@@ -81,7 +81,10 @@ function onGetGoods(d: unknown[]) {
 
 function send(item: TypeGoodsItem, extra: CommandArg[] = []) {
   const { type, param } = props.request;
-  game.sendGlobalCommand('user', 'useTypeGoods', [type, item.gid, city.cid, ...param, ...extra]);
+  if (type === 143 || type === 12) {
+    game.useStateGoods(type, item.gid, city.cid, [...param, ...extra]);
+  } else
+    game.sendGlobalCommand('user', 'useTypeGoods', [type, item.gid, city.cid, ...param, ...extra]);
 }
 
 async function onClickGoods(item: TypeGoodsItem) {

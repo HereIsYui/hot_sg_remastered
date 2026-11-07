@@ -73,6 +73,7 @@ import LuoYangBattlePanel from '../luoyang/LuoYangBattlePanel.vue';
 import LuoYangBelongPanel from '../luoyang/LuoYangBelongPanel.vue';
 import MarryMainPanel from '../marry/MarryMainPanel.vue';
 import FuncBtnPanel from './FuncBtnPanel.vue';
+import ChangeStateDialog from '../user/ChangeStateDialog.vue';
 import GovernPanel from '../world/GovernPanel.vue';
 
 /** DialogManager: the dialogs over the scene panels (only one shown at a time). */
@@ -123,6 +124,7 @@ function choose(action: 'all' | 'level') {
     <TaskDialog v-else-if="dialog?.name === 'task'" />
     <MyGoodsDialog v-else-if="dialog?.name === 'myGoods'" />
     <ArmorDialog v-else-if="dialog?.name === 'armor'" />
+    <ChangeStateDialog v-else-if="dialog?.name === 'changeState'" @close="game.closeDialog()" />
     <CampaignFavouritesDialog v-else-if="dialog?.name === 'favourites'" />
     <WorldActionDialog
       v-else-if="dialog?.name === 'worldAction'"

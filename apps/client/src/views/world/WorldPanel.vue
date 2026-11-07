@@ -270,8 +270,6 @@ function clampCoord(v: number): number {
 
 function moveViewTo(x: number, y: number): void {
   world.centre = { x: clampCoord(x), y: clampCoord(y) };
-  redraw();
-  loadBlocks();
 }
 
 function onJump(): void {
@@ -355,7 +353,10 @@ function onMinimapClick(e: MouseEvent): void {
 const unregister = game.addGlobalReceiver('world', (command, data) => {
   if (command === 'getBlockData') onGetBlockData(data);
   else if (command === 'getWorldCityInfo' || command === 'startWar') onGetWorldCityInfo(data);
-  else if (command === 'createCityFromLand') {
+  else if (command === 'useTaoNiShengZhi') {
+    const cids = [...world.cityInfo.keys()];
+    if (cids.length) game.sendWorldCommand('getWorldCityInfo', [cids.length, ...cids]);
+  } else if (command === 'createCityFromLand') {
     // WorldPanel.as:9324 `moveViewTo(mgx, mgy)`: re-centre on the current view so the flatland
     // that just became a city reloads its block (loadUserInfo + the 筑城成功 toast are app-level,
     // handled in Game.onGlobalCommand).
@@ -405,7 +406,14 @@ onBeforeUnmount(() => {
 });
 
 // keep the Pixi view in sync if the centre is changed elsewhere
-watch(() => world.centre, redraw, { deep: true });
+watch(
+  () => world.centre,
+  () => {
+    redraw();
+    loadBlocks();
+  },
+  { deep: true },
+);
 </script>
 
 <template>

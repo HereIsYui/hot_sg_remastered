@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watchEffect } from 'vue';
+import { stateNameKey } from '../../game/userState';
 import { useGame } from '../../game/game';
 import { defenceTip, heroFace, heroStateName, heroTip, soldierTip } from '../../game/units';
 import { i18n } from '../../i18n';
@@ -187,7 +188,14 @@ const cityIndex = computed({
         <FxLabel :x="50" :y="3" :w="105" :fx="ROW_VALUE" :text="row.value" />
         <FxButton v-if="row.plus" :x="150" :y="8" style-name="Plus" :tip="i18n(row.plus)" />
       </FxCanvas>
-      <FxButton :x="13" :y="102" style-name="King" />
+      <FxButton
+        :x="13"
+        :y="102"
+        :w="68"
+        style-name="ButtonGreen"
+        :label="i18n(stateNameKey(user.ustate))"
+        @click="game.openChangeState()"
+      />
       <FxButton :x="13" :y="135" style-name="Armor" @click="game.showDialog('armor')" />
       <FxButton :x="13" :y="168" style-name="Inventory" @click="game.showDialog('myGoods')" />
     </FxCanvas>
