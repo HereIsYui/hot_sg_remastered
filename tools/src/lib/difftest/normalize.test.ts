@@ -3,6 +3,7 @@ import {
   canonicalScalar,
   compareTrees,
   diffMultisets,
+  diffNormalizedRows,
   maskAt,
   normalizeRow,
   normalizeTree,
@@ -113,6 +114,61 @@ describe('rewriteTieRanks', () => {
     );
     const rows = [{ level: 50, command: 133, rank: 2 }];
     expect(rewriteTieRanks(rows, {})).toBe(rows);
+  });
+});
+
+describe('diffNormalizedRows', () => {
+  const rule = { tieRank: { column: 'rank', keys: ['level', 'command'] } };
+  const snapshot = [
+    { hid: 1, level: 50, command: 133, rank: 1, name: 'A' },
+    { hid: 2, level: 50, command: 133, rank: 2, name: 'B' },
+    { hid: 3, level: 50, command: 133, rank: 3, name: 'C' },
+    { hid: 4, level: 49, command: 120, rank: 4, name: 'D' },
+  ];
+
+  it('equates different raw delta memberships, including an unchanged lowest-rank member', () => {
+    // The first engine swaps only ranks 2/3; the other keeps the snapshot order. A raw delta
+    // omits hid 1, so rewriting that subset would also choose the wrong group minimum (2).
+    const live = snapshot.map((row) => ({
+      ...row,
+      rank: row.hid === 2 ? 3 : row.hid === 3 ? 2 : row.rank,
+    }));
+    expect(diffNormalizedRows(live, snapshot, rule, ctx())).toEqual({ added: [], removed: [] });
+    expect(diffNormalizedRows(snapshot, snapshot, rule, ctx())).toEqual({ added: [], removed: [] });
+    expect(snapshot[1]!.rank).toBe(2);
+  });
+
+  it('retains real field changes within a tie group', () => {
+    const live = snapshot.map((row) => (row.hid === 2 ? { ...row, name: 'changed' } : row));
+    const delta = diffNormalizedRows(live, snapshot, rule, ctx());
+    expect(delta.added.map((row) => JSON.parse(row))).toEqual([
+      { command: '133', hid: '2', level: '50', name: 'changed', rank: '1' },
+    ]);
+    expect(delta.removed.map((row) => JSON.parse(row))).toEqual([
+      { command: '133', hid: '2', level: '50', name: 'B', rank: '1' },
+    ]);
+  });
+
+  it('retains rank changes between distinct sort groups', () => {
+    const live = snapshot.map((row) => (row.hid === 4 ? { ...row, rank: 5 } : row));
+    const delta = diffNormalizedRows(live, snapshot, rule, ctx());
+    expect(delta.added.map((row) => JSON.parse(row))).toEqual([
+      { command: '120', hid: '4', level: '49', name: 'D', rank: '5' },
+    ]);
+    expect(delta.removed.map((row) => JSON.parse(row))).toEqual([
+      { command: '120', hid: '4', level: '49', name: 'D', rank: '4' },
+    ]);
+  });
+
+  it('retains additions, deletions and duplicate row counts', () => {
+    const delta = diffNormalizedRows(
+      [snapshot[0]!, snapshot[0]!, snapshot[2]!, snapshot[3]!],
+      snapshot,
+      rule,
+      ctx(),
+    );
+    expect(delta.added.map((row) => JSON.parse(row)).map((row) => row.hid)).toEqual(['1']);
+    expect(delta.removed.map((row) => JSON.parse(row)).map((row) => row.hid)).toEqual(['2']);
   });
 });
 

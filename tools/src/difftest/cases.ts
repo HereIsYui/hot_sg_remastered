@@ -8184,6 +8184,1245 @@ export const cases: DiffCase[] = [
       );
     },
   },
+
+  {
+    name: 'W5 rumor: goods before portrait, retained portrait, null gid and quality boundaries',
+    run: async (s) => {
+      s.rng([0]); // Pin the daily login box as well as subsequent PHP RNG calls.
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      await s.query(
+        'delete from sys_goods where uid = ? and gid in (149, 100123, 110123, 120123, 130123, 140123, 150123)',
+        [uid],
+      );
+      await s.query('delete from sys_things where uid = ? and tid = 20123', [uid]);
+      w5Error(await s.command(session, 'genWuHunByRumor', 20123));
+      await w4Goods(s, uid, 149, 12);
+      w5Error(await s.command(session, 'genWuHunByRumor', 20123));
+      await s.query('insert into sys_things (uid, tid, count) values (?, 20123, 1)', [uid]);
+      for (const draw of [0, 89]) {
+        s.rng([draw]); // inclusive <=90 fragment branch
+        const ret = await s.command(session, 'genWuHunByRumor', 20123);
+        w4Success(ret);
+        if ((ret as unknown[][])[4]?.[0] !== null)
+          throw new Error('PHP rumor reply must retain undefined gid as null');
+      }
+      for (const [draw, gid] of [
+        [0, 110123],
+        [60, 120123],
+        [90, 130123],
+        [97, 140123],
+        [99, 150123],
+      ] as const) {
+        s.rng([90, draw]);
+        w4Success(await s.command(session, 'genWuHunByRumor', 20123));
+        await w4Number(
+          s,
+          'select count as value from sys_goods where uid = ? and gid = ?',
+          [uid, gid],
+          1,
+        );
+      }
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 100123',
+        [uid],
+        2,
+      );
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 149',
+        [uid],
+        5,
+      );
+      await w4Number(
+        s,
+        'select count as value from sys_things where uid = ? and tid = 20123',
+        [uid],
+        1,
+      );
+      await w4Number(
+        s,
+        'select count(*) as value from log_things where uid = ? and tid = 20123 and count < 0',
+        [uid],
+        0,
+      );
+    },
+  },
+  {
+    name: 'W5 fragments: banner gate, PHP truthiness, failed consumption and guaranteed RNG draw',
+    run: async (s) => {
+      s.seed(5002);
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      await s.query(
+        'delete from sys_goods where uid = ? and gid in (148, 100123, 110123, 120123, 130123, 140123, 150123)',
+        [uid],
+      );
+      w5Error(await s.command(session, 'genWuHunBySuipian', 100123, 1)); // banner before fragments
+      await w4Goods(s, uid, 148, 2);
+      w5Error(await s.command(session, 'genWuHunBySuipian', 100123, 1));
+      await w4Goods(s, uid, 100123, 21);
+      s.rng([70]); // 71 fails, still consumes ten
+      w4Success(await s.command(session, 'genWuHunBySuipian', 100123, '0'));
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 100123',
+        [uid],
+        11,
+      );
+      s.rng([69, 59]); // 70 succeeds, quality 60 inclusive
+      w4Success(await s.command(session, 'genWuHunBySuipian', 100123, 0));
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 110123',
+        [uid],
+        1,
+      );
+      s.rng([99, 60]); // guaranteed success still draws 100, then quality 61
+      w4Success(await s.command(session, 'genWuHunBySuipian', 100123, '1'));
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 120123',
+        [uid],
+        1,
+      );
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 100123',
+        [uid],
+        0,
+      );
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 148',
+        [uid],
+        1,
+      );
+      w5Error(await s.command(session, 'genWuHunBySuipian', 100123, 0));
+    },
+  },
+  {
+    name: 'W5 cards: closed gates and mix strict threshold, materials consumed on failure',
+    run: async (s) => {
+      s.seed(5003);
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      await s.query('update mem_state set value = 0 where state = 197');
+      for (const args of [[], [210123], [240123, 240124]])
+        w5Error(await s.command(session, 'mixCard', ...args));
+      w5Error(await s.command(session, 'multiUseCard'));
+      for (const gid of [250, 240123, 251]) {
+        await w4Goods(s, uid, gid, 1);
+        w5Error(await s.command(session, 'useGoods', gid));
+        await w4Number(
+          s,
+          'select count as value from sys_goods where uid = ? and gid = ?',
+          [uid, gid],
+          1,
+        );
+      }
+      await s.query('update mem_state set value = 60 where state = 197');
+      w5Error(await s.command(session, 'mixCard', 240123));
+      w5Error(await s.command(session, 'mixCard', 210123, 240124));
+      await s.query('delete from sys_goods where uid = ? and gid in (240124, 230123)', [uid]);
+      w5Error(await s.command(session, 'mixCard', 240123, 240124));
+      await w4Goods(s, uid, 240124, 2);
+      s.rng([3]); // roll 4 is NOT <4: original retained, material lost
+      w4Success(await s.command(session, 'mixCard', 240123, 240124));
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 240123',
+        [uid],
+        1,
+      );
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 240124',
+        [uid],
+        1,
+      );
+      s.rng([2]); // roll 3 upgrades the named original
+      w4Success(await s.command(session, 'mixCard', 240123, 240124));
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 240123',
+        [uid],
+        0,
+      );
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 230123',
+        [uid],
+        1,
+      );
+      // PHP does not roll back earlier materials when a later material or the original is absent.
+      await w4Goods(s, uid, 240124, 1);
+      await s.query('delete from sys_goods where uid = ? and gid = 240125', [uid]);
+      s.rng([0]);
+      w5Error(await s.command(session, 'mixCard', 240123, 240124, 240125));
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 240124',
+        [uid],
+        0,
+      );
+      await w4Goods(s, uid, 240124, 1);
+      s.rng([0]);
+      w5Error(await s.command(session, 'mixCard', 240123, 240124));
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 240124',
+        [uid],
+        0,
+      );
+    },
+  },
+  {
+    name: 'W5 cards: unique scheduled hero, batch quality order, 100 cap and single use',
+    run: async (s) => {
+      s.seed(5004);
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      await s.query('update mem_state set value = 55555555 where state = 197');
+      await s.query('update mem_state set value = 1 where state = 250');
+      await s.query('update cfg_hero_card_schedule set part = 0');
+      await s.query(
+        "insert into cfg_hero_card_schedule (hid, name, part) values (123, '验收卡将', 1) on duplicate key update part = 1",
+      );
+      await s.query(
+        'delete from sys_goods where uid = ? and gid in (250, 210123, 220123, 230123, 240123)',
+        [uid],
+      );
+      w4Success(await s.command(session, 'multiUseCard')); // zero is a successful empty summary
+      await w4Goods(s, uid, 250, 7);
+      s.rng([887, 888, 988, 989, 998, 999, 1004]);
+      w4Success(await s.command(session, 'multiUseCard'));
+      for (const [gid, count] of [
+        [240123, 1],
+        [230123, 2],
+        [220123, 2],
+        [210123, 2],
+      ]) {
+        await w4Number(
+          s,
+          'select count as value from sys_goods where uid = ? and gid = ?',
+          [uid, gid],
+          count!,
+        );
+      }
+      await w4Goods(s, uid, 250, 101);
+      s.rng([0]);
+      w4Success(await s.command(session, 'multiUseCard'));
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 250',
+        [uid],
+        1,
+      );
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 240123',
+        [uid],
+        101,
+      );
+      w4Success(await s.command(session, 'useGoods', 250));
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 240123',
+        [uid],
+        102,
+      );
+      w5Error(await s.command(session, 'useGoods', 250));
+    },
+  },
+  {
+    name: 'W5 question: singleton draw, unchecked replay reward, literal text and answer box',
+    run: async (s) => {
+      s.seed(5005);
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      await s.query('delete from sys_goods where uid = ? and gid in (147, 150)', [uid]);
+      // No prior question, answer or item ownership is required by PHP; replay also grants rewards.
+      for (const message of ["验收'a\\b", ''])
+        w4Success(await s.command(session, 'afterUseShenMiChuanYinFu', message));
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 150',
+        [uid],
+        2,
+      );
+      await w4Number(s, 'select count(*) as value from sys_inform where msg = ?', ["验收'a\\b"], 1);
+      w5Error(await s.command(session, 'useGoods', 147));
+      await s.query('delete from sys_question');
+      await s.query(
+        "insert into sys_question (id, question, option1, option2, option3, option4, answer, info) values (990051, '验收问题', '甲', '乙', '丙', '丁', 2, '验收说明')",
+      );
+      await w4Goods(s, uid, 147, 1);
+      w5Error(await s.command(session, 'useGoods', 147, 2));
+      w4Success(await s.command(session, 'useGoods', 147));
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 147',
+        [uid],
+        0,
+      );
+      // SQL ORDER BY RAND cannot be scripted: one positive woodbox candidate fixes the answer box.
+      await s.query('update cfg_goods set woodbox = 0');
+      await s.query('update cfg_goods set inuse = 1, value = 1, woodbox = 1 where gid = 85');
+      await s.query('update cfg_act set endtime = 1 where type = 15');
+      const [before] = await s.query<{ value: string }>(
+        'select coalesce(sum(count), 0) as value from sys_goods where uid = ? and gid = 85',
+        [uid],
+      );
+      w4Success(await s.command(session, 'useGoods', 150));
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 85',
+        [uid],
+        Number(before!.value) + 1,
+      );
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 150',
+        [uid],
+        1,
+      );
+    },
+  },
+  {
+    name: 'W5 hero box sort7: consumed on full office, one hero, loyalty override and blood',
+    run: async (s) => {
+      s.seed(5006);
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await s.query('delete from cfg_box_open_condition where boxid = 990051 or keyid = 990051');
+      await s.query('delete from cfg_box_details where srctype = 0 and srcid = 990051');
+      await s.query(
+        `insert into cfg_box_details (id, srctype, srcid, sort, type, count, rate, inform, dayopencount, totalopencount, owncount) values (990051, 0, 990051, 7, 990051, 99, 1, 1, 1, 1, 1)`,
+      );
+      await s.query(
+        `insert into cfg_recruit_hero (id, heroname, herotype, min_face, max_face, min_affairs_base, max_affairs_base, min_bravery_base, max_bravery_base, min_wisdom_base, max_wisdom_base, min_loyalty, max_loyalty, sex, level, min_level, max_level) values (990051, '验收箱将', 301, 1, 1, 30, 30, 60, 60, 30, 30, 5, 5, 0, 10, 10, 10)`,
+      );
+      await w4Goods(s, uid, 990051, 3);
+      await s.query('delete from sys_city_hero where uid = ? and cid = ?', [uid, cid]);
+      await s.query('update sys_building set level = 0 where cid = ? and bid = 11', [cid]);
+      w5Error(await s.command(session, 'useGoods', 990051));
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 990051',
+        [uid],
+        2,
+      );
+      await s.query('update sys_building set level = 10 where cid = ? and bid = 11', [cid]);
+      s.rng([0, 0, 0, 0, 0, 0, 8]);
+      for (let i = 0; i < 2; i++) w5Error(await s.command(session, 'useGoods', 990051)); // committed success message is an error envelope
+      await w4Number(
+        s,
+        'select count(*) as value from sys_city_hero where uid = ? and cid = ? and name = ? and loyalty = 70 and level = 10 and face = 9',
+        [uid, cid, '验收箱将'],
+        2,
+      );
+      await w4Number(
+        s,
+        'select count(*) as value from mem_hero_blood b join sys_city_hero h on h.hid = b.hid where h.uid = ? and h.name = ? and b.`force` = 100 and b.energy = 100 and b.force_max = 123 and b.energy_max = 113',
+        [uid, '验收箱将'],
+        2,
+      );
+      await w4Number(
+        s,
+        'select count(*) as value from log_act where uid = ? and actid = 990051',
+        [uid],
+        0,
+      ); // sort7 ignores count/limit/inform bookkeeping
+    },
+  },
+  {
+    name: 'W5 reduceGoods: wuhun all-reason threshold, idempotent achievement and gid158 type filter',
+    tables: { sys_user_achivement: { offsets: ['time'] } },
+    run: async (s) => {
+      s.seed(5007);
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await s.query('update sys_user set nobility = 1, state = 0 where uid = ?', [uid]);
+      await s.query('update sys_building set level = 5 where cid = ? and bid = 13', [cid]);
+      await s.query(
+        'update cfg_achivement set state = 1, open_time = 0, system_inform = 0, union_inform = 0 where id in (30, 70016)',
+      );
+      await s.query(
+        'delete from sys_user_achivement where uid = ? and achivement_id in (30, 70016)',
+        [uid],
+      );
+      await s.query(
+        'delete from log_goods where uid = ? and (gid between 110001 and 159999 or gid = 158)',
+        [uid],
+      );
+      await s.query(
+        'insert into log_goods (uid, gid, count, time, type) values (?, 110123, -28, 1, 9), (?, 110123, 500, 1, 0), (?, 110000, -500, 1, 0), (?, 160000, -500, 1, 0)',
+        [uid, uid, uid, uid],
+      );
+      await w4Goods(s, uid, 110123, 3);
+      w4Success(await s.command(session, 'sellGoods', cid, 110123, 1));
+      await w4Number(
+        s,
+        'select count(*) as value from sys_user_achivement where uid = ? and achivement_id = 30',
+        [uid],
+        0,
+      );
+      w4Success(await s.command(session, 'sellGoods', cid, 110123, 1));
+      w4Success(await s.command(session, 'sellGoods', cid, 110123, 1));
+      await w4Number(
+        s,
+        'select count(*) as value from sys_user_achivement where uid = ? and achivement_id = 30',
+        [uid],
+        1,
+      );
+      await s.query(
+        'insert into log_goods (uid, gid, count, time, type) values (?, 158, -14, 1, 0), (?, 158, -100, 1, 9)',
+        [uid, uid],
+      );
+      await w4Goods(s, uid, 158, 3);
+      w4Success(await s.command(session, 'sellGoods', cid, 158, 1)); // type9 must NOT count toward 15
+      await w4Number(
+        s,
+        'select count(*) as value from sys_user_achivement where uid = ? and achivement_id = 70016',
+        [uid],
+        0,
+      );
+      // The real type0 use path is disabled remote transport, so seed the historical 15th use.
+      await s.query(
+        'insert into log_goods (uid, gid, count, time, type) values (?, 158, -1, 1, 0)',
+        [uid],
+      );
+      w4Success(await s.command(session, 'sellGoods', cid, 158, 1));
+      await w4Number(
+        s,
+        'select count(*) as value from sys_user_achivement where uid = ? and achivement_id = 70016',
+        [uid],
+        1,
+      );
+      w5Error(await s.command(session, 'useGoods', 158)); // PHP remote call throws before consumption
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 158',
+        [uid],
+        1,
+      );
+    },
+  },
+
+  {
+    name: 'W5 useGoods wuhun: missing item, busy hero, replacement and busy extension',
+    tables: { mem_hero_buffer: { offsets: ['endtime'] } },
+    run: async (s) => {
+      s.seed(5008);
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await s.query('delete from sys_goods where uid = ? and gid = 110123', [uid]);
+      w5Error(await s.command(session, 'useGoods', 110123, 1, 990058));
+      await s.query(
+        `insert into sys_city_hero (hid, uid, name, sex, face, cid, state, level, command_base, affairs_base, bravery_base, wisdom_base, loyalty) values (990058, ?, '武魂验收', 0, 1, ?, 1, 1, 10, 10, 10, 10, 100)`,
+        [uid, cid],
+      );
+      await s.query(
+        'insert into mem_hero_blood (hid, `force`, force_max, energy, energy_max) values (990058, 100, 100, 100, 100)',
+      );
+      // Ensure get command_base by npcid has exactly one row (PHP rejects multiple results).
+      await s.query('update sys_city_hero set npcid = 0 where npcid = 123');
+      await s.query(
+        "insert into sys_city_hero (hid, uid, name, sex, face, cid, npcid, command_base) values (990059, 0, '武魂模板', 0, 1, 0, 123, 100)",
+      );
+      await w4Goods(s, uid, 110123, 3);
+      w5Error(await s.command(session, 'useGoods', 110123, 2, 990058)); // generic multi-use guard first
+      w5Error(await s.command(session, 'useGoods', 110123, 1, 990058)); // busy, no matching buffer
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 110123',
+        [uid],
+        3,
+      );
+      await s.query('update sys_city_hero set state = 0 where hid = 990058');
+      await s.query(
+        'insert into mem_hero_buffer (hid, buftype, endtime) values (990058, 120098, 1)',
+      );
+      w4Success(await s.command(session, 'useGoods', 110123, 1, 990058));
+      await w4Number(
+        s,
+        'select command_base as value from sys_city_hero where hid = 990058',
+        [],
+        60,
+      );
+      await w4Number(
+        s,
+        'select count(*) as value from mem_hero_buffer where hid = 990058 and buftype = 120098',
+        [],
+        0,
+      );
+      await w4Number(
+        s,
+        'select count(*) as value from sys_city_hero_base_add where hid = 990058 and type = 2',
+        [],
+        1,
+      );
+      await s.query('update sys_city_hero set state = 1 where hid = 990058');
+      await s.query(
+        'update mem_hero_buffer set endtime = 1 where hid = 990058 and buftype = 110098',
+      );
+      w4Success(await s.command(session, 'useGoods', 110123, 1, 990058)); // existing expired buffer bypasses busy check
+      await w4Number(
+        s,
+        'select endtime as value from mem_hero_buffer where hid = 990058 and buftype = 110098',
+        [],
+        86401,
+      );
+      await w4Number(
+        s,
+        'select count(*) as value from sys_city_hero_base_add where hid = 990058 and type = 2',
+        [],
+        1,
+      );
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 110123',
+        [uid],
+        1,
+      );
+    },
+  },
+  {
+    name: 'W5 useGoods card hero: office gate, five-card cap and deterministic summon',
+    run: async (s) => {
+      s.seed(5009);
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await s.query('update mem_state set value = 60 where state = 197');
+      await s.query(
+        'delete from sys_city_hero where uid = ? and (cid = ? or herotype between 21250 and 24250)',
+        [uid, cid],
+      );
+      await s.query('update sys_city_hero set npcid = 0 where npcid = 123');
+      await s.query(
+        "insert into sys_city_hero (hid, uid, name, sex, face, cid, npcid, command_base) values (990060, 0, '卡牌模板', 0, 1, 0, 123, 100)",
+      );
+      await w4Goods(s, uid, 240123, 2);
+      await s.query('update sys_building set level = 0 where cid = ? and bid = 11', [cid]);
+      w5Error(await s.command(session, 'useGoods', 240123));
+      await s.query('update sys_building set level = 10 where cid = ? and bid = 11', [cid]);
+      for (let i = 0; i < 5; i++)
+        await s.query(
+          "insert into sys_city_hero (hid, uid, name, sex, face, cid, herotype) values (?, ?, '已有卡将', 0, 1, 0, 24250)",
+          [990061 + i, uid],
+        );
+      w5Error(await s.command(session, 'useGoods', 240123));
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 240123',
+        [uid],
+        2,
+      );
+      await s.query('delete from sys_city_hero where hid between 990061 and 990065');
+      s.rng([0]);
+      w4Success(await s.command(session, 'useGoods', 240123));
+      await w4Number(
+        s,
+        'select count(*) as value from sys_city_hero where uid = ? and cid = ? and herotype = 24250 and loyalty = 100 and command_base = 5',
+        [uid, cid],
+        1,
+      );
+      await w4Number(
+        s,
+        'select count(*) as value from sys_city_hero h join mem_hero_blood b on b.hid = h.hid where h.uid = ? and h.cid = ? and h.herotype = 24250 and b.`force` = b.force_max and b.energy = b.energy_max',
+        [uid, cid],
+        1,
+      );
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 240123',
+        [uid],
+        1,
+      );
+    },
+  },
+
+  {
+    name: 'W6 praise: catalog, dummy argument, hero and king gates, buff extension',
+    tables: { mem_hero_buffer: { offsets: ['endtime'] } },
+    run: async (s) => {
+      s.rng([0]);
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await w6Hero(s, uid, cid);
+      w4Success(await s.command(session, 'loadHeroGoods'));
+      s.unordered(4); // cfg query has no ORDER BY; compare every catalog row.
+      await s.command(session, 'praiseHero', 'ignored', cid, 990099, 999); // unsupported gid falls through null
+      w5Error(await s.command(session, 'praiseHero', 'ignored', cid, 990099, 26));
+      await s.query('update sys_city_hero set state = 2, herotype = 1000 where hid = 990071');
+      w5Error(await s.command(session, 'praiseHero', 'ignored', cid, 990071, 26)); // old branch king before busy
+      w5Error(await s.command(session, 'praiseHero', 'ignored', cid, 990071, 160040)); // new branch busy before king
+      await s.query('update sys_city_hero set state = 0, herotype = 0 where hid = 990071');
+      await s.query('delete from sys_goods where uid = ? and gid = 26', [uid]);
+      w5Error(await s.command(session, 'praiseHero', 'ignored', cid, 990071, 26));
+      await w4Goods(s, uid, 160040, 1);
+      w4Success(await s.command(session, 'praiseHero', 'ignored', cid, 990071, 160040));
+      s.offset(4, '*', 'buf160040');
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 160040',
+        [uid],
+        0,
+      );
+      await w4Number(
+        s,
+        'select (endtime between unix_timestamp() + 3580 and unix_timestamp() + 3600) as value from mem_hero_buffer where hid = 990071 and buftype = 160040',
+        [],
+        1,
+      );
+      await w4Goods(s, uid, 26, 2);
+      for (let i = 0; i < 2; i++) {
+        w4Success(await s.command(session, 'praiseHero', 'ignored', cid, 990071, 26));
+        s.offset(4, '*', 'buf1');
+      }
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 26',
+        [uid],
+        0,
+      );
+      await w4Number(
+        s,
+        'select count(*) as value from mem_hero_buffer where hid = 990071 and buftype = 160040',
+        [],
+        0,
+      ); // old hufu replaces chibi
+      await w4Number(
+        s,
+        'select (endtime between unix_timestamp() + 172780 and unix_timestamp() + 172800) as value from mem_hero_buffer where hid = 990071 and buftype = 1',
+        [],
+        1,
+      );
+      s.stopRng();
+    },
+  },
+  {
+    name: 'W6 largess: inventory before conflicts, king buffs, grade replacement and pills',
+    tables: { mem_hero_buffer: { offsets: ['endtime'] }, log_act: { offsets: ['time'] } },
+    run: async (s) => {
+      s.rng([0]);
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await w6Hero(s, uid, cid);
+      await s.query('update sys_city_hero set herotype = 1000 where hid = 990071');
+      await s.query('delete from sys_goods where uid = ? and gid = 160040', [uid]);
+      await s.query('insert into mem_hero_buffer (hid, buftype, endtime) values (990071, 1, 1)');
+      w5Error(await s.command(session, 'largessHeroWithGid', '', cid, 990071, 160040)); // missing item before conflict
+      await w4Goods(s, uid, 160040, 2);
+      w5Error(await s.command(session, 'largessHeroWithGid', '', cid, 990071, 160040)); // even expired base buff conflicts
+      await s.query('delete from mem_hero_buffer where hid = 990071');
+      await s.query(
+        'insert into mem_hero_buffer (hid, buftype, endtime) values (990071, 160040, 1)',
+      );
+      await w4Goods(s, uid, 160042, 1); // higher-grade treasure must be in stock before the swap
+      w4Success(await s.command(session, 'largessHeroWithGid', '', cid, 990071, 160042)); // higher grade replaces lower
+      s.offset(4, '*', 'buf160042');
+      await w4Number(
+        s,
+        'select count(*) as value from mem_hero_buffer where hid = 990071 and buftype = 160040',
+        [],
+        0,
+      );
+      // Higher-grade treasure remains active; a lower-grade replacement is rejected.
+      w5Error(await s.command(session, 'largessHeroWithGid', '', cid, 990071, 160040));
+      await w4Number(
+        s,
+        'select count(*) as value from mem_hero_buffer where hid = 990071 and buftype = 160042',
+        [],
+        1,
+      );
+      await w4Goods(s, uid, 10152, 2);
+      w5Error(await s.command(session, 'largessHeroWithGid', '', cid, 990071, 10152)); // pills forbid king
+      await s.query('update sys_city_hero set herotype = 0 where hid = 990071');
+      w4Success(await s.command(session, 'largessHeroWithGid', '', cid, 990071, 10152));
+      // The pill branch writes no buffer: the still-active 160042 from the swap above is the
+      // only future endtime in this heroInfo reply, so it is the one that needs the offset.
+      s.offset(4, '*', 'buf160042');
+      await w4Number(
+        s,
+        'select command_base as value from sys_city_hero where hid = 990071',
+        [],
+        11,
+      );
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 10152',
+        [uid],
+        1,
+      );
+      await w4Number(
+        s,
+        'select count(*) as value from sys_city_hero_base_add where hid = 990071 and type = 4 and command_base_add_on = 1',
+        [],
+        1,
+      );
+      s.stopRng();
+    },
+  },
+  {
+    name: 'W6 king study: book order, guarantee, failure counter, fractional count and designations',
+    tables: { sys_user_level: { offsets: ['time'] }, log_user_level_add: { offsets: ['time'] } },
+    run: async (s) => {
+      s.rng([0]);
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await w6Hero(s, uid, cid);
+      await s.query('update sys_city_hero set herotype = 0 where uid = ? and herotype = 1000', [
+        uid,
+      ]);
+      await s.query('update sys_city_hero set herotype = 1000, level = 100 where hid = 990071');
+      await s.query('delete from sys_user_level where uid = ?', [uid]);
+      await s.query('delete from sys_goods where uid = ? and gid = 10961', [uid]);
+      w4Success(await s.command(session, 'loadKingTactic'));
+      w5Error(await s.command(session, 'addUserLevelTimes', 0));
+      w5Error(await s.command(session, 'addUserLevelTimes', 1));
+      await w4Goods(s, uid, 10961, 20);
+      s.rng([9999]); // level1 guaranteed even at roll 10000
+      w4Success(await s.command(session, 'addUserLevelTimes', 1));
+      await w4Number(s, 'select level as value from sys_user_level where uid = ?', [uid], 1);
+      await w4Number(
+        s,
+        'select command_base as value from sys_city_hero where hid = 990071',
+        [],
+        20,
+      );
+      w4Success(await s.command(session, 'addUserLevelTimes', 1)); // level2 fails, counter increments
+      await w4Number(s, 'select count as value from sys_user_level where uid = ?', [uid], 1);
+      await s.query('update sys_user_level set count = 4 where uid = ?', [uid]);
+      w4Success(await s.command(session, 'addUserLevelTimes', 1));
+      await w4Number(s, 'select level as value from sys_user_level where uid = ?', [uid], 2);
+      s.rng([0]);
+      w4Success(await s.command(session, 'addUserLevelTimes', 1.5)); // PHP loop runs twice
+      await w4Number(s, 'select level as value from sys_user_level where uid = ?', [uid], 4);
+      await s.query('update sys_city_hero set level = 1 where hid = 990071');
+      w4Success(await s.command(session, 'addUserLevelTimes', 1)); // returns level-limit message without consuming
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 10961',
+        [uid],
+        15,
+      );
+      await s.query('update sys_city_hero set level = 100 where hid = 990071');
+      await s.query('delete from sys_user_designation where uid = ? and did in (20,21,22,23)', [
+        uid,
+      ]);
+      w4Success(await s.command(session, 'addUserLevelTimes', 7)); // reaches 10 then stops
+      await w4Number(s, 'select level as value from sys_user_level where uid = ?', [uid], 10);
+      await w4Number(
+        s,
+        'select count(*) as value from sys_user_designation where uid = ? and did in (20,21,22,23)',
+        [uid],
+        4,
+      );
+      await w4Number(
+        s,
+        'select speed_add_on as value from sys_city_hero where hid = 990071',
+        [],
+        10,
+      );
+      await w4Goods(s, uid, 10961, 0);
+      w5Error(await s.command(session, 'addUserLevelTimes', 1)); // inventory before max level
+      await w4Goods(s, uid, 10961, 1);
+      w5Error(await s.command(session, 'addUserLevelTimes', 1));
+      s.stopRng();
+    },
+  },
+  {
+    name: 'W6 expr reward: timeout, ownership, money and details order, goods claim and replay',
+    tables: {
+      sys_hero_expr_reward: { offsets: ['endtime'] },
+      log_hero_expr_reward: { offsets: ['endtime', 'time'] },
+    },
+    run: async (s) => {
+      s.rng([0]);
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await s.query('update sys_user set money = 100 where uid = ?', [uid]);
+      w5Error(await s.command(session, 'finishCommonExpr', 990071));
+      await w6Reward(s, uid + 1, cid, 990071, 1, 200, '30,31,');
+      w5Error(await s.command(session, 'finishCommonExpr', 990071));
+      await s.query('update sys_hero_expr_reward set uid = ?, endtime = 1 where id = 990071', [
+        uid,
+      ]);
+      w5Error(await s.command(session, 'finishCommonExpr', 990071));
+      await s.query(
+        "update sys_hero_expr_reward set endtime = unix_timestamp() + 3600, details = '' where id = 990071",
+      );
+      w5Error(await s.command(session, 'finishCommonExpr', 990071)); // money before empty details
+      await s.query('update sys_hero_expr_reward set money = -1 where id = 990071');
+      w5Error(await s.command(session, 'finishCommonExpr', 990071));
+      await s.query('update sys_hero_expr_reward set money = 2 where id = 990071');
+      w5Error(await s.command(session, 'finishCommonExpr', 990071));
+      await s.query("update sys_hero_expr_reward set details = '30,31,,0,' where id = 990071");
+      await w4Goods(s, uid, 30, 0);
+      await w4Goods(s, uid, 31, 0);
+      w5Error(await s.command(session, 'finishCommonExpr', 990071)); // success commits then throws
+      for (const gid of [30, 31])
+        await w4Number(
+          s,
+          'select count as value from sys_goods where uid = ? and gid = ?',
+          [uid, gid],
+          1,
+        );
+      await w4Number(s, 'select money as value from sys_user where uid = ?', [uid], 98);
+      await w4Number(
+        s,
+        'select count(*) as value from sys_hero_expr_reward where id = 990071',
+        [],
+        0,
+      );
+      await w4Number(
+        s,
+        'select count(*) as value from log_hero_expr_reward where uid = ? and type = 990071',
+        [uid],
+        1,
+      );
+      w5Error(await s.command(session, 'finishCommonExpr', 990071));
+      await w4Number(s, 'select money as value from sys_user where uid = ?', [uid], 98);
+      s.stopRng();
+    },
+  },
+  {
+    name: 'W6 expr reward: attributes, pearl conversion, missing armor friend and draft errors',
+    tables: {
+      sys_hero_expr_reward: { offsets: ['endtime'] },
+      log_hero_expr_reward: { offsets: ['endtime', 'time'] },
+    },
+    run: async (s) => {
+      s.rng([0]);
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await w6Hero(s, uid, cid);
+      await s.query('update sys_user set money = 100 where uid = ?', [uid]);
+      await w6Reward(s, uid, cid, 990072, 4, 1, '7,1,2,1,3,2,4,3,5,4,6,5,7,6,8');
+      w5Error(await s.command(session, 'finishCommonExpr', 990072));
+      for (const [column, value] of [
+        ['bravery_base', 15],
+        ['wisdom_base', 14],
+        ['affairs_base', 15],
+        ['command_base', 16],
+        ['attack_add_on', 7],
+        ['defence_add_on', 8],
+      ] as const)
+        await w4Number(
+          s,
+          `select ${column} as value from sys_city_hero where hid = 990071`,
+          [],
+          value,
+        );
+      await w6Reward(s, uid, cid, 990073, 5, 1, '30,31');
+      await w4Goods(s, uid, 30, 0);
+      await w4Goods(s, uid, 31, 0);
+      w5Error(await s.command(session, 'finishCommonExpr', 990073));
+      await w4Goods(s, uid, 30, 1);
+      w5Error(await s.command(session, 'finishCommonExpr', 990073));
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 30',
+        [uid],
+        0,
+      );
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 31',
+        [uid],
+        1,
+      );
+      for (const [id, sort, detail] of [
+        [990074, 6, '990099'],
+        [990075, 7, '1'],
+        [990076, 8, '50'],
+      ] as const) {
+        await w6Reward(s, uid, cid, id, sort, 1, detail);
+        if (sort === 7)
+          await s.query('delete from sys_lionize where uid = ? and npcid = 990071', [uid]);
+        if (sort === 8) await s.query('delete from sys_city_draftqueue where cid = ?', [cid]);
+        w5Error(await s.command(session, 'finishCommonExpr', id));
+        await w4Number(
+          s,
+          'select count(*) as value from sys_hero_expr_reward where id = ?',
+          [id],
+          1,
+        );
+      }
+      await w4Number(s, 'select money as value from sys_user where uid = ?', [uid], 98);
+      s.stopRng();
+    },
+  },
+  {
+    name: 'W7 persuade: failed attempt consumes goods and cooldown; success transfers hero',
+    run: async (s) => {
+      s.rng([9999]);
+      const session = await s.login(EXISTING_PLAYER);
+      const { uid } = session;
+      const cid = await lastCity(s, uid);
+      // sys_city_hero.npcid is a smallint on both engines: an id above 32767 silently clamps
+      // (to 32767) and the persuade's npcid lookup finds nothing. 32701 is outside the
+      // baseline famous-hero range (1..1026) and unused.
+      const hid = 32701;
+      await s.query('delete from sys_city_hero where hid = ?', [hid]);
+      await s.query(
+        `insert into sys_city_hero (hid, uid, npcid, name, sex, face, cid, state, level,
+          bravery_base, wisdom_base, loyalty, herotype)
+         values (?, 900001, ?, 'W7游说将', 1, 1, 188128, 0, 20, 60, 60, 60, 100)`,
+        [hid, hid],
+      );
+      await s.query('delete from sys_lionize where uid = ? and npcid = ?', [uid, hid]);
+      await s.query('insert into sys_lionize (uid, npcid, friend, state) values (?, ?, 100, 1)', [
+        uid,
+        hid,
+      ]);
+      await s.query('delete from sys_goods where uid = ? and gid = 13', [uid]);
+      await w4Goods(s, uid, 13, 30);
+      await s.query('delete from mem_user_schedule where uid = ?', [uid]);
+      await s.query('update mem_state set value = 0 where state = 6');
+      const hotel = (func: string, ...args: unknown[]) =>
+        s.dialog(session, cid, 10, 42, func, ...args);
+
+      // A lost persuade roll is a success envelope carrying the failure text, not a thrown
+      // error; PHP consumes the 15 tokens and starts the cooldown before rolling.
+      w4Success(await hotel('PersuadeHero', hid));
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 13',
+        [uid],
+        15,
+      );
+      await w4Number(
+        s,
+        'select (last_persuade between unix_timestamp() - 10 and unix_timestamp()) as value from mem_user_schedule where uid = ?',
+        [uid],
+        1,
+      );
+      w5Error(await hotel('PersuadeHero', hid)); // the daily cooldown throws time_err
+      await w4Number(
+        s,
+        'select count as value from sys_goods where uid = ? and gid = 13',
+        [uid],
+        15,
+      );
+      await s.query('update sys_city_hero set loyalty = 1 where hid = ?', [hid]);
+      await s.query('update mem_user_schedule set last_persuade = 1 where uid = ?', [uid]);
+      s.rng([0]);
+      w4Success(await hotel('PersuadeHero', hid));
+      await w4Number(s, 'select uid as value from sys_city_hero where hid = ?', [hid], uid);
+      await w4Number(s, 'select cid as value from sys_city_hero where hid = ?', [hid], cid);
+      await w4Number(
+        s,
+        'select state as value from sys_lionize where uid = ? and npcid = ?',
+        [uid, hid],
+        2,
+      );
+      s.stopRng();
+    },
+  },
+  {
+    name: 'W7 famous hero tasks: selector, acceptance, rumor target and recorded task pair',
+    tables: { sys_hero_task: { offsets: ['endtime'] } },
+    run: async (s) => {
+      // A varied draw stream (not a fixed value): createTaskList re-draws while the tid is
+      // already taken, so a constant sequence pins every draw to 401 and both engines' task
+      // loops never terminate (the run then climbs into an OOM).
+      s.seed(7);
+      const session = await s.login(EXISTING_PLAYER);
+      const { uid } = session;
+      const cid = await lastCity(s, uid);
+      const hid = 32702; // smallint-safe npcid, same constraint as the W7 persuade fixture
+      const group = hid * 10 + 20001;
+      await s.query('delete from sys_hero_task where uid = ? and `group` = ?', [uid, group]);
+      await s.query('delete from sys_lionize where uid = ? and npcid = ?', [uid, hid]);
+      // state 2 (already own) makes the first getHeroPublicTask throw state_err without
+      // creating the six level-0 tasks; the update below restores state 1 for the real list.
+      await s.query('insert into sys_lionize (uid, npcid, friend, state) values (?, ?, 100, 2)', [
+        uid,
+        hid,
+      ]);
+      await s.query('delete from sys_city_hero where hid = ?', [hid]);
+      await s.query(
+        `insert into sys_city_hero (hid, uid, npcid, name, sex, face, cid, state, level, loyalty)
+         values (?, 900001, ?, 'W7任务将', 1, 1, ?, 0, 20, 100)`,
+        [hid, hid, cid],
+      );
+      await s.query('delete from sys_city_rumor where cid = ? and id = ?', [cid, hid]);
+      await s.query(
+        `insert into sys_city_rumor (id, cid, name, type, typeid, price)
+         values (?, ?, 'W7任务将', 0, ?, 30)`,
+        [hid, cid, hid],
+      );
+      const hotel = (func: string, ...args: unknown[]) =>
+        s.dialog(session, cid, 10, 42, func, ...args);
+      w5Error(await hotel('getHeroPublicTask', hid, 0));
+      await s.query('update sys_lionize set state = 1, friend = 100 where uid = ? and npcid = ?', [
+        uid,
+        hid,
+      ]);
+      await hotel('getHeroPublicTask', hid, 60);
+      await w4Number(
+        s,
+        'select count(*) as value from sys_hero_task where uid = ? and `group` = ?',
+        [uid, group],
+        3,
+      );
+      const available = await s.query<{ tid: string }>(
+        'select tid from sys_hero_task where uid = ? and `group` = ? order by tid limit 1',
+        [uid, group],
+      );
+      const tid = Number(available[0]?.tid ?? 0);
+      if (!tid) throw new Error('W7 expected generated famous-hero tasks');
+      await hotel('getTheTask', tid, group);
+      await w4Number(
+        s,
+        'select state as value from sys_hero_task where uid = ? and `group` = ? and tid = ?',
+        [uid, group, tid],
+        1,
+      );
+      await hotel('getRumor', hid);
+      await s.query('delete from sys_user_task where uid = ? and tid in (?, ?)', [
+        uid,
+        20000 + hid,
+        30000 + hid,
+      ]);
+      w5Error(await hotel('recordTask', hid));
+      await w4Number(
+        s,
+        'select count(*) as value from sys_user_task where uid = ? and tid in (?, ?)',
+        [uid, 20000 + hid, 30000 + hid],
+        2,
+      );
+      w5Error(await hotel('recordTask', hid));
+      await w4Number(
+        s,
+        'select count(*) as value from sys_user_task where uid = ? and tid in (?, ?)',
+        [uid, 20000 + hid, 30000 + hid],
+        2,
+      );
+      s.stopRng();
+    },
+  },
+  {
+    name: 'W7 commission detail and reward: 90% payout clears both rows and reports the poster',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const { uid } = session;
+      // The dump ships no commission rows; ids live in the 200000-400000 detail/reward window.
+      // finishuid = uid turns the detail state true, a fixed endtime keeps the reply absolute.
+      await s.query(
+        `insert into sys_pub_reward_task
+           (id, uid, targetcid, targetname, type, goal, endtime, money, number, state, finishuid, todo)
+         values (?, ?, 12003, '长乐', 0, 5000, 1900000000, 1010, 1, -1, ?, 'W7委托内容')`,
+        [200001, uid, uid],
+      );
+      await s.query(
+        `insert into sys_pub_reward_task
+           (id, uid, targetcid, targetname, type, goal, endtime, money, number, state, finishuid, todo)
+         values (?, ?, 12003, '长乐', 1, 8000, 1900000000, 500, 0, -1, ?, 'W7未完成委托')`,
+        [200002, uid, uid],
+      );
+      await s.query(
+        `insert into sys_user_reward_task (uid, tid, state, type, targetcid, goal)
+         values (?, 200001, -1, 0, 12003, 5000), (?, 200002, 0, 1, 12003, 8000)`,
+        [uid, uid],
+      );
+      await s.command(session, 'getTaskDetail', 200001);
+      await s.command(session, 'getTaskDetail', 200002);
+      const money = await s.query<{ money: string }>('select money from sys_user where uid = ?', [
+        uid,
+      ]);
+      // An unfinished commission is refused before anything is granted or deleted.
+      w5Error(await s.command(session, 'getReward', 200002));
+      await w4Number(
+        s,
+        'select money - ? as value from sys_user where uid = ?',
+        [Number(money[0]?.money ?? 0), uid],
+        0,
+      );
+      w4Success(await s.command(session, 'getReward', 200001));
+      // money*9/10, and both receiver and posted rows are gone (the delete has no uid filter).
+      await w4Number(
+        s,
+        'select money - ? as value from sys_user where uid = ?',
+        [Number(money[0]?.money ?? 0), uid],
+        909,
+      );
+      await w4Number(
+        s,
+        'select count(*) as value from sys_user_reward_task where tid = ?',
+        [200001],
+        0,
+      );
+      await w4Number(
+        s,
+        'select count(*) as value from sys_pub_reward_task where id = ?',
+        [200001],
+        0,
+      );
+      await w4Number(
+        s,
+        'select count(*) as value from sys_user_reward_task where tid = ?',
+        [200002],
+        1,
+      );
+    },
+  },
+  {
+    name: 'W7 selection protocols: armor by part, by id and heroes by level',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const { uid } = session;
+      const cid = await lastCity(s, uid);
+      // Exactly one candidate per filter: the dump's unworn pieces tie on value, so the unfiltered
+      // stock is dropped first (白虎护腕 53047 is part 7 / type 6).
+      await s.query('delete from sys_user_armor where uid = ? and hid = 0', [uid]);
+      await s.query(
+        `insert into sys_user_armor (sid, uid, armorid, hp, hp_max, hid, strong_level, strong_value)
+         values (990003, ?, 53047, 1000, 100, 0, 0, 0)`,
+        [uid],
+      );
+      await s.command(session, 'getArmorsByPartOrType', cid, 52, 0, 7, 1);
+      // A piece carries two attribute rows (attid 1 and 2); the PHP selects them without an
+      // order by, so MyISAM and InnoDB return the pair in opposite orders. Every filter that
+      // matches this piece (part 7, type 6 and by id) needs the unordered mark.
+      s.unordered(4, 4);
+      await s.command(session, 'getArmorsByPartOrType', cid, 51, 0, 6, 1);
+      s.unordered(4, 4);
+      await s.command(session, 'getArmorsByPartOrType', cid, 0, 53047, 0, 1);
+      s.unordered(4, 4);
+      await s.command(session, 'getArmorsByPartOrType', cid, 51, 0, 99, 1);
+      s.unordered(4, 4);
+      await s.command(session, 'getArmorsByPartOrType', cid, 0, 53047, 0, 1);
+      s.unordered(4, 4);
+      await s.command(session, 'getArmorsByPartOrType', cid, 51, 0, 99, 1);
+      s.unordered(4, 4);
+      // Two heroes of distinct levels: the filter and the empty reply compare exactly.
+      await s.query('delete from sys_city_hero where uid = ? and state = 0', [uid]);
+      await s.query(
+        `insert into sys_city_hero (hid, uid, npcid, name, sex, face, cid, state, level, loyalty)
+         values (990083, ?, ?, 'W7选将甲', 1, 1, ?, 0, 5, 100)`,
+        [uid, uid, cid],
+      );
+      await s.query(
+        `insert into sys_city_hero (hid, uid, npcid, name, sex, face, cid, state, level, loyalty)
+         values (990084, ?, ?, 'W7选将乙', 0, 1, ?, 0, 30, 100)`,
+        [uid, uid, cid],
+      );
+      await s.command(session, 'getHerosByLevel', cid, 0, 10);
+      await s.command(session, 'getHerosByLevel', cid, 0, 50);
+    },
+  },
+  {
+    name: 'W8 login, sign, activity, craft buffers, progress and offline compatibility',
+    tables: { sys_user_sign: { offsets: ['time'] } },
+    run: async (s) => {
+      s.rng([0]);
+      const session = await s.login(EXISTING_PLAYER);
+      const { uid } = session;
+      await s.command(session, 'getLoginInfo');
+      s.offset(2, 0, 'time');
+      await s.command(session, 'finishOpenAnnounce');
+      await w4Number(
+        s,
+        'select count(*) as value from sys_user_task where uid = ? and tid = 292 and state = 1',
+        [uid],
+        1,
+      );
+      await s.command(session, 'getLoginReward', -1);
+      await s.command(session, 'getActivityList');
+      await s.command(session, 'getHuangJinProgress', 0);
+      await s.command(session, 'getDongZhuoProgress', 0);
+      await s.command(session, 'getDongZhuoProgress', 6);
+      await s.command(session, 'getAllHeroList');
+      await s.command(session, 'getCrossShaChangInfo');
+      await s.command(session, 'getCrossShaChangReward');
+      await s.command(session, 'sendCloseMsg');
+      w5Error(await s.command(session, 'joinCrossShaChang', 990099));
+      const [hero] = await s.query<{ hid: string }>(
+        'select hid from sys_city_hero where uid = ? and state = 0 order by hid limit 1',
+        [uid],
+      );
+      if (hero) await s.command(session, 'joinCrossShaChang', Number(hero.hid));
+      await s.command(session, 'getCraftBuffer');
+      s.stopRng();
+    },
+  },
+  {
+    // 联盟群发 success path (MailFunc.php:395-460): one insert-select letter per member, both
+    // alarms raised, 2 传音符 spent, goal 80 completed. The dump ships no unions, so the fixture
+    // founds one directly; leader = uid satisfies the 盟主 gate with an ordinary union_pos. The
+    // horn shortage is tried first: the raw not_enough_goods error fires before any letter row.
+    // The fan-out `insert … select … from sys_user where union_id = …` has no order by, so the
+    // engines emit the member rows in different orders (MyISAM dump order 1002-first vs InnoDB
+    // PK order 1001-first) and the auto-increment sys_mail_box.mid lands swapped (16/17). That
+    // is engine row order, not port behavior: mid is ignored in the delta and masked in the
+    // mailbox replies, everything else (contentid, title, type, names, flags) compares exact.
+    name: 'union mail: 联盟群发 fans out to both members and spends the horns',
+    tables: { sys_mail_box: { ignore: ['mid'] } },
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      await s.query(
+        `insert into sys_union (id, name, leader, creator, member, createtime)
+         values (990021, '差分联盟', ?, 0, 2, 1500000000)`,
+        [uid],
+      );
+      await s.query('update sys_user set union_id = 990021 where uid in (?, 1002)', [uid]);
+      const member = await s.login('judingwan');
+      await s.query('update sys_goods set count = 1 where uid = ? and gid = 1', [uid]);
+      w5Error(
+        await s.command(session, 'sendUnionMail', EXISTING_PLAYER, 990021, '群发', '差分群发正文'),
+      );
+      await w4Number(s, 'select count(*) as value from sys_mail_box where fromuid = ?', [uid], 0);
+      // Exactly two horns are needed; the success send drains them to zero.
+      await s.query('update sys_goods set count = 2 where uid = ? and gid = 1', [uid]);
+      w4Success(
+        await s.command(session, 'sendUnionMail', EXISTING_PLAYER, 990021, '群发', '差分群发正文'),
+      );
+      // The sender's own copy sits in the outbox with the ［联盟］ title prefix — and so does
+      // the member's copy, because every fanned row carries fromuid = sender; both share one
+      // posttime, so the `order by posttime desc` tie permutes between the engines. The
+      // letter's own mid is the engine-swapped auto-inc (see the tables note above).
+      await s.command(session, 'getOutboxMail', 0);
+      s.mask(4, 2, '*', 'mid');
+      s.unordered(4, 2);
+      await s.command(member, 'getInboxMail', 0);
+      s.mask(4, 2, '*', 'mid');
+      await w4Number(s, 'select count as value from sys_goods where uid = ? and gid = 1', [uid], 0);
+      await w4Number(
+        s,
+        `select count(*) as value from sys_mail_box
+         where contentid = (select max(mid) from sys_mail_content)`,
+        [],
+        2,
+      );
+      await w4Number(
+        s,
+        'select count(*) as value from sys_user_goal where uid = ? and gid = 80',
+        [uid],
+        1,
+      );
+      await w4Number(
+        s,
+        'select count(*) as value from sys_alarm where uid in (?, 1002) and mail = 1',
+        [uid],
+        2,
+      );
+    },
+  },
 ];
 
 async function seedScoutPatrol(
@@ -8508,4 +9747,37 @@ async function w4MoveDestination(s: Side, cid: number): Promise<number> {
 /** Preserve report wording, users and dates: only the wall-clock HH:MM:SS is nondeterministic. */
 function w4ReportClock(value: unknown): unknown {
   return typeof value === 'string' ? value.replace(/\b\d{2}:\d{2}:\d{2}\b/g, '<clock>') : value;
+}
+
+function w5Error(response: unknown): void {
+  if (!Array.isArray(response) || Number(response[0]) !== 0) {
+    throw new Error(`W5 expected PHP error envelope: ${JSON.stringify(response)}`);
+  }
+}
+
+/** Isolate hero-list responses to one hero; every future buffer timestamp has an explicit offset. */
+async function w6Hero(s: Side, uid: number, cid: number): Promise<void> {
+  await s.query('delete from sys_city_hero where uid = ? and cid = ?', [uid, cid]);
+  await s.query(
+    `insert into sys_city_hero (hid, uid, name, sex, face, cid, state, level, command_base, affairs_base, bravery_base, wisdom_base, loyalty) values (990071, ?, 'W6验收将', 0, 1, ?, 0, 1, 10, 10, 10, 10, 100)`,
+    [uid, cid],
+  );
+  await s.query(
+    'insert into mem_hero_blood (hid, `force`, force_max, energy, energy_max) values (990071, 100, 100, 100, 100)',
+  );
+}
+
+async function w6Reward(
+  s: Side,
+  uid: number,
+  cid: number,
+  id: number,
+  sort: number,
+  money: number,
+  details: string,
+): Promise<void> {
+  await s.query(
+    'insert into sys_hero_expr_reward (id, uid, cid, hid, type, sort, money, details, endtime) values (?, ?, ?, 990071, 990071, ?, ?, ?, unix_timestamp() + 3600)',
+    [id, uid, cid, sort, money, details],
+  );
 }

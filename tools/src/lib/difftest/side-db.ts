@@ -177,6 +177,12 @@ export class SideDb {
     };
   }
 
+  /** Complete rows for comparisons whose normalization depends on the whole table. */
+  async readRows(table: string, snapshot = false): Promise<Row[]> {
+    this.info(table);
+    return this.query(`select * from ${q((snapshot ? SNAP_PREFIX : '') + table)}`);
+  }
+
   /** Rows present now but not in the snapshot (added/changed) and vice versa. */
   async diff(table: string): Promise<TableDelta> {
     const live = q(table);

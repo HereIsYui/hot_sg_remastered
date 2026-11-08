@@ -176,6 +176,21 @@ export function rewriteTieRanks(rows: Row[], rule: TableRule): Row[] {
   return rows.map((row) => ({ ...row, [tie.column]: String(lowest.get(keyOf(row))) }));
 }
 
+/** Normalize complete live/snapshot tables before selecting changed rows (especially ties). */
+export function diffNormalizedRows(
+  live: Row[],
+  snapshot: Row[],
+  rule: TableRule,
+  ctx: SideContext,
+): { added: string[]; removed: string[] } {
+  const norm = (rows: Row[]) =>
+    rewriteTieRanks(rows, rule)
+      .map((row) => normalizeRow(row, rule, ctx))
+      .filter((row): row is string => row !== null);
+  const { onlyA, onlyB } = diffMultisets(norm(live), norm(snapshot));
+  return { added: onlyA, removed: onlyB };
+}
+
 /** Multiset difference of two lists of canonical strings. */
 export function diffMultisets(a: string[], b: string[]): { onlyA: string[]; onlyB: string[] } {
   const counts = new Map<string, number>();

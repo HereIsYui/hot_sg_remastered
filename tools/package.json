@@ -10,6 +10,7 @@
     "ui": "node src/ui.ts",
     "dump-db": "node src/dump-db.ts",
     "inventory": "node src/inventory/index.ts",
+    "coverage": "node src/coverage.ts",
     "smoke": "node src/smoke.ts",
     "migrate-db": "node src/migrate-db.ts",
     "lang": "node src/lang.ts",

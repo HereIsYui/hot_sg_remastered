@@ -2,7 +2,10 @@
  * Differential test: runs each case against the legacy PHP server and the NestJS server, then
  * compares their responses and the database rows each side changed.
  *
- *   pnpm difftest [name filter] [--resnapshot] [--dump]
+ *   pnpm difftest [name filter] [--from N] [--to N] [--resnapshot] [--dump]
+ *
+ * `--from`/`--to` select a consecutive half-open-inclusive index range in cases.ts order, so a
+ * long run can be split into segments (the legacy mysqld needs a restart between them).
  *
  * `--dump` writes each case's normalized responses and row changes to the cache directory.
  *
@@ -18,12 +21,12 @@ import { tableRules } from './difftest/tables.ts';
 import {
   compareTrees,
   diffMultisets,
+  diffNormalizedRows,
   mapAt,
   maskAt,
   normalizeRow,
   normalizeTree,
   offsetOf,
-  rewriteTieRanks,
   sortAt,
   type SideContext,
   type TableRule,
@@ -42,9 +45,28 @@ const MAX_REPORT_LINES = 40;
 const args = process.argv.slice(2);
 let resnapshot = args.includes('--resnapshot');
 const dump = args.includes('--dump');
-const filter = args.find((a) => !a.startsWith('--'));
-const selected = cases.filter((c) => !filter || c.name.includes(filter));
-if (selected.length === 0) throw new Error(`no case matches "${filter}"`);
+const filter = args.find(
+  (a, i) => !a.startsWith('--') && args[i - 1] !== '--from' && args[i - 1] !== '--to',
+);
+const numArg = (name: string): number | undefined => {
+  const i = args.indexOf(name);
+  const v = i >= 0 ? Number(args[i + 1]) : undefined;
+  if (i >= 0 && !Number.isInteger(v)) throw new Error(`${name} needs an integer index`);
+  return v;
+};
+const from = numArg('--from');
+const to = numArg('--to');
+const selected = cases
+  .map((c, i) => ({ c, i }))
+  .filter(
+    ({ c, i }) =>
+      (!filter || c.name.includes(filter)) &&
+      (from === undefined || i >= from) &&
+      (to === undefined || i <= to),
+  )
+  .map(({ c }) => c);
+if (selected.length === 0)
+  throw new Error(`no case matches "${filter ?? 'everything'}" in [${from ?? 0}, ${to ?? 'end'}]`);
 
 // The tick would keep changing the legacy database underneath the cases.
 succeeds('docker', [
@@ -228,15 +250,18 @@ async function runSide(
   const saved = await db.snapshotAutoIncrements();
   const deltas = new Map<string, { added: string[]; removed: string[] }>();
   for (const table of await db.changedSince(start)) {
-    const delta: TableDelta = await db.diff(table);
-    await db.restore(table, saved.get(table));
     const rule = tableOverrides[table] ?? tableRules[table] ?? {};
+    // A raw rank-key delta can omit unchanged members of a tie group. Normalize the complete
+    // tables first, so tie permutations cannot change delta membership or the group's minimum.
+    const delta: TableDelta = rule.tieRank
+      ? { added: await db.readRows(table), removed: await db.readRows(table, true) }
+      : await db.diff(table);
+    await db.restore(table, saved.get(table));
     const norm = (rows: TableDelta['added']) =>
-      rewriteTieRanks(rows, rule)
-        .map((r) => normalizeRow(r, rule, ctx))
-        .filter((r): r is string => r !== null);
-    const added = norm(delta.added);
-    const removed = norm(delta.removed);
+      rows.map((r) => normalizeRow(r, rule, ctx)).filter((r): r is string => r !== null);
+    const { added, removed } = rule.tieRank
+      ? diffNormalizedRows(delta.added, delta.removed, rule, ctx)
+      : { added: norm(delta.added), removed: norm(delta.removed) };
     if (added.length || removed.length) deltas.set(table, { added, removed });
   }
   return {
