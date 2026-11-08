@@ -4,6 +4,9 @@ import { GoodsModule } from '../goods/goods.module';
 import { TaskModule } from '../task/task.module';
 import { ArmorCommands } from './armor.commands';
 import { BlackSmithCommands } from './blacksmith.commands';
+import { HeroItemCommands } from './hero-item.commands';
+import { KingCommands } from './king.commands';
+import { HeroExprRewardCommands } from './hero-expr-reward.commands';
 import { HeroCommands } from './hero.commands';
 import { HeroExprCommands } from './hero-expr.commands';
 import { HeroExprTick } from './hero-expr.tick';
@@ -18,12 +21,15 @@ import { SkillCommands } from './skill.commands';
     ArmorCommands,
     BlackSmithCommands,
     HeroCommands,
+    HeroItemCommands,
+    KingCommands,
+    HeroExprRewardCommands,
     HeroExprCommands,
     HeroExprTick,
     HotelCommands,
     OfficeCommands,
     SkillCommands,
   ],
-  exports: [BlackSmithCommands, HeroExprCommands],
+  exports: [BlackSmithCommands, HeroExprCommands, HeroItemCommands],
 })
 export class HeroModule {}

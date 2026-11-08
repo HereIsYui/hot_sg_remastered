@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { sql, type RawBuilder } from 'kysely';
 import { GameError } from '../common/game-error';
 import { LangService } from '../common/lang.service';
+import { HotelRules } from '../city/hotel-rules.service';
+import { HeroRules } from '../core/hero-rules.service';
 import { GoodsRules } from '../core/goods-rules.service';
 import { phpIntval, phpNum, phpString } from '../core/php';
 import { RandomService } from '../core/random.service';
@@ -54,6 +56,8 @@ export class DefaultBoxService {
     private readonly rewards: TaskRewards,
     private readonly users: UserRules,
     private readonly random: RandomService,
+    private readonly hotel: HotelRules,
+    private readonly heroes: HeroRules,
   ) {}
 
   /** The opened items (TreasureGetDialog), or false when nothing is given. */
@@ -90,7 +94,8 @@ export class DefaultBoxService {
 
     const pick = await this.pickWithLimit(uid, SRC_GOODS, srcid, details);
     if (!pick) return false;
-    if (phpIntval(pick.sort) === 7) throw new Error(`openDefaultHeroBox(${srcid}) not ported`);
+    if (phpIntval(pick.sort) === 7)
+      return this.openDefaultHeroBox(uid, cid, SRC_GOODS, phpIntval(pick.type));
     const given = await this.give(uid, cid, srcid, SRC_GOODS, pick);
     return typeof given === 'string' ? new CommittedMessage(given) : given;
   }
@@ -111,9 +116,80 @@ export class DefaultBoxService {
     if (details.length === 0) return false;
     const pick = await this.pickWithLimit(uid, srctype, srcid, details);
     if (!pick) return false;
-    if (phpIntval(pick.sort) === 7) throw new Error(`openDefaultHeroBox(${srcid}) not ported`);
+    if (phpIntval(pick.sort) === 7) {
+      const message = await this.openDefaultHeroBox(uid, cid, srctype, phpIntval(pick.type));
+      return message instanceof CommittedMessage ? message.text : message;
+    }
     const given = await this.give(uid, cid, srcid, srctype, pick, basecount);
     return typeof given === 'string' ? given : false;
+  }
+
+  /** PHP ignores count, limits and inform for sort 7; srctype 0 commits then shows an error. */
+  async openDefaultHeroBox(
+    uid: number,
+    cid: number,
+    srctype: 0,
+    type: number,
+  ): Promise<CommittedMessage>;
+  async openDefaultHeroBox(
+    uid: number,
+    cid: number,
+    srctype: number,
+    type: number,
+  ): Promise<string | CommittedMessage>;
+  async openDefaultHeroBox(
+    uid: number,
+    cid: number,
+    srctype: number,
+    type: number,
+  ): Promise<string | CommittedMessage> {
+    if (!(await this.hotel.cityHasHeroPosition(uid, cid))) {
+      // The box was already consumed by openDefaultBox before checking capacity.
+      const msg = this.lang.t('recruitHero.hotel_level_low');
+      if (srctype === SRC_GOODS) return new CommittedMessage(msg);
+      throw GameError.raw(msg);
+    }
+    const hero = (await this.row(sql`select * from cfg_recruit_hero where id = ${type}`)) ?? {};
+    let level = phpIntval(hero.level);
+    if (phpNum(hero.min_level) > 0 && phpNum(hero.max_level) > 0) {
+      level = this.random.mtRand(phpIntval(hero.min_level), phpIntval(hero.max_level));
+    }
+    const affairs = this.random.mtRand(
+      phpIntval(hero.min_affairs_base),
+      phpIntval(hero.max_affairs_base),
+    );
+    const bravery = this.random.mtRand(
+      phpIntval(hero.min_bravery_base),
+      phpIntval(hero.max_bravery_base),
+    );
+    const wisdom = this.random.mtRand(
+      phpIntval(hero.min_wisdom_base),
+      phpIntval(hero.max_wisdom_base),
+    );
+    // Still draw the loyalty before PHP overwrites it with 70.
+    this.random.mtRand(phpIntval(hero.min_loyalty), phpIntval(hero.max_loyalty));
+    const total = affairs + bravery + wisdom;
+    const add1 = total ? Math.floor((affairs / total) * level) : 0;
+    const add2 = total ? Math.floor((bravery / total) * level) : 0;
+    const add3 = level - add1 - add2;
+    const sex = phpIntval(hero.sex);
+    const face = sex === 0 ? this.random.mtRand(1, 9) : this.random.mtRand(1001, 1070);
+    const exp = await this.cell(sql`select total_exp from cfg_hero_level where level = ${level}`);
+    const result = await sql`insert into sys_city_hero
+      (uid, name, sex, face, cid, state, level, exp, affairs_base, bravery_base, wisdom_base,
+       affairs_add, bravery_add, wisdom_add, loyalty, herotype)
+      values (${uid}, ${hero.heroname}, ${sex}, ${face}, ${cid}, 0, ${level}, ${exp},
+        ${affairs}, ${bravery}, ${wisdom}, ${add1}, ${add2}, ${add3}, 70, ${hero.herotype})`.execute(
+      this.scope.db,
+    );
+    const hid = Number(result.insertId);
+    const forceMax = 100 + Math.floor(level / 5) + Math.floor((bravery + add2) / 3);
+    const energyMax = 100 + Math.floor(level / 5) + Math.floor((wisdom + add3) / 3);
+    await sql`insert into mem_hero_blood (hid, \`force\`, force_max, energy, energy_max)
+      values (${hid}, 100, ${forceMax}, 100, ${energyMax})`.execute(this.scope.db);
+    await this.heroes.updateCityHeroChange(uid, cid);
+    const msg = this.lang.t('goods.get_hero', hero.heroname);
+    return srctype === SRC_GOODS ? new CommittedMessage(msg) : msg;
   }
 
   /** The act 252 roll for 沉睡的匣子; ten lucky ones in a row earn an achievement. */

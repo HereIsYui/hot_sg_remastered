@@ -1,5 +1,6 @@
 import { Global, type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
 import { TaskModule } from '../task/task.module';
+import { AchievementRules } from './achievement-rules.service';
 import { CityRules } from './city-rules.service';
 import { GameStateService } from './game-state.service';
 import { GoodsRules } from './goods-rules.service';
@@ -16,6 +17,7 @@ import { UserProtection } from './user-protection.service';
 import { UserRules } from './user-rules.service';
 
 const providers = [
+  AchievementRules,
   CityRules,
   CityRelocation,
   UserProtection,

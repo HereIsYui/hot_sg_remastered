@@ -3,6 +3,7 @@ import { sql, type RawBuilder } from 'kysely';
 import { GameError } from '../common/game-error';
 import { LangService } from '../common/lang.service';
 import { CityRules } from '../core/city-rules.service';
+import { AchievementRules } from '../core/achievement-rules.service';
 import { GoodsRules } from '../core/goods-rules.service';
 import { HeroRules, LORD_HERO_TYPE } from '../core/hero-rules.service';
 import { phpEmpty, phpIntval, phpLooseEquals, phpNum, phpString } from '../core/php';
@@ -24,12 +25,6 @@ const ARMOR_DESIGNATIONS: Record<number, number> = { 12018: 24, 12016: 25 };
 /** Achievements for reaching a nobility (giveResource type 18). */
 const NOBILITY_ACHIEVEMENTS: Record<number, number> = { 1: 37, 5: 38, 11: 39 };
 
-/** NPC and system accounts below this uid never get achievements. */
-const FIRST_PLAYER_UID = 897;
-
-/** cfg_achivement.open_time */
-const AchievementOpen = { AfterNewbie: 1, AfterHuangJin: 2 } as const;
-
 /** The reward grants and goal deductions of TaskFunc.php (giveReward, reduceGoal and helpers). */
 @Injectable()
 export class TaskRewards {
@@ -41,6 +36,7 @@ export class TaskRewards {
     private readonly heroes: HeroRules,
     private readonly users: UserRules,
     private readonly random: RandomService,
+    private readonly achievements: AchievementRules = new AchievementRules(scope, lang, users),
   ) {}
 
   /** giveReward: grants one cfg_task_reward row; with `withMessage`, returns its broadcast text. */
@@ -216,8 +212,13 @@ export class TaskRewards {
           values (${uid}, 101, ${type}, ${-count})
           on duplicate key update count = count - ${count}`.execute(this.scope.db);
         break;
-      case 203:
-        throw new Error('reduceGoal(203): 备战洛阳 not ported');
+      case 203: {
+        const union = await this.cell(sql`select union_id from sys_user where uid = ${uid}`);
+        await sql`update luoyang_progress set curvalue = curvalue - ${count} where union_id = ${union} and tid = ${type}`.execute(
+          this.scope.db,
+        );
+        break;
+      }
       case 201: {
         const heroes = await this.rows(sql`select hid from sys_city_hero where uid = ${uid}
           and herotype = ${type} and state = 0 order by level limit ${count}`);
@@ -321,53 +322,7 @@ export class TaskRewards {
 
   /** utils.php::finishAchivement */
   async finishAchievement(uid: number, id: number): Promise<void> {
-    if (uid < FIRST_PLAYER_UID) return;
-    if (await this.check(sql`select 1 from cfg_achivement where id = ${id} and state = '0'`))
-      return;
-    if (
-      await this.check(sql`select 1 from sys_user_achivement
-        where uid = ${uid} and achivement_id = ${id}`)
-    ) {
-      return;
-    }
-    const openTime = phpIntval(
-      await this.cell(sql`select open_time from cfg_achivement where id = ${id}`),
-    );
-    if (openTime === AchievementOpen.AfterNewbie) {
-      const state = await this.cell(sql`select state from sys_user where uid = ${uid}`);
-      if (!phpLooseEquals(state, 0)) return;
-    } else if (openTime === AchievementOpen.AfterHuangJin) {
-      const state = await this.cell(sql`select value from mem_state where state = 5`);
-      if (!phpLooseEquals(state, 1)) return;
-    }
-    const db = this.scope.db;
-    await sql`insert into sys_user_achivement (uid, achivement_id, time)
-      values (${uid}, ${id}, unix_timestamp())`.execute(db);
-    const cfg = await this.row(sql`select union_inform, system_inform, name, point
-      from cfg_achivement where id = ${id}`);
-    await sql`update sys_user set achivement_count = achivement_count + 1,
-        achivement_point = achivement_point + ${phpNum(cfg?.point)}
-      where uid = ${uid}`.execute(db);
-    const user = await this.row(sql`select name, union_id from sys_user where uid = ${uid}`);
-    const msg = this.lang.t('Achivement.congrats', user?.name, cfg?.name);
-    if (phpLooseEquals(cfg?.union_inform, 1)) {
-      for (const table of ['sys_union_event', 'mem_union_event']) {
-        await sql`insert into ${sql.table(table)} (unionid, type, content, evttime)
-          values (${user?.union_id}, 11, ${msg}, unix_timestamp())`.execute(db);
-      }
-    }
-    if (phpLooseEquals(cfg?.system_inform, 1)) {
-      await this.users.sendSysInform({
-        type: 0,
-        inuse: 1,
-        starttime: 0,
-        endtime: 600,
-        interval: 50000,
-        scrollcount: 1,
-        color: 49151,
-        msg,
-      });
-    }
+    await this.achievements.finishAchievement(uid, id);
   }
 
   private async giveArmy(cid: unknown, sid: number, count: number): Promise<void> {
@@ -442,7 +397,7 @@ export class TaskRewards {
   }
 
   /** HeroFunc.php::deleteHeroBaseAdd: undoes the hero's attribute bonuses. */
-  private async deleteHeroBaseAdd(hid: unknown): Promise<void> {
+  async deleteHeroBaseAdd(hid: unknown): Promise<void> {
     const db = this.scope.db;
     const row = await this.row(sql`select sum(command_base_add_on) as command,
         sum(affairs_base_add_on) as affairs, sum(bravery_base_add_on) as bravery,

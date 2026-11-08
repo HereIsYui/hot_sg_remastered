@@ -4,6 +4,8 @@ import { GameError } from '../common/game-error';
 import { LangService } from '../common/lang.service';
 import { phpEmpty, phpIntval, phpLooseEquals, phpNum, phpString } from '../core/php';
 import { TaskRules } from '../core/task-rules.service';
+import { HeroRules } from '../core/hero-rules.service';
+import { ReportService } from '../core/report.service';
 import { UserRules } from '../core/user-rules.service';
 import { DbScope } from '../db/database.module';
 import { GlobalCommand, type CommandContext } from '../gateway/decorators';
@@ -88,11 +90,7 @@ async function canRecomplete(tid: number, defaultState: () => Promise<unknown>):
   return phpLooseEquals(await defaultState(), 100);
 }
 
-/**
- * The TaskDialog commands of TaskFunc.php. Not ported: the world-event rewards (黄巾 / 董卓
- * donations, 备战洛阳), the 名将 hero tasks' rewards, and commission tasks' lists and rewards;
- * those answer with an error.
- */
+/** The TaskDialog commands and task selection protocols of TaskFunc.php. */
 @Injectable()
 export class TaskCommands {
   constructor(
@@ -102,6 +100,8 @@ export class TaskCommands {
     private readonly goals: TaskGoals,
     private readonly rewards: TaskRewards,
     private readonly tasks: TaskRules,
+    private readonly heroes: HeroRules,
+    private readonly report: ReportService,
   ) {}
 
   /**
@@ -164,6 +164,14 @@ export class TaskCommands {
     ];
   }
 
+  /** `[cid, type, level]` → rows; cid/type are consumed but do not filter the PHP query. */
+  @GlobalCommand()
+  async getHerosByLevel(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    return this.rows(
+      sql`select hid, name from sys_city_hero where uid = ${ctx.uid} and state = 0 and level >= ${phpIntval(param[2])} order by level limit 20`,
+    );
+  }
+
   /** `[groupid]` → `[tasks with state = finished, finished count]`. */
   @GlobalCommand()
   async getTaskList(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
@@ -176,7 +184,7 @@ export class TaskCommands {
     const uid = ctx.uid;
     const tid = phpIntval(param[0]);
     if (tid >= COMMISSION_BASE && tid < 400000) {
-      throw new Error('getTaskDetail: commission tasks not ported');
+      return this.commissionDetail(uid, tid);
     }
     const goalSort = await this.cell(
       sql`select sort from cfg_task_goal where tid = ${tid} limit 1`,
@@ -240,13 +248,16 @@ export class TaskCommands {
           throw GameError.lang('getReward.not_enough_things', times);
         }
       }
-      if (isHuangJinDonation(tid) || isDongZhuoDonation(tid) || isLuoYangTask(tid)) {
-        throw new Error(`getMultiReward(${tid}): world-event tasks not ported`);
-      }
       const cid = await this.lastcid(uid);
-      for (const reward of await this.rows(sql`select * from cfg_task_reward where tid = ${tid}`)) {
-        reward.count = phpNum(reward.count) * times;
-        await this.rewards.giveReward(uid, cid, reward);
+      if (isHuangJinDonation(tid) || isDongZhuoDonation(tid)) {
+        await this.eventReward(uid, cid, tid, times);
+      } else if (!isLuoYangTask(tid)) {
+        for (const reward of await this.rows(
+          sql`select * from cfg_task_reward where tid = ${tid}`,
+        )) {
+          reward.count = phpNum(reward.count) * times;
+          await this.rewards.giveReward(uid, cid, reward);
+        }
       }
       for (const goal of goals) {
         if (phpIntval(goal.reduce) === 1) await this.rewards.reduceGoal(uid, cid, goal);
@@ -400,7 +411,7 @@ export class TaskCommands {
     const db = this.scope.db;
     const tid = phpIntval(param[0]);
     if (tid >= COMMISSION_BASE && tid < 400000) {
-      throw new Error('getReward: commission tasks not ported');
+      return this.commissionReward(uid, tid);
     }
     const lordHeroTask = tid >= LORD_HERO_TASKS.min && tid <= LORD_HERO_TASKS.max;
     if (lordHeroTask) {
@@ -467,19 +478,25 @@ export class TaskCommands {
     }
     if (!complete) throw GameError.lang('getReward.task_not_finished');
 
-    if (
-      isLuoYangTask(tid) ||
-      isHuangJinDonation(tid) ||
-      isDongZhuoDonation(tid) ||
-      (tid > 400 && tid < 800) ||
-      (tid > 400000 && tid < 420000)
-    ) {
-      throw new Error(`getReward(${tid}): world-event and 名将 tasks not ported`);
-    }
-
     const cid = await this.lastcid(uid);
+    if (isLuoYangTask(tid)) {
+      const union = await this.cell(sql`select union_id from sys_user where uid = ${uid}`);
+      const progress = await this.row(
+        sql`select maxvalue, curvalue from luoyang_progress where tid = ${tid} and union_id = ${union}`,
+      );
+      if (progress && phpNum(progress.curvalue) >= phpNum(progress.maxvalue))
+        throw GameError.lang('getReward.not_enough_remain_task');
+    }
+    if (isHuangJinDonation(tid) || isDongZhuoDonation(tid)) {
+      const result = await this.eventReward(uid, cid, tid, 1);
+      if (result) return result;
+    }
     let msg = '';
-    if (tid === TASK_OFFICE_SALARY) {
+    if (isHuangJinDonation(tid) || isDongZhuoDonation(tid)) {
+      // Rewards were granted together with the event progress above.
+    } else if ((tid > 400 && tid < 800) || (tid > 400000 && tid < 420000)) {
+      await this.heroReward(uid, tid, selectId);
+    } else if (tid === TASK_OFFICE_SALARY) {
       await this.rewards.giveResource(uid, cid, 1, await this.officeSalary(uid));
     } else if (tid === TASK_NOBILITY_SALARY) {
       const salary = await this.nobilitySalary(uid);
@@ -596,10 +613,341 @@ export class TaskCommands {
     return [1];
   }
 
+  private async eventReward(
+    uid: number,
+    cid: unknown,
+    tid: number,
+    count: number,
+  ): Promise<unknown[] | undefined> {
+    const huangjin = isHuangJinDonation(tid);
+    const table = huangjin ? 'huangjin_progress' : 'dongzhuo_progress';
+    const progress = await this.row(
+      sql`select maxvalue, curvalue from ${sql.table(table)} where tid = ${tid}`,
+    );
+    const current = phpNum(progress?.curvalue),
+      max = phpNum(progress?.maxvalue);
+    const db = this.scope.db;
+    if (count > 1 && (huangjin ? current + count >= max : current + count > max))
+      throw GameError.lang('getReward.not_enough_remain');
+    if (count === 1 && current >= max) {
+      await sql`update sys_user_task set state = 1 where tid = ${tid}`.execute(db);
+      return [0, this.lang.t('getReward.global_task_end')];
+    }
+    const union = await this.cell(sql`select union_id from sys_user where uid = ${uid}`);
+    for (const reward of await this.rows(sql`select * from cfg_task_reward where tid = ${tid}`)) {
+      reward.count = phpNum(reward.count) * count;
+      const column = (
+        { 11001: 'jungong', 12001: 'juanxian', 13001: 'qinwang', 14001: 'gongpin' } as Record<
+          number,
+          string
+        >
+      )[phpIntval(reward.type)];
+      if (huangjin && phpLooseEquals(reward.sort, 5) && column) {
+        await sql`insert into huangjin_task_log (uid, ${sql.ref(column)}) values (${uid}, ${reward.count}) on duplicate key update ${sql.ref(column)} = ${sql.ref(column)} + ${reward.count}`.execute(
+          db,
+        );
+        if (phpNum(union) > 0)
+          await sql`insert into huangjin_task_log_union (unionid, ${sql.ref(column)}) values (${union}, ${reward.count}) on duplicate key update ${sql.ref(column)} = ${sql.ref(column)} + ${reward.count}`.execute(
+            db,
+          );
+      }
+      await this.rewards.giveReward(uid, cid, reward);
+    }
+    await sql`update ${sql.table(table)} set curvalue = least(maxvalue, curvalue + ${count}) where tid = ${tid}`.execute(
+      db,
+    );
+    await sql`insert into log_task_epic (uid, tid, count, time) values (${uid}, ${tid}, ${count}, unix_timestamp())`.execute(
+      db,
+    );
+    const total = phpNum(
+      await this.cell(sql`select sum(count) from log_task_epic where uid = ${uid}`),
+    );
+    for (const [i, threshold] of [100, 250, 1000, 2500, 10000, 25000].entries()) {
+      if (total >= threshold && total - count < threshold)
+        await this.rewards.finishAchievement(uid, 10041 + i);
+    }
+    if (current < max - count) return;
+    await sql`update sys_user_task set state = 1 where tid = ${tid}`.execute(db);
+    const remaining = phpNum(
+      await this.cell(sql`select count(*) from ${sql.table(table)} where curvalue < maxvalue`),
+    );
+    if (huangjin && remaining === 0) {
+      await sql`update mem_state set value = 1 where state = 5`.execute(db);
+      await this.eventTasks(sql`id in (10501, 6301, 6302, 6401, 6402)`);
+      await sql`update sys_user_task set state = 1 where tid between 11000 and 15000`.execute(db);
+      await sql`delete from sys_user_task where tid in (select id from cfg_task where \`group\` in (1000, 2000, 3000, 4000))`.execute(
+        db,
+      );
+      await this.eventTasks(sql`id in (155005, 155006)`);
+      const battles = await this.rows(
+        sql`select battleId from sys_battle_open_condition where otherCondition = 'huangJinZhiLuanShiShiDone'`,
+      );
+      if (battles.length) {
+        await sql`delete from sys_battle_open_condition where otherCondition = 'huangJinZhiLuanShiShiDone'`.execute(
+          db,
+        );
+        for (const battle of battles) {
+          if (
+            phpNum(
+              await this.cell(
+                sql`select count(*) from sys_battle_open_condition where battleId = ${battle.battleId}`,
+              ),
+            ) !== 0
+          )
+            continue;
+          await sql`update cfg_battle_field set state = 1 where id = ${battle.battleId}`.execute(
+            db,
+          );
+          if (count === 1) {
+            await sql`update sys_battle_open_condition set isConditionDoing = 1 where dependBattleId = ${battle.battleId}`.execute(
+              db,
+            );
+            for (const child of await this.rows(
+              sql`select battleId from sys_battle_open_condition where dependBattleId = ${battle.battleId}`,
+            ))
+              await this.battleOpenTime(child.battleId);
+          }
+        }
+      }
+      const battle = await this.row(
+        sql`select battleId from sys_battle_open_condition where otherCondition = 'defeatGuanYu'`,
+      );
+      if (battle) {
+        await sql`update sys_battle_open_condition set isConditionDoing = 1 where otherCondition = 'defeatGuanYu'`.execute(
+          db,
+        );
+        await this.battleOpenTime(battle.battleId);
+      }
+    } else if (!huangjin) {
+      if (remaining === 0) {
+        await sql`update mem_state set value = 3 where state = 7`.execute(db);
+        await sql`update cfg_battle_field set state = 1 where id = 12001`.execute(db);
+        await sql`update sys_user_task set state = 1 where tid in (select id from cfg_task where \`group\` in (15100, 15200, 15300, 15400, 15500, 15600))`.execute(
+          db,
+        );
+      }
+      const phaseRemaining = await this.cell(
+        sql`select count(*) from dongzhuo_progress where curvalue < maxvalue and \`group\` = 15000`,
+      );
+      const phase = await this.mem(State.DongZhuo);
+      if (phpLooseEquals(phaseRemaining, 0) && phpNum(phase) < 2) await this.dongzhuoNextPhase();
+    }
+  }
+
+  private async eventTasks(where: RawBuilder<unknown>): Promise<void> {
+    await sql`insert into sys_user_task (uid, tid, state) select uid, id, 0 from sys_user_task, cfg_task where tid = 243 and state = 1 and ${where} on duplicate key update state = 0`.execute(
+      this.scope.db,
+    );
+  }
+
+  private async battleOpenTime(id: unknown): Promise<void> {
+    const span = await this.mem(311);
+    if (
+      phpNum(
+        await this.cell(
+          sql`select count(*) from sys_battle_open_condition where battleId = ${id} and isConditionDoing = 0`,
+        ),
+      ) === 0 &&
+      phpLooseEquals(
+        await this.cell(sql`select openTime from cfg_battle_field where id = ${id}`),
+        0,
+      )
+    ) {
+      await sql`update cfg_battle_field set openTime = unix_timestamp() + ${span} where id = ${id}`.execute(
+        this.scope.db,
+      );
+    }
+  }
+
+  private async eventNotice(key: string): Promise<void> {
+    const content = this.lang.t(`${key}.mailcontent`);
+    // sendAllSysMail shares one body among accounts with state <= 2.
+    const result =
+      await sql`insert into sys_mail_sys_content (content, posttime) values (${'&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;' + content}, unix_timestamp())`.execute(
+        this.scope.db,
+      );
+    await sql`insert into sys_mail_sys_box (uid, contentid, title, \`read\`, posttime) select uid, ${Number(result.insertId)}, ${this.lang.t(`${key}.mailtitle`)}, 0, unix_timestamp() from sys_user where state <= 2`.execute(
+      this.scope.db,
+    );
+    await sql`insert into sys_alarm (uid, mail) select uid, 1 from sys_user where state <= 2 on duplicate key update mail = 1`.execute(
+      this.scope.db,
+    );
+    await this.users.sendSysInform({
+      type: 0,
+      inuse: 1,
+      starttime: 0,
+      endtime: 300,
+      interval: 1800,
+      scrollcount: 1,
+      color: 49151,
+      msg: content,
+    });
+  }
+
+  private async dongzhuoNextPhase(): Promise<void> {
+    const db = this.scope.db;
+    if (!phpLooseEquals(await this.cell(sql`select uid from sys_city where cid = 215265`), 659)) {
+      for (const row of await this.rows(
+        sql`select id from cfg_task where id > 15100 and id < 16000`,
+      ))
+        await this.eventTasks(sql`id = ${row.id}`);
+      await sql`update sys_city set chiefhid = 659, uid = 659 where cid = 215265`.execute(db);
+      await sql`update sys_city set chiefhid = 0 where cid = 225185`.execute(db);
+      await sql`update mem_state set value = 2 where state = 7`.execute(db);
+      await this.eventNotice('taodong');
+    }
+    await this.eventNotice('dongzuojj');
+    await sql`delete from sys_user_task where tid >= 420494 and tid <= 420520`.execute(db);
+    await sql`update sys_user_task set state = 1 where tid in (select id from cfg_task where \`group\` in (10100, 10200, 10500, 15000))`.execute(
+      db,
+    );
+    await this.eventTasks(sql`id >= 420464 and id <= 420490`);
+    await sql`update sys_user_task set state = 0 where tid in (420464, 420468, 420473, 420482)`.execute(
+      db,
+    );
+    await this.eventTasks(sql`id in (103005, 103006, 103007, 103008, 103009)`);
+    await sql`update sys_city set uid = 659 where uid = 896`.execute(db);
+    await sql`update sys_city set uid = 659 where uid = 710 and type <= 1`.execute(db);
+    await sql`update sys_city_soldier a, sys_city b set sid = sid + 5 where a.cid = b.cid and count > 0 and b.uid = 659 and sid between 23 and 27`.execute(
+      db,
+    );
+    await sql`update sys_city_hero set uid = 659 where uid = 896 and cid in (select cid from sys_city where uid = 659)`.execute(
+      db,
+    );
+    await sql`delete from sys_user_task where tid = 84014`.execute(db);
+    await this.eventTasks(sql`\`group\` = 10700`);
+    await sql`update sys_user_task set state = 1 where tid in (select id from cfg_task where \`group\` = 10400)`.execute(
+      db,
+    );
+    await this.eventTasks(sql`\`group\` = 112022`);
+  }
+
+  private commissionName(row: Row): void {
+    const kind = phpString(row.type);
+    if (['0', '1', '2'].includes(kind))
+      row.name = this.lang.t(`recordTask.task_group_name_${kind}`);
+  }
+
+  private async commissionDetail(uid: number, tid: number): Promise<unknown[]> {
+    const row = (await this.row(sql`select * from sys_pub_reward_task where id = ${tid}`)) ?? {};
+    row.content = this.lang.t('recordTask.task_content_prefix') + phpString(row.todo);
+    row.todo = this.lang.t('recordTask.task_group_description');
+    if (phpLooseEquals(row.state, 0) || !phpLooseEquals(row.finishuid, uid)) row.state = false;
+    else if (phpLooseEquals(row.state, -1)) row.state = true;
+    this.commissionName(row);
+    const type = phpIntval(row.type);
+    const key = type === 2 ? (phpLooseEquals(row.goal, 0) ? 2 : 3) : type;
+    const cid = phpIntval(row.targetcid);
+    const pos = `[${cid % 1000},${Math.floor(cid / 1000)}]`;
+    const content =
+      type === 2
+        ? this.lang.t(`recordTask.goal_${key}`, row.targetname, pos)
+        : this.lang.t(`recordTask.goal_${key}`, row.targetname, pos, row.goal);
+    return [row, [{ content, state: row.state }], [{ sort: 1, type: 20, count: row.money }]];
+  }
+
+  private async commissionReward(uid: number, tid: number): Promise<unknown[]> {
+    const task = await this.row(
+      sql`select * from sys_user_reward_task where tid = ${tid} and uid = ${uid}`,
+    );
+    if (!task || phpLooseEquals(task.state, 1)) throw GameError.lang('getReward.already_got');
+    if (phpLooseEquals(task.state, 0)) throw GameError.lang('getReward.task_not_finished');
+    if (phpLooseEquals(task.state, -1)) {
+      const reward = await this.row(
+        sql`select uid, todo, money, targetcid from sys_pub_reward_task where id = ${task.tid}`,
+      );
+      if (!reward) throw GameError.lang('getReward.already_got');
+      await this.rewards.giveResource(uid, -1, 20, (phpNum(reward.money) * 9) / 10);
+      await sql`delete from sys_user_reward_task where tid = ${task.tid}`.execute(this.scope.db);
+      await sql`delete from sys_pub_reward_task where id = ${tid}`.execute(this.scope.db);
+      const name = await this.cell(sql`select name from sys_user where uid = ${uid}`);
+      await this.report.sendReport(
+        phpIntval(reward.uid),
+        34,
+        phpIntval(task.targetcid),
+        phpIntval(task.targetcid),
+        this.lang.t('recordTask.report', name, reward.todo, reward.money),
+      );
+    }
+    return [1];
+  }
+
+  private async heroReward(uid: number, tid: number, selected: unknown): Promise<void> {
+    const group = phpNum(selected);
+    const hid = (group - 20001) / 10;
+    const exclusive = tid > 400000;
+    if (
+      exclusive &&
+      !phpLooseEquals(uid, await this.cell(sql`select uid from sys_city_hero where hid = ${hid}`))
+    )
+      throw GameError.lang('getReward.err');
+    const db = this.scope.db;
+    for (const reward of await this.rows(sql`select * from cfg_task_reward where tid = ${tid}`)) {
+      if (!phpLooseEquals(reward.sort, 1)) continue;
+      if (!exclusive)
+        await sql`update sys_hero_task set state = 2 where \`group\` = ${group} and tid = ${tid} and uid = ${uid}`.execute(
+          db,
+        );
+      const amount = exclusive ? 1 : phpNum(reward.count);
+      await sql`update sys_lionize set friend = friend + ${amount} where uid = ${uid} and npcid = ${hid}`.execute(
+        db,
+      );
+      const cap = exclusive ? 120 : 100;
+      await sql`update sys_lionize set friend = ${cap} where friend > ${cap} and uid = ${uid} and npcid = ${hid}`.execute(
+        db,
+      );
+      await sql`insert into log_lionize (uid, npcid, type, count, time) select uid, npcid, ${exclusive ? 0 : 3}, friend, unix_timestamp() from sys_lionize where uid = ${uid} and npcid = ${hid}`.execute(
+        db,
+      );
+      const friend = phpNum(
+        await this.cell(sql`select friend from sys_lionize where uid = ${uid} and npcid = ${hid}`),
+      );
+      if (exclusive && friend > 100) {
+        const old = await this.row(
+          sql`select sum(command_base_add_on) as command, sum(affairs_base_add_on) as affairs, sum(bravery_base_add_on) as bravery, sum(wisdom_base_add_on) as wisdom from sys_city_hero_base_add where type = 3 and hid = ${hid}`,
+        );
+        await sql`update sys_city_hero set bravery_base = bravery_base - ${phpIntval(old?.bravery)}, wisdom_base = wisdom_base - ${phpIntval(old?.wisdom)}, affairs_base = affairs_base - ${phpIntval(old?.affairs)}, command_base = command_base - ${phpIntval(old?.command)} where hid = ${hid}`.execute(
+          db,
+        );
+        await sql`delete from sys_city_hero_base_add where type = 3 and hid = ${hid}`.execute(db);
+        const npc = await this.row(
+          sql`select affairs_base, bravery_base, wisdom_base from cfg_npc_hero where npcid = ${hid}`,
+        );
+        if (npc) {
+          const other = await this.row(
+            sql`select sum(affairs_base_add_on) as affairs, sum(bravery_base_add_on) as bravery, sum(wisdom_base_add_on) as wisdom from sys_city_hero_base_add where hid = ${hid}`,
+          );
+          await sql`update sys_city_hero set bravery_base = ${phpNum(npc.bravery_base) + phpIntval(other?.bravery)}, wisdom_base = ${phpNum(npc.wisdom_base) + phpIntval(other?.wisdom)}, affairs_base = ${phpNum(npc.affairs_base) + phpIntval(other?.affairs)} where hid = ${hid}`.execute(
+            db,
+          );
+        }
+        const mul = (friend - 100) / 100;
+        const row = await this.row(
+          sql`select a.cid as herocid, ${mul} * b.affairs_base as affairs, ${mul} * b.bravery_base as bravery, ${mul} * b.wisdom_base as wisdom from sys_city_hero a, cfg_npc_hero b where a.hid = ${hid} and b.npcid = ${hid}`,
+        );
+        const affairs = phpIntval(row?.affairs),
+          bravery = phpIntval(row?.bravery),
+          wisdom = phpIntval(row?.wisdom);
+        await sql`insert into sys_city_hero_base_add (hid, uid, affairs_base_add_on, bravery_base_add_on, wisdom_base_add_on, type) values (${hid}, ${uid}, ${affairs}, ${bravery}, ${wisdom}, 3)`.execute(
+          db,
+        );
+        await sql`update sys_city_hero set bravery_base = bravery_base + ${bravery}, wisdom_base = wisdom_base + ${wisdom}, affairs_base = affairs_base + ${affairs} where hid = ${hid}`.execute(
+          db,
+        );
+        await this.heroes.updateCityHeroChange(uid, row?.herocid);
+        await this.heroes.regenerateHeroAttri(uid, hid);
+      }
+    }
+    if (exclusive) {
+      await sql`delete from sys_user_goal where uid = ${uid} and gid = ${tid}`.execute(db);
+      await sql`delete from sys_attack_position where uid = ${uid} and tid = ${tid}`.execute(db);
+    }
+  }
+
   /**
    * The hero (goal 50) or gear (goals 51, 52) picked for a sort-1 goal. The original fetched the
-   * gear's part as a single value and then indexed it, so a gear goal only passes when no gear
-   * matched and the asked count is "0"; that is kept.
+   * gear's part as a single value, but only indexed it when empty. Nonempty parts pass;
+   * empty results compare their missing offset (null) loosely with the requested count.
    */
   private async chosenFits(uid: number, goal: Row, selectId: unknown): Promise<boolean> {
     if (phpIntval(goal.sort) !== GoalSort.Resource) return true;
@@ -608,7 +956,7 @@ export class TaskCommands {
       const part = await this.cell(sql`select b.part, b.type from sys_user_armor a, cfg_armor b
         where a.armorid = b.id and uid = ${uid} and sid = ${phpString(selectId)}`);
       if (!phpEmpty(part)) return true;
-      return (part === 0 || part === '0') && phpLooseEquals('0', phpString(goal.count));
+      return phpLooseEquals(null, goal.count);
     }
     if (type === 50) {
       const count = await this.cell(sql`select count(1) from sys_city_hero where uid = ${uid}
@@ -723,7 +1071,18 @@ export class TaskCommands {
   }
 
   private async taskList(uid: number, group: number): Promise<unknown[]> {
-    if (group >= COMMISSION_BASE) throw new Error('getTaskList: commission tasks not ported');
+    if (group >= COMMISSION_BASE) {
+      const rows = await this.rows(
+        sql`select * from sys_user_reward_task where uid = ${uid} and tid = ${group} and state <= 0`,
+      );
+      for (const row of rows) {
+        this.commissionName(row);
+        if (phpLooseEquals(row.state, 0)) row.state = false;
+        else if (phpLooseEquals(row.state, -1)) row.state = true;
+        row.id = row.tid;
+      }
+      return [rows];
+    }
     const tasks = [
       ...(await this.rows(sql`select t.* from sys_user_task u, cfg_task t
         where u.uid = ${uid} and u.tid = t.id and t.\`group\` = ${group} and u.state = 0

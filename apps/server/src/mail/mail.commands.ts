@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { sql } from 'kysely';
 import { GameError } from '../common/game-error';
 import { LangService } from '../common/lang.service';
+import { GoodsRules } from '../core/goods-rules.service';
 import { phpEmpty, phpIntval, phpLooseEquals, phpString, phpTrim } from '../core/php';
 import { TaskRules } from '../core/task-rules.service';
 import { DbScope } from '../db/database.module';
@@ -11,8 +12,11 @@ import { GlobalCommand, type CommandContext } from '../gateway/decorators';
 const PAGE_SIZE = 10;
 /** MailFunc.php `MAX_MAIL_COUNT`: inbox / outbox cap. */
 const MAX_MAIL_COUNT = 100;
-/** `sendPersonMail` finishes task goal 80 when the addressee is a real player (uid > 1000). */
+/** Task goal 80: finished by `sendPersonMail` (addressee uid > 1000) and by `sendUnionMail`. */
 const GOAL_SEND_MAIL = 80;
+/** `sendUnionMail`: the 传音符 goods id and the per-letter cost the sender pays. */
+const HORN_GID = 1;
+const HORN_COST = 2;
 /** `sendPersonMail`: mailing uid 710 finishes goal 3101107. */
 const GOAL_MAIL_710 = 3101107;
 const NPC_UID_MAX = 1000;
@@ -26,11 +30,10 @@ type Row = Record<string, unknown>;
 
 /**
  * MailFunc.php: the 邮件 dialog's inbox / outbox / 系统信 lists, reading and deleting a letter,
- * and sending a personal letter. `sendUnionMail` depends on the 联盟 module, which is not ported
- * yet, so it reports 暂未开放. The unread flag on the bottom bar's 邮件 button is `sys_alarm.mail`,
- * cleared here by `checkUnread` exactly as the original did. System mail to a single player is sent
- * by other modules through `MailService.send` (CoreModule, global) — the battle / report wave uses
- * it to deliver 战报 notices.
+ * sending a personal letter, and the 联盟群发 broadcast. The unread flag on the bottom bar's 邮件
+ * button is `sys_alarm.mail`, cleared here by `checkUnread` exactly as the original did. System
+ * mail to a single player is sent by other modules through `MailService.send` (CoreModule,
+ * global) — the battle / report wave uses it to deliver 战报 notices.
  */
 @Injectable()
 export class MailCommands {
@@ -41,6 +44,7 @@ export class MailCommands {
     private readonly scope: DbScope,
     private readonly lang: LangService,
     private readonly tasks: TaskRules,
+    private readonly goods: GoodsRules,
   ) {
     this.sysFromName = this.lang.tOrNull('getSysMail.fromname') ?? '系统';
   }
@@ -352,12 +356,15 @@ export class MailCommands {
   }
 
   /**
-   * `sendUnionMail`: 联盟群发. The actual broadcast (iterating the 盟 roster, spending 传音符) and
-   * its per-member fan-out belong to the 联盟 module, which is not ported yet. MailFunc.php runs a
-   * chain of guards BEFORE that send, though — the 君主名 / banned-word / mailbox-full / 盟主 seat
-   * checks — and a non-champion is rejected there, never reaching the unported part. Those guards
-   * are ported so the reachable error paths match PHP exactly; only once a caller clears them all
-   * (a champion with enough 传音符) do we surface the not-ported error instead of broadcasting.
+   * `sendUnionMail`: 联盟群发. One letter (type 2, sender-saved via fromuid) is fanned out to every
+   * member of the sender's 盟 with a single insert-select, every member's `sys_alarm.mail` is
+   * raised, 2 传音符 (gid 1) are spent and task goal 80 finishes. The banned-word scans run on the
+   * RAW title / content — the `$GLOBALS['word']['special']` stripping (StringUtils::removeChars) is
+   * skipped exactly as in `sendPersonMail` — and the title scan uses `instr(title, content)` (title
+   * as haystack) while the content scan uses `strpos` the other way round. A content hit logs to
+   * `log_illegal_user` and throws the sendPersonMail 文案, as the original did. The horn shortage
+   * throws the literal `not_enough_goods1#N` client code; PHP's second
+   * no_enough_acoustic throw right after it is unreachable dead code and is not reproduced.
    */
   @GlobalCommand()
   async sendUnionMail(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
@@ -367,15 +374,19 @@ export class MailCommands {
     if (!phpEmpty(userstate) && phpIntval(userstate) === STATE_NO_NAME) {
       throw GameError.lang('sendUnionMail.no_name');
     }
+    const fromname = phpString(await this.cell(sql`select name from sys_user where uid = ${uid}`));
     args.shift(); // fromname arg is ignored; PHP re-reads it from sys_user.
     args.shift(); // unionid arg is ignored; PHP re-reads it from sys_user.
-    const title = phpString(args.shift());
-    args.shift(); // content — unused until the broadcast is ported.
+    const rawTitle = phpString(args.shift());
+    const content = phpString(args.shift());
+    let title = rawTitle;
+    if (phpEmpty(title)) title = this.langTitle('sendUnionMail.untitled');
+    title = `${this.lang.tOrNull('sendUnionMail.union') ?? ''}${title}`;
     // PHP checks the banned-word table against the RAW title (before the 无标题 default and the
-    // ［联盟］ prefix, which only matter for the unported broadcast), so that is all we build here.
+    // ［联盟］ prefix, which only matter for the stored letter).
     if (
       await this.exists(
-        sql`select 1 from cfg_baned_mail_content where instr(${title}, content) > 0`,
+        sql`select 1 from cfg_baned_mail_content where instr(${rawTitle}, content) > 0`,
       )
     ) {
       throw GameError.lang('banned.word_illegal');
@@ -390,9 +401,39 @@ export class MailCommands {
     if (unionpos !== 4 && unionpos !== 5 && (phpEmpty(leader) || !phpLooseEquals(leader, uid))) {
       throw GameError.lang('sendUnionMail.not_champion');
     }
-    // Cleared every reachable guard: the 传音符 cost and the broadcast fan-out are the 联盟 module's
-    // and are not ported yet.
-    throw GameError.raw('**联盟群发信暂未开放。');
+    const horn = phpIntval(
+      await this.cell(
+        sql`select \`count\` from sys_goods where uid = ${uid} and gid = ${HORN_GID}`,
+      ),
+    );
+    if (horn < HORN_COST) {
+      // 原样字符串错误：客户端弹 not_enough_goods1#N 的买即用弹窗。
+      throw GameError.raw(`not_enough_goods1#${HORN_COST - horn}`);
+    }
+    const banned = await this.rows(sql`select content from cfg_baned_mail_content`);
+    for (const row of banned) {
+      const word = phpString(row.content);
+      if (word !== '' && content.includes(word)) {
+        await sql`insert into log_illegal_user (uid, name, count) values (${uid}, ${fromname}, 1)
+          on duplicate key update count = count + 1`.execute(this.scope.db);
+        // The original throws the sendPersonMail 文案 here, not sendUnionMail's own.
+        throw GameError.lang('sendPersonMail.content_illegal');
+      }
+    }
+    const inserted = await this.scope.db
+      .insertInto('sys_mail_content')
+      .values({ content, posttime: sql<number>`unix_timestamp()` })
+      .executeTakeFirstOrThrow();
+    const mid = Number(inserted.insertId);
+    await sql`insert into sys_mail_box
+        (uid, name, fromuid, fromname, contentid, title, \`read\`, recvstate, sendstate, posttime, type)
+      (select uid, name, ${uid}, ${fromname}, ${mid}, ${title}, 0, 0, 0, unix_timestamp(), 2
+        from sys_user where union_id = ${unionid})`.execute(this.scope.db);
+    await sql`insert into sys_alarm (uid, mail) (select uid, 1 from sys_user where union_id = ${unionid})
+      on duplicate key update mail = 1`.execute(this.scope.db);
+    await this.goods.addGoods(uid, HORN_GID, -HORN_COST, 0);
+    await this.tasks.completeTask(uid, GOAL_SEND_MAIL);
+    return [];
   }
 
   /** `checkUnread`: clears `sys_alarm.mail` once neither mailbox has an unread letter. */

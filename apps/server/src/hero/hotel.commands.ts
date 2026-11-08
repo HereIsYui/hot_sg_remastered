@@ -8,15 +8,18 @@ import { LangService } from '../common/lang.service';
 import { Building, CityRules, cid2wid, wid2cid } from '../core/city-rules.service';
 import { GoodsRules } from '../core/goods-rules.service';
 import { HeroRules, isActHero } from '../core/hero-rules.service';
-import { phpIntval, phpNum } from '../core/php';
+import { MailService } from '../core/mail.service';
+import { phpEmpty, phpIntval, phpLooseEquals, phpNum, phpString, phpTrim } from '../core/php';
 import { RandomService } from '../core/random.service';
 import { ReportService } from '../core/report.service';
 import { TaskRules } from '../core/task-rules.service';
 import { UserRules } from '../core/user-rules.service';
 import { DbScope } from '../db/database.module';
-import { DialogCommand, type CommandContext } from '../gateway/decorators';
+import { GlobalCommand, DialogCommand, type CommandContext } from '../gateway/decorators';
 import { DefaultBoxService, SRC_RECRUIT_HERO } from '../goods/default-box.service';
 import { TaskRewards } from '../task/task-rewards.service';
+
+import { ArmorCommands } from './armor.commands';
 
 type Row = Record<string, unknown>;
 
@@ -85,6 +88,8 @@ export class HotelCommands {
     private readonly users: UserRules,
     private readonly report: ReportService,
     private readonly random: RandomService,
+    private readonly mail: MailService,
+    private readonly armors: ArmorCommands,
   ) {}
 
   private async row(query: RawBuilder<unknown>): Promise<Row | undefined> {
@@ -320,6 +325,276 @@ export class HotelCommands {
     });
   }
 
+  /** TaskFunc.php selection protocol: `[cid, type, armorid, value, count]`. */
+  @GlobalCommand()
+  async getArmorsByPartOrType(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const type = phpIntval(param[1]);
+    const aid = phpIntval(param[2]);
+    const value = phpIntval(param[3]);
+    const rows = await this.rows(
+      sql`select * from cfg_armor a, sys_user_armor b where b.uid = ${ctx.uid} and a.id = b.armorid and b.hid = 0 and ${type === 51 ? sql`type = ${value} order by value` : type === 52 ? sql`part = ${value} order by value` : sql`a.id = ${aid}`}`,
+    );
+    return this.armors.armorListReply(rows);
+  }
+
+  /** `[hid, friendship]` → `[available tasks]`; friendship is the caller's supplied tier. */
+  @DialogCommand()
+  async getHeroPublicTask(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const uid = ctx.uid;
+    const hid = phpIntval(param[0]);
+    const state = await this.cell(
+      sql`select state from sys_lionize where uid = ${uid} and npcid = ${hid}`,
+    );
+    if (phpEmpty(state)) throw GameError.lang('getHeroPublicTask.have_bay');
+    if ([2, 3].includes(phpNum(state))) throw GameError.lang('getHeroPublicTask.state_err');
+    const group = hid * 10 + 20001;
+    if (
+      phpNum(
+        await this.cell(
+          sql`select count(*) from sys_hero_task where uid = ${uid} and \`group\` = ${group}`,
+        ),
+      ) === 0
+    ) {
+      const level = Math.trunc(phpNum(param[1]) / 20);
+      const counts =
+        [
+          [6, 0, 0, 0],
+          [5, 1, 0, 0],
+          [3, 2, 0, 0],
+          [1, 1, 1, 0],
+        ][level] ??
+        [
+          [0, 0, 0, 1],
+          [0, 0, 2, 0],
+          [0, 2, 1, 0],
+        ][this.random.mtRand(1, 3) - 1]!;
+      const sex = await this.cell(sql`select sex from sys_city_hero where hid = ${hid}`);
+      for (const [tier, count] of counts.entries()) {
+        let dealt = 0;
+        while (dealt < count) {
+          const tid = this.random.mtRand(401 + tier * 100, 427 + tier * 100);
+          if (phpNum(sex) === 0 && tid === 401 + tier * 100) continue;
+          if (
+            count > 1 &&
+            phpNum(
+              await this.cell(
+                sql`select count(*) from sys_hero_task where uid = ${uid} and \`group\` = ${group} and tid = ${tid}`,
+              ),
+            ) !== 0
+          )
+            continue;
+          await sql`insert into sys_hero_task (uid, \`group\`, tid, state) values (${uid}, ${group}, ${tid}, 0)`.execute(
+            this.scope.db,
+          );
+          dealt++;
+        }
+      }
+    }
+    return [
+      (
+        await this.rows(
+          sql`select a.*, b.name as reward, c.group from sys_hero_task c left join cfg_task a on c.tid = a.id left join cfg_task_reward b on a.id = b.tid where c.uid = ${uid} and c.group = ${group} and c.state = 0`,
+        )
+      ).map((row) => ({
+        // PHP's mysql extension returns every column as a string; stringify the numeric
+        // cfg_task / sys_hero_task fields so the wire matches the legacy client contract.
+        ...row,
+        id: phpString(row.id),
+        group: phpString(row.group),
+        pretid: phpString(row.pretid),
+        default: phpString(row.default),
+        inform: phpString(row.inform),
+      })),
+    ];
+  }
+
+  /** `[tid, group]` → `[tid, group, message]`; legacy does not require an affected row. */
+  @DialogCommand()
+  async getTheTask(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const { uid, cid } = ctx;
+    const level = await this.cell(
+      sql`select level from sys_building where cid = ${cid} and bid = ${Building.Hotel}`,
+    );
+    if (phpNum(level) < 5) throw GameError.lang('getTheTask.hotel_level_low');
+    const tid = phpIntval(param[0]);
+    const group = phpIntval(param[1]);
+    const hid = (group - 20001) / 10;
+    if (
+      phpEmpty(
+        await this.cell(sql`select state from sys_lionize where uid = ${uid} and npcid = ${hid}`),
+      )
+    )
+      throw GameError.lang('getHeroPublicTask.have_bay');
+    await sql`update sys_hero_task set state = 1, endtime = unix_timestamp() + 86400 where uid = ${uid} and \`group\` = ${group} and tid = ${tid}`.execute(
+      this.scope.db,
+    );
+    return [tid, group, this.lang.t('getTheTask.get_succ')];
+  }
+
+  /** `[npcid]` → `[outcome]`; the attempt always consumes 15 锦囊 and the daily cooldown. */
+  @DialogCommand('PersuadeHero')
+  async persuadeHero(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
+    const { uid, cid } = ctx;
+    if (await this.isPersuadeClose()) throw GameError.lang('persuadeHero.closed');
+    if (!(await this.hotel.cityHasHeroPosition(uid, cid)))
+      throw GameError.lang('recruitHero.hotel_level_low');
+    const hid = phpIntval(param[0]);
+    const hero = await this.row(sql`select * from sys_city_hero where npcid = ${hid}`);
+    if (hid === 894) throw GameError.lang('beizhanluoyang.lubu_exception');
+    if (phpNum(hero?.uid) < 1000) {
+      if (
+        (await this.exists(sql`select 1 from mem_state where state = 197 and value = 60`)) &&
+        (await this.exists(sql`select 1 from mem_state where state = 50 and value = 1`))
+      )
+        throw GameError.lang('persuadeHero.persuade_err');
+      if (
+        (await this.exists(sql`select * from mem_state where state = 5 and value <> 1`)) &&
+        (await this.exists(sql`select * from sys_city where cid = ${hero?.cid ?? ''}`))
+      )
+        throw GameError.lang('persuadeHero.sstask_doing');
+      if (
+        await this.exists(
+          sql`select * from sys_user where uid = ${hid} and passtype = 'npc' and flagchar <> ''`,
+        )
+      )
+        throw GameError.lang('persuadeHero.its_boss');
+      const count = phpNum(
+        await this.cell(
+          sql`select count(*) from sys_city_hero where uid = ${hid} and herotype <> 100`,
+        ),
+      );
+      if (count > 1 && hid < 1000)
+        throw GameError.lang('persuadeHero.have_follower', hero?.name, count - 1);
+    }
+    const friend = phpNum(
+      await this.cell(sql`select friend from sys_lionize where uid = ${uid} and npcid = ${hid}`),
+    );
+    if (friend < 100) throw GameError.lang('persuadeHero.no_enough_friend');
+    const state = phpNum(
+      await this.cell(sql`select state from sys_lionize where uid = ${uid} and npcid = ${hid}`),
+    );
+    if (state === 2) throw GameError.lang('persuadeHero.zijiren');
+    if (state === 3) throw GameError.lang('persuadeHero.fulu');
+    if (
+      [2, 3, 5, 6, 9, 10, 11].includes(phpNum(hero?.state)) ||
+      (phpNum(hero?.state) === 4 && phpNum(hero?.uid) !== 0)
+    )
+      throw GameError.lang('persuadeHero.not_here');
+    const masterFriend = () =>
+      this.cell(sql`select max(friend) from sys_lionize where state = 2 and npcid = ${hid}`);
+    if (phpNum(await masterFriend()) >= 80) throw GameError.lang('persuadeHero.too_high_friend');
+    const last = await this.cell(
+      sql`select last_persuade from mem_user_schedule where uid = ${uid}`,
+    );
+    if (phpNum(await this.cell(sql`select unix_timestamp()`)) <= phpNum(last) + 86400)
+      throw GameError.lang('persuadeHero.time_err');
+    const goods = phpNum(
+      await this.cell(sql`select sum(count) from sys_goods where uid = ${uid} and gid = 13`),
+    );
+    if (goods < 15) throw GameError.raw(`not_enough_goods13#${15 - goods}`);
+    await this.goods.addGoods(uid, 13, -15, 0);
+    const db = this.scope.db;
+    await sql`insert into mem_user_schedule (uid, last_persuade) values (${uid}, unix_timestamp()) on duplicate key update last_persuade = unix_timestamp()`.execute(
+      db,
+    );
+    const master = await masterFriend();
+    const masterValue = phpEmpty(master) && phpNum(hero?.uid) <= 1000 ? 50 : phpNum(master);
+    if (
+      masterValue >= 80 ||
+      this.random.mtRand(0, phpIntval(phpNum(hero?.loyalty) + masterValue)) >= friend / 2.5
+    )
+      return [this.lang.t('persuadeHero.persuade_err')];
+    await sql`update sys_lionize set state = 2 where uid = ${uid} and npcid = ${hid}`.execute(db);
+    await sql`insert into log_lionize (uid, npcid, type, count, time) select uid, npcid, 4, friend, unix_timestamp() from sys_lionize where state = 2 and uid = ${uid} and npcid = ${hid}`.execute(
+      db,
+    );
+    await sql`insert into log_lionize (uid, npcid, type, count, time) select uid, npcid, 15, 0, unix_timestamp() from sys_lionize where state = 2 and uid <> ${uid} and npcid = ${hid}`.execute(
+      db,
+    );
+    await sql`delete from sys_lionize where state = 2 and uid <> ${uid} and npcid = ${hid}`.execute(
+      db,
+    );
+    if (phpNum(hero?.state) === 4) await sql`delete from sys_troops where hid = ${hid}`.execute(db);
+    await sql`delete from sys_hero_rest where hid = ${hid}`.execute(db);
+    await sql`update sys_city_hero set hero_health = 1 where hero_health = 2 and hid = ${hid} limit 1`.execute(
+      db,
+    );
+    await this.rewards.deleteHeroBaseAdd(hid);
+    for (const column of ['chiefhid', 'generalid', 'counsellorid']) {
+      if (
+        phpNum(
+          await this.cell(
+            sql`select ${sql.ref(column)} from sys_city where cid = ${hero?.cid ?? ''}`,
+          ),
+        ) === hid
+      ) {
+        await sql`update sys_city set ${sql.ref(column)} = 0 where cid = ${hero?.cid ?? ''}`.execute(
+          db,
+        );
+      }
+    }
+    if (phpNum(hero?.uid) > 1000) {
+      await this.mail.send(
+        phpIntval(hero?.uid),
+        phpString(hero?.name) + this.lang.t('PersuadeHero.PersuadeHero_mail_title'),
+        this.lang.t('PersuadeHero.PersuadeHero_mail_content'),
+      );
+    } else {
+      const bravery = phpNum(hero?.bravery_base) + phpNum(hero?.bravery_add);
+      const wisdom = phpNum(hero?.wisdom_base) + phpNum(hero?.wisdom_add);
+      const baseForce = 100 + Math.floor(phpNum(hero?.level) / 5) + Math.floor(bravery / 3);
+      const baseEnergy = 100 + Math.floor(phpNum(hero?.level) / 5) + Math.floor(wisdom / 3);
+      const forcePercent = phpNum(
+        await this.cell(
+          sql`select value from sys_hero_attribute where attid = 10005 and hid = ${hid}`,
+        ),
+      );
+      const energyPercent = phpNum(
+        await this.cell(
+          sql`select value from sys_hero_attribute where attid = 10006 and hid = ${hid}`,
+        ),
+      );
+      const force =
+        baseForce + Math.floor((bravery % 3) / 3) + Math.floor((baseForce * forcePercent) / 100);
+      const energy =
+        baseEnergy + Math.floor((wisdom % 3) / 3) + Math.floor((baseEnergy * energyPercent) / 100);
+      await sql`insert into mem_hero_blood (hid, \`force\`, force_max, energy, energy_max) values (${hid}, ${force}, ${force}, ${energy}, ${energy}) on duplicate key update \`force\` = ${force}, force_max = ${force}, energy = ${energy}, energy_max = ${energy}`.execute(
+        db,
+      );
+    }
+    for (const task of await this.rows(
+      sql`select s.tid from sys_user_task s left join cfg_task_goal c on s.tid = c.tid where s.uid = ${uid} and s.state = 0 and s.tid > 400000 and s.tid < 500000 and (c.sort = 10 or c.sort = 12) and c.type = ${hid}`,
+    )) {
+      await sql`insert into sys_attack_position (uid, tid, cid, state) values (${uid}, ${task.tid}, ${hero?.cid ?? ''}, 1) on duplicate key update state = 1`.execute(
+        db,
+      );
+    }
+    await sql`delete from sys_hero_armor where hid = ${hid}`.execute(db);
+    await sql`update sys_user_book set hid = 0 where hid = ${hid}`.execute(db);
+    await sql`update sys_user_armor set hid = 0 where hid = ${hid}`.execute(db);
+    const min = 10 * (hid + 40000);
+    await sql`delete from sys_user_task where tid > ${min} and tid < ${min + 10}`.execute(db);
+    await sql`delete from sys_user_goal where gid > ${min} and gid < ${min + 10}`.execute(db);
+    await sql`delete from sys_attack_position where tid > ${min} and tid < ${min + 10}`.execute(db);
+    await sql`update sys_city_hero set uid = ${uid}, cid = ${cid}, state = 0, loyalty = 40 where npcid = ${hid}`.execute(
+      db,
+    );
+    await this.heroes.regenerateHeroAttri(uid, hid);
+    await this.heroes.updateCityHeroChange(uid, cid);
+    const name = await this.cell(sql`select name from sys_user where uid = ${uid}`);
+    await this.users.sendSysInform({
+      type: 0,
+      inuse: 1,
+      starttime: 0,
+      endtime: 600,
+      interval: 50000,
+      scrollcount: 1,
+      color: 16738740,
+      msg: this.lang.t('PersuadeHero.npc', hero?.name, name),
+    });
+    return [this.lang.t('persuadeHero.persuade_succ')];
+  }
+
   /** HotelFunc.php::isPersuadeClose: 游说 is off on servers opened after 2011-07-27. */
   private async isPersuadeClose(): Promise<boolean> {
     const openTime = await this.cell(sql`select value from mem_state where state = 6`);
@@ -387,8 +662,7 @@ export class HotelCommands {
 
   /**
    * `[rumorId]`: reads one rumor's detail header (whether the hero is locatable and the gold a
-   * 询问详情 would cost). Only the famous-hero branch is self-contained; a 任务物品 / 军队 rumor
-   * depends on the world-map task system of a later stage. Answers the original's array.
+   * 询问详情 would cost). Task-item and troop rumors may reset their task target position. Answers the original's array.
    */
   @DialogCommand()
   async getRumor(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
@@ -396,13 +670,42 @@ export class HotelCommands {
     const rumor = await this.row(sql`select * from sys_city_rumor where id = ${id}`);
     if (!rumor) throw GameError.lang('getRumor.never_heard');
     if (phpNum(rumor.type) !== 0) {
-      throw new Error(
-        `getRumor(type=${phpNum(rumor.type)}): 任务物品/军队 rumor needs the world-map task system (not ported)`,
+      const troop = phpNum(rumor.type) === 2;
+      if (!troop && phpNum(rumor.type) !== 1) return [rumor];
+      const detail = await this.row(
+        troop
+          ? sql`select f.*, r.type, r.price, r.introduce from cfg_rumor_troop r, cfg_troop_task f where r.tid = ${rumor.typeid} and f.tid = r.tid`
+          : sql`select f.*, r.type, r.price, r.introduce from cfg_rumor_thing r, cfg_things f where r.tid = ${rumor.typeid} and f.tid = r.tid`,
       );
+      if (troop || phpNum(detail?.type) === 1) {
+        const tid = await this.cell(
+          sql`select tid from cfg_task_goal where ${troop ? sql`(sort = 11 or sort = 12)` : sql`sort = 5`} and type = ${detail?.tid ?? ''} and tid in (select tid from sys_user_task where uid = ${ctx.uid} and state = 0)`,
+        );
+        const x = this.random.mtRand(1, 500);
+        const y = this.random.mtRand(1, 500);
+        const target = y * 1000 + x;
+        await sql`insert into sys_attack_position (uid, cid, tid, goods, name, state) values (${ctx.uid}, ${target}, ${phpString(tid)}, 1, 0, 0) on duplicate key update cid = ${target}, state = 0`.execute(
+          this.scope.db,
+        );
+        return [
+          rumor,
+          detail ?? false,
+          this.lang.t('askDetail.hero_location', detail?.name, await this.posDescription(target)),
+          false,
+          false,
+        ];
+      }
+      return [
+        rumor,
+        detail ?? false,
+        phpNum(detail?.type) === 2 ? detail?.introduce : '',
+        phpNum(detail?.type) === 2,
+        false,
+      ];
     }
     const ret: unknown[] = [rumor];
     const info = await this.row(sql`select * from cfg_npc_hero where npcid = ${rumor.typeid}`);
-    ret.push(info);
+    ret.push(info ?? false); // PHP's sql_fetch_one answers false when the NPC row is missing
     const hero = await this.row(sql`select * from sys_city_hero where npcid = ${rumor.typeid}`);
     if (!hero) {
       ret.push(this.lang.t('getRumor.dont_know_where_he_is'));
@@ -437,15 +740,14 @@ export class HotelCommands {
   }
 
   /**
-   * `[name]`: spends 1000 黄金 to search for a named hero (the 任务物品 / 军队 searches depend on
-   * the world-map task system of a later stage and are left unported). Replaces that many of the
+   * `[name]`: spends 1000 黄金 to search for a named hero, task item or troop. Replaces that many of the
    * oldest rumors. Answers the fresh list.
    */
   @DialogCommand()
   async searchRumor(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
     const { uid, cid } = ctx;
-    const input = String(param[0] ?? '').trim();
-    if (input === '') throw GameError.lang('searchRumor.input_name_to_seartch');
+    const input = phpTrim(param[0]);
+    if (phpEmpty(input)) throw GameError.lang('searchRumor.input_name_to_seartch');
     return this.scope.transaction(async () => {
       const level = phpNum(
         await this.cell(sql`select level from sys_building
@@ -457,13 +759,31 @@ export class HotelCommands {
 
       const heroes = await this.rows(sql`select r.* from cfg_rumor_hero r, cfg_npc_hero n
         where r.npcid = n.npcid and n.name like ${'%' + input + '%'} order by rand() limit ${level}`);
-      // The 任务物品 / 军队 branches need the world-map task tables of a later stage.
-      if (heroes.length <= 0) throw GameError.lang('searchRumor.no_useful_info');
+      const extra: { type: number; row: Row }[] = [];
+      for (const type of [1, 2]) {
+        const match =
+          type === 1
+            ? sql`select type from cfg_task_goal where sort = 5 and tid in (select tid from sys_user_task where uid = ${uid} and state = 0 and tid > 400000) and type in (select tid from cfg_things where name like ${'%' + input + '%'} and tid in (select tid from cfg_rumor_thing))`
+            : sql`select type from cfg_task_goal where sort in (11, 12) and tid in (select tid from sys_user_task where uid = ${uid} and state = 0 and tid > 400000) and type in (select tid from cfg_troop_task where name like ${'%' + input + '%'} and tid in (select tid from cfg_rumor_troop))`;
+        if (!(await this.exists(match))) continue;
+        const rows = await this.rows(
+          type === 1
+            ? sql`select * from cfg_rumor_thing r, cfg_things t where r.tid = t.tid and t.name = ${input} order by rand() limit 1`
+            : sql`select * from cfg_rumor_troop r, cfg_troop_task t where r.tid = t.tid and t.name = ${input} order by rand() limit 1`,
+        );
+        extra.push(...rows.map((row) => ({ type, row })));
+      }
+      if (heroes.length + extra.length <= 0) throw GameError.lang('searchRumor.no_useful_info');
 
       await sql`delete from sys_city_rumor where cid = ${cid} order by id
-        limit ${heroes.length}`.execute(this.scope.db);
+        limit ${heroes.length + extra.length}`.execute(this.scope.db);
       for (const rumor of heroes) {
         await this.addHeroRumor(cid, phpIntval(rumor.npcid), phpNum(rumor.price));
+      }
+      for (const { type, row } of extra) {
+        await sql`insert into sys_city_rumor (cid, name, type, typeid, price) values (${cid}, ${row.name}, ${type}, ${row.tid}, ${row.price})`.execute(
+          this.scope.db,
+        );
       }
       await sql`update mem_city_schedule set last_reset_rumor = unix_timestamp()
         where cid = ${cid}`.execute(this.scope.db);
@@ -476,22 +796,16 @@ export class HotelCommands {
 
   /**
    * `[rumorId, paytype]`: pays 元宝 (0) or 礼金 (1) to learn a famous hero's exact location,
-   * granting the hero's 画像 (thing 20000+npcid) and filing a 市井传闻 report. The 任务物品 branch
-   * depends on the world-map task system of a later stage. Answers the original's array.
+   * granting the hero's 画像 (thing 20000+npcid) and filing a 市井传闻 report. Task items use their own location or detail text. Answers the original's array.
    */
   @DialogCommand()
   async askDetail(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
     const { uid, cid } = ctx;
     const id = phpIntval(param[0]);
-    const paytype = phpIntval(param[1]);
-    if (paytype !== 0 && paytype !== 1) throw GameError.lang('buyGoods.invalid_pay_type');
+    const paytype = phpLooseEquals(param[1], 0) ? 0 : phpLooseEquals(param[1], 1) ? 1 : -1;
+    if (paytype === -1) throw GameError.lang('buyGoods.invalid_pay_type');
     const rumor = await this.row(sql`select * from sys_city_rumor where id = ${id}`);
     if (!rumor) throw GameError.lang('askDetail.never_heard');
-    if (phpNum(rumor.type) !== 0) {
-      throw new Error(
-        `askDetail(type=${phpNum(rumor.type)}): 任务物品 rumor needs the world-map task system (not ported)`,
-      );
-    }
     return this.scope.transaction(async () => {
       const db = this.scope.db;
       const user = await this.row(sql`select money, gift from sys_user where uid = ${uid}`);
@@ -501,8 +815,54 @@ export class HotelCommands {
       if (paytype === 1 && phpNum(user?.gift) < price)
         throw GameError.lang('askDetail.no_enough_Gift');
 
+      if (phpNum(rumor.type) !== 0) {
+        const ret: unknown[] = [rumor];
+        let report = '';
+        if (phpNum(rumor.type) === 1) {
+          const thing = await this.row(
+            sql`select f.*, r.type, r.detail from cfg_rumor_thing r, cfg_things f where r.tid = ${rumor.typeid} and f.tid = r.tid`,
+          );
+          ret.push(thing ?? false);
+          let msg: unknown = '';
+          let charge = false;
+          if (phpNum(thing?.type) === 1) {
+            const target = await this.cell(
+              sql`select cid from sys_thing_position where thingid = ${thing?.tid ?? ''}`,
+            );
+            if (phpEmpty(target)) msg = this.lang.t('askDetail.no_info_of_staff', thing?.name);
+            else {
+              msg = this.lang.t(
+                'askDetail.staff_location',
+                rumor.name,
+                await this.posDescription(phpIntval(target)),
+              );
+              charge = true;
+            }
+          } else if (phpNum(thing?.type) === 2) {
+            msg = thing?.detail;
+            charge = true;
+          }
+          ret.push(msg, false);
+          if (charge) {
+            report = phpString(thing?.description) + '<br/>' + phpString(msg);
+            if (paytype === 0) await this.rewards.addMoney(uid, -price, 90);
+            else await this.rewards.addGift(uid, -price, 90);
+          }
+        }
+        if (!phpEmpty(report))
+          await this.report.sendReport(uid, REPORT_TITLE_RUMOR, cid, cid, report);
+        await this.users.logUserAction(uid, ACTION_ASK_DETAIL);
+        return ret;
+      }
       const hero = await this.row(sql`select * from sys_city_hero where npcid = ${rumor.typeid}`);
       if (!hero) throw GameError.lang('askDetail.no_info_of_hero');
+      for (const task of await this.rows(
+        sql`select a.tid from cfg_task_goal a, sys_user_task b where a.sort in (10, 12) and a.type = ${rumor.typeid} and a.tid = b.tid and b.uid = ${uid} and b.state = 0 and b.tid > 400000`,
+      )) {
+        await sql`insert into sys_attack_position (uid, cid, tid, goods, name, state) values (${uid}, ${hero.cid}, ${task.tid}, 1, 0, 0) on duplicate key update cid = ${hero.cid}, state = 0`.execute(
+          db,
+        );
+      }
       const heroInfo = await this.row(
         sql`select * from cfg_npc_hero where npcid = ${rumor.typeid}`,
       );
@@ -521,6 +881,15 @@ export class HotelCommands {
       await sql`insert into sys_things (uid, tid, count) values (${uid}, ${tid}, 1)
         on duplicate key update \`count\` = 1`.execute(db);
 
+      if (
+        await this.exists(
+          sql`select rate from cfg_act where type = 5 and unix_timestamp() between starttime and endtime limit 1`,
+        )
+      ) {
+        await sql`insert into temp_act_event (uid, type, eid, count) values (${uid}, 1003, 10000, 1) on duplicate key update count = count + 1`.execute(
+          db,
+        );
+      }
       let report = String(heroInfo?.name ?? '');
       if (!this.empty(heroInfo?.zi)) report += this.lang.t('askDetail.word') + String(heroInfo?.zi);
       report += '。' + String(heroInfo?.introduce ?? '') + '<br/>' + msg;
@@ -531,8 +900,7 @@ export class HotelCommands {
   }
 
   /**
-   * `[rumorId]`: records a famous hero rumor as a 捉将 task pair (tids 20000+/30000+npcid). The
-   * 任务物品 branch depends on cfg_thing_task of a later stage. Throws the success message.
+   * `[rumorId]`: records a famous hero rumor as a 捉将 task pair (tids 20000+/30000+npcid). Task-item rumors only validate cfg_thing_task, as in the original. Throws the success message.
    */
   @DialogCommand()
   async recordTask(ctx: CommandContext, param: unknown[]): Promise<unknown[]> {
@@ -572,7 +940,14 @@ export class HotelCommands {
       throw GameError.lang('recordTask.task_record_succ');
     }
     if (rumor && phpNum(rumor.type) === 1) {
-      throw new Error('recordTask(type=1): 任务物品 cfg_thing_task not ported');
+      if (
+        phpEmpty(
+          await this.cell(sql`select taskid from cfg_thing_task where thingid = ${rumor.typeid}`),
+        )
+      )
+        throw GameError.lang('recordTask.no_task_related_to_staff');
+      await this.users.logUserAction(uid, ACTION_RECORD_TASK);
+      throw GameError.lang('recordTask.task_record_succ');
     }
     throw GameError.lang('recordTask.no_rumor_to_record');
   }

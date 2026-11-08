@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AchivementModule } from './achivement/achivement.module';
 import { ArenaModule } from './activity/arena.module';
+import { LoginActivityModule } from './activity/login-activity.module';
 import { LuoyangBelongModule } from './activity/luoyang-belong.module';
 import { LuoyangModule } from './activity/luoyang.module';
 import { MarryModule } from './activity/marry.module';
@@ -92,6 +93,7 @@ import { WorldModule } from './world/world.module';
     HonorModule,
     PkModule,
     ArenaModule,
+    LoginActivityModule,
     LuoyangModule,
     LuoyangBelongModule,
     MarryModule,

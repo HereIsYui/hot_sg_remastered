@@ -14,6 +14,7 @@ import { DbScope } from '../db/database.module';
 import { GlobalCommand, type CommandContext } from '../gateway/decorators';
 import type { Row } from '../task/task-goals.service';
 import { TaskRewards } from '../task/task-rewards.service';
+import { WuhunCardCommands } from './wuhun-card.commands';
 import { BufferGoods } from './buffer-goods.service';
 import { CommittedMessage, DefaultBoxService } from './default-box.service';
 
@@ -182,6 +183,7 @@ export class GoodsCommands {
     private readonly buffers: BufferGoods,
     private readonly defaultBox: DefaultBoxService,
     private readonly protection: UserProtection,
+    private readonly wuhunCards: WuhunCardCommands,
   ) {}
 
   /** `[goods, things]` the player owns, in cfg order. */
@@ -295,7 +297,7 @@ export class GoodsCommands {
       if (useCount > 1 && (gid < 40000 || gid > 50000) && !MULTI_USE_GIDS.has(gid)) {
         throw GameError.raw('当前道具没有开启多开功能！');
       }
-      const used = await this.use(uid, cid, gid, useCount);
+      const used = await this.use(uid, cid, gid, useCount, param[2]);
       return used instanceof CommittedMessage ? used : [gid, ...used];
     });
     if (reply instanceof CommittedMessage) throw GameError.raw(reply.text);
@@ -307,6 +309,7 @@ export class GoodsCommands {
     cid: number,
     gid: number,
     useCount: number,
+    heroId?: unknown,
   ): Promise<unknown[] | CommittedMessage> {
     const usedElsewhere = USED_ELSEWHERE[gid];
     if (usedElsewhere) throw GameError.lang(usedElsewhere);
@@ -354,9 +357,56 @@ export class GoodsCommands {
         this.lang.t('useGoods.MianZhanPai_valid_date'),
         phpIntval(await this.protection.use(uid, 1)),
       ];
+    if (gid > 110000 && gid < 160000) {
+      return [0, await this.wuhunCards.useWuHun(uid, phpIntval(heroId), gid), heroId ?? null];
+    }
+    // getBattleNetScore invokes the disabled remote transport and throws an empty message.
+    if (gid === 158) throw GameError.raw('');
+    if (gid === 150) return [1, await this.openAnswerReward(uid)];
+    if (gid === 147) return [6, await this.wuhunCards.useQuestion(uid)];
+    if (gid === 250) return [0, await this.wuhunCards.giveMeHeroCard(uid)];
+    if (gid > 210000 && gid < 250000)
+      return [0, await this.wuhunCards.generateHero4Card(uid, cid, gid)];
+    if (gid >= 251 && gid <= 254) return [0, await this.wuhunCards.useArmyOrder(uid, cid, gid)];
     if (hasOwnUse(gid)) throw GameError.lang('useGoods.func_not_in_use');
     const opened = await this.defaultBox.open(uid, cid, gid);
     return opened instanceof CommittedMessage ? opened : [UseReply.Items, opened];
+  }
+
+  /** useDaTiLiBao -> openOldWoodBox -> openSimpleGoodsBox (type 50). */
+  private async openAnswerReward(uid: number): Promise<unknown[]> {
+    if (!(await this.goods.checkGoods(uid, 150))) throw GameError.lang('useDaTiLiBao.no_DaTiLiBao');
+    const rates = await this.rows(sql`select gid, woodbox as rate, value from cfg_goods
+      where inuse = 1 and woodbox > 0 and value > 0 order by rand()`);
+    const sum = rates.reduce((n, row) => n + phpNum(row.rate), 0);
+    const roll = this.random.rand() % sum;
+    let accumulated = 0;
+    const ret: unknown[] = [];
+    for (const row of rates) {
+      accumulated += phpNum(row.rate);
+      if (roll >= accumulated || !Number.isFinite(roll)) continue;
+      const gid = phpIntval(row.gid);
+      await this.goods.addGoods(uid, gid, 1, 3);
+      const item = await this.row(
+        sql`select *, 1 as count, value from cfg_goods where gid = ${gid}`,
+      );
+      ret.push(item ?? false);
+      if (item && ANNOUNCED_GIDS.has(phpIntval(item.gid))) {
+        await this.announceBox(uid, 50, [`“${String(item.name)}”1`], phpNum(item.value));
+      }
+      break;
+    }
+    const actRate = await this.cell(sql`select rate from cfg_act where type = 15
+      and starttime <= unix_timestamp() and endtime >= unix_timestamp() limit 1`);
+    if (!phpEmpty(actRate) && this.random.mtRand(1, 100) <= phpNum(actRate)) {
+      const extra = await this.defaultBox.openEvent(uid, 0, 50, 8);
+      // PHP indexes the string returned for a non-goods source: only its first character.
+      if (extra) ret.push(Buffer.from(extra, 'utf8').subarray(0, 1).toString('utf8'));
+    }
+    if (phpIntval((ret[0] as Row | undefined)?.gid) === 18)
+      await this.rewards.finishAchievement(uid, 7);
+    await this.goods.reduceGoods(uid, 150, 1);
+    return ret;
   }
 
   /** openDynamicBox: a cfg_pack_goods pack of resources, items, 礼金, things and gear. */

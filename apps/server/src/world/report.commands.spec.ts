@@ -118,3 +118,21 @@ describe('ReportCommands.readReportAll', () => {
     expect(db.executed[0]?.parameters).toContain(1001);
   });
 });
+
+describe('ReportCommands.getReportContent', () => {
+  it('loads only the owner report, marks it read, and clears the stored HTML', async () => {
+    const { cmd, db } = build([
+      { match: /select content from sys_report/i, rows: [{ content: '<b>正文</b>' }] },
+    ]);
+    expect(await cmd.getReportContent(ctx, [42])).toBe('<b>正文</b>');
+    expect(db.executed[0]?.parameters).toEqual([42, 1001]);
+    expect(db.executed[1]?.sql).toMatch(/update sys_report set .read. = 1, content = ''/i);
+    expect(db.executed[1]?.parameters).toEqual([42, 1001]);
+  });
+
+  it('does not expose or consume another user report', async () => {
+    const { cmd, db } = build([]);
+    expect(await cmd.getReportContent(ctx, [42])).toBe('');
+    expect(db.executed).toHaveLength(1);
+  });
+});

@@ -143,6 +143,20 @@ export class ReportCommands {
    * client never calls it (接口清单: "待确认：客户端未引用"); ported for completeness since it is
    * trivial. Returns `[1]`.
    */
+  /** report.php: load an owned plain report and consume its unread body. */
+  @GlobalCommand()
+  async getReportContent(ctx: CommandContext, param: unknown[]): Promise<string> {
+    const id = phpIntval(param[0]);
+    const row = (
+      await this.rows(sql<Row>`select content from sys_report
+      where id = ${id} and uid = ${ctx.uid}`)
+    )[0];
+    if (!row) return '';
+    await sql`update sys_report set \`read\` = 1, content = ''
+      where id = ${id} and uid = ${ctx.uid}`.execute(this.scope.db);
+    return String(row.content ?? '');
+  }
+
   @GlobalCommand()
   async readReportAll(ctx: CommandContext): Promise<unknown[]> {
     await sql`update sys_report set \`read\` = 1 where uid = ${ctx.uid}`.execute(this.scope.db);

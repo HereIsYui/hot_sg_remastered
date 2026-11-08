@@ -60,7 +60,8 @@ const REPEAT_USE_GROUPS: {
 }[] = [
   { gids: [160026, 160027, 160028], family: 'baguazheng', base: { userBuffer: 7 } },
   { gids: [160029, 160030, 160031], family: 'xianzhenzhangu', base: { userBuffer: 6 } },
-  { gids: [160040, 160041, 160042], family: 'hufu', base: { heroBuffer: 1 } },
+  // PHP reverses the 虎符 family: 160042 replaces 160040/160041.
+  { gids: [160042, 160041, 160040], family: 'hufu', base: { heroBuffer: 1 } },
   { gids: [160043, 160044, 160045], family: 'wenquxin', base: { heroBuffer: 2 } },
   { gids: [160046, 160047, 160048], family: 'zhuiduoxin', base: { heroBuffer: 4 } },
   { gids: [160049, 160050, 160051], family: 'wuquxin', base: { heroBuffer: 3 } },
@@ -358,7 +359,7 @@ export class HonorCommands {
 
   /**
    * HeroFunc.php::checkGoodsRepeatUse — the 赤壁 families: the family's old-style buff blocks
-   * every member; a higher grade blocks a lower one, a lower one replaces the higher.
+   * every member; tuples follow PHP's replacement priority (strongest first).
    */
   private async checkGoodsRepeatUse(uid: number, gid: number, hid: number): Promise<void> {
     const db = this.scope.db;
@@ -416,23 +417,17 @@ export class HonorCommands {
         }
       }
       if (gid === low) {
-        if (
-          await this.check(
-            sql`select 1 from mem_hero_buffer where hid = ${hid} and buftype = ${mid}`,
-          )
-        ) {
-          await sql`delete from mem_hero_buffer where hid = ${hid} and buftype = ${mid}`.execute(
-            db,
-          );
-        }
-        if (
-          await this.check(
-            sql`select 1 from mem_hero_buffer where hid = ${hid} and buftype = ${high}`,
-          )
-        ) {
-          await sql`delete from mem_hero_buffer where hid = ${hid} and buftype = ${high}`.execute(
-            db,
-          );
+        const order = low === 160042 || low >= 160046 ? [high, mid] : [mid, high];
+        for (const buftype of order) {
+          if (
+            await this.check(
+              sql`select 1 from mem_hero_buffer where hid = ${hid} and buftype = ${buftype}`,
+            )
+          ) {
+            await sql`delete from mem_hero_buffer where hid = ${hid} and buftype = ${buftype}`.execute(
+              db,
+            );
+          }
         }
       }
     }
