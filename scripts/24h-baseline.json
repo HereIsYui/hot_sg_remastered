@@ -1,0 +1,39 @@
+{
+  "purpose": "24h 差分结算对比 —— 夹具后基线留档；scripts/compare-24h.mjs 以 startTs 为对比窗口起点",
+  "createdAt": "2026-11-08 15:57 +08:00",
+  "fixtureT0": 1794124631,
+  "startTs": 1794124631,
+  "startIso": "2026-11-08T07:57:11.000Z",
+  "tickStart": {
+    "legacy": "hot-legacy-tick-1 (compose --profile tick), HOT_LEGACY_TICK_SECONDS=3",
+    "dev": "nohup node apps/server/dist/main.js (TICK_INTERVAL_MS=3000, WORLD_REFRESH_ENABLED=false)"
+  },
+  "fingerprintAfterFixtures": {
+    "tables": 481,
+    "mismatches": 0,
+    "note": "count+CRC32 全列聚合指纹，legacy(MySQL 5.7) 与 dev(MySQL 8.4) 完全一致",
+    "checkedAt": 1794124700
+  },
+  "fixtures": {
+    "file": "scripts/24h-fixtures.sql",
+    "twinRestore": "node scripts/24h-restore-twin.mjs（先两侧恢复 __snap_*，再以同一 T0 字面量执行夹具）",
+    "account": "uid 1001 长乐 / 城池 209355 长乐宫；对照 uid 1002 / 城池 188128",
+    "items": [
+      "mem_world：209355 名下添两块野地（203000 侦察用 / 203002 采集用），sys_city_technic(209355,7,5)",
+      "Curse：188128 仓库存量上限抬高治愈原生存档；wood=6001000 一次性超仓受害者；将领 80216 忠诚=1 走整点警告",
+      "mem_user_buffer：buftype 17 商队契约(+48h)；buftype 1-4 endtime +6h/+14h/+20h/+40h（含跨午夜）",
+      "sys_building/mem_building_upgrading：209355 xy=1 (bid2→16) T0+2h；xy=2 (bid4→16) T0+30h",
+      "TechnicTick：sys_technic(209355,tid1) T0+2h 完成；sys_technic(188128,tid1) T0+30h 在途",
+      "SoldierTick：209355 兵营 xy=1 队A T0+1h 完成(sid1×100)，队B T0+31h",
+      "DefenceTick：209355 城防 did1×10 T0+1h 完成，did2×20 T0+31h",
+      "TroopTick：金丝雀运输 900102 T0+5min 自城入库/10min 返回；主运输 900103 T0+1h/2h；侦察 900104 task2 空野地 T0+70min；战场出征 900105 task7→601101 T0+2h 驻扎；采集驻扎 900101 task1 state4 + sys_gather",
+      "HeroExprTick：80216(1002) T0+2h 完成（随机奇遇收敛在 1002）；80213(1001) T0+30h 在途",
+      "AutoTransTick→TradeTick：单程 T0+59min 装载/+60min 交付(任务25/26)；循环 T0+20h 装载后 +86400 出窗"
+    ]
+  },
+  "compare": {
+    "script": "node scripts/compare-24h.mjs [--fingerprint]",
+    "window": "[startTs, 对比时刻] ±120s 摆动余量；时间列掩码 /time|_at$|_ts$|posttime|endtime|starttime|last/",
+    "passRule": "PASS = 掩码后逐表多重集 0 差异；auto_increment 计数器漂移单独列出不算失败"
+  }
+}
