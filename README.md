@@ -274,8 +274,8 @@ W5–W8 已于 2026-11-08 完成逐行核对与差分 / 浏览器走查收尾（
   - `entry-audit`：coverage 余量 15 项逐项定性维持不做（对反编译客户端逐名 grep 引用 0 命中核实）；coverage 492/507。
   - `final-regression`：全量回归收尾（数字见阶段 11 基线）；未做任何 git 提交，提交由主会话接管。
   - 集成核验：`LoginActivityModule`（`app.module.ts:96`）、`WuhunCardCommands`（`goods.module.ts`）、`AchievementRules`（`core.module.ts`）、`HeroItemCommands` / `KingCommands` / `HeroExprRewardCommands`（`hero.module.ts`）注册均在位，零改动。
-- W5–W8 浏览器走查（2026-11-08，每轮经脚本 checksum 基线恢复校验：W6/W7/W8 `checksumDifferences=[]`，passtype 测后还原 `testpassport`）：W6 3/3（赞扬、君主学习、战报历练）与 W8 5/5（公告与签到、黄巾 / 董卓进度、活动栏挂载）全过；W7 4/8——通过名将详情与求贤、名将任务领奖、委托领奖、俘虏断交拒绝，未过专属任务领奖（exclusive-reward）、将领选择（hero-selection）与装备选择两分项（armor-51/52），均为选择网格行点击 6 秒超时；W5 沿用既有干净证据（目标差分 9/9）。
-- 待做：W7 走查 4 个未过项修复后重走；官府采集 / 收获与君主状态等额外入口的浏览器验收（续接记录 P5）；差分套件现有 200 例而分段回归为 198 组，差额 2 例（含联盟群发新例）未能逐一对账，需随下次全量回归覆盖；lint / format 修复（见阶段 11 基线）；按波次分批提交；15 项 coverage 候选核实。
+- W5–W8 浏览器走查（2026-11-08，每轮经脚本 checksum 基线恢复校验：W6/W7/W8 `checksumDifferences=[]`，passtype 测后还原 `testpassport`）：W6 3/3（赞扬、君主学习、战报历练）与 W8 5/5（公告与签到、黄巾 / 董卓进度、活动栏挂载）全过；W7 初轮 4/8，4 例失败定性为脚本侧问题（组 id 990070 落入委托区间路由、FxDataGrid 选中行无 `selectable` 类）后重写为「浏览→详情→领取」真实命令流，**8/8 全过**（2026-11-08 补充，见[走查记录](docs/阶段11-浏览器走查记录.md)）；W5 沿用既有干净证据（目标差分 9/9）。战场商城按原版结构补齐（分组页签 + armor/hero tooltip 查表，battleShop 单测 14/14）。
+- 待做：官府采集 / 收获与君主状态等额外入口的浏览器验收（续接记录 P5）；差分套件现有 200 例而分段回归为 198 组，差额 2 例（含联盟群发新例）未能逐一对账，已由 2026-11-08 分段复核 6 段 200/200 覆盖；商城限时上架倒计时、mBattleShopType==2 跨服积分面板、addForceBtn（本地服不下发对应战场，如实记录）；24h 差分对比与帧率采样（长时项）；桌面壳（未确认）。
 
 ## 开发流程
 

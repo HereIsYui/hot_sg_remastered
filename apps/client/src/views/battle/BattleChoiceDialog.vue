@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import type { HallBattle } from '../../game/battlefield';
-import type { BattleShopGood, BattleShopState } from '../../game/battleShop';
+import {
+  battleShopGoodTip,
+  groupBattleShopGoods,
+  parseBattleShopGroups,
+  type BattleShopGood,
+  type BattleShopGroup,
+  type BattleShopState,
+} from '../../game/battleShop';
 import { armBuyAgain } from '../../game/battlefieldBuyAgain';
 import { useGame } from '../../game/game';
 import { i18n } from '../../i18n';
@@ -12,6 +19,7 @@ import FxDataGrid from '../../ui/FxDataGrid.vue';
 import FxImage from '../../ui/FxImage.vue';
 import FxLabel from '../../ui/FxLabel.vue';
 import FxText from '../../ui/FxText.vue';
+import type { TipValue } from '../../ui/tooltip';
 import CreateBattleDialog from './CreateBattleDialog.vue';
 
 /**
@@ -77,25 +85,69 @@ const instructionLevel = computed(() => {
 });
 const instructionImage = computed(() => `images/${selected.value?.id ?? 0}_battle_info.jpg`);
 
+/** `mCurrentBattleTypeNameArray`: the left list's header per tab. */
+const listHeader = computed(() =>
+  battleType.value === 2
+    ? i18n('Battle_BattleChoiceDialogSrc_3_1')
+    : i18n('Battle_BattleChoiceDialogSrc_1'),
+);
+
 /** `doClickBattleItem` (the list click) + `switchPanel` (the tab). */
 function switchPanel(group: number): void {
   battleType.value = group;
   lastIndex.value = 0;
-  if (group === 2) emit('shop');
+  if (group === 2) {
+    shopGroupIndex.value = 0; // switchPanel(2) shows mBattleGoodsGroups[0]
+    shopPage.value = 0;
+    emit('shop');
+  }
   if (group === 3) emit('invites');
 }
 function onClickBattle(_row: HallBattle, index: number): void {
   lastIndex.value = index;
 }
 
-// ---- the 战场商城 view (mBattleShopType: the shop rows of the getUserBattleShopInfo reply) ----
+// ---- the 战场商城 view (initBattleGroups' shop list over the getUserBattleShopInfo reply) ----
 const SHOP_PAGE = 12;
 const shopPage = ref(0);
-const shopGoods = computed(() => props.shop?.goods ?? []);
+const shopGroupIndex = ref(0);
+
+/** `initBattleGroups`'s mBattleShops: 战场道具, one entry per battle, 赤壁/孟获商城 when open. */
+const shopGroups = computed(() => parseBattleShopGroups(props.shop?.battles ?? []));
+/** `mBattleGoodsDict`: the goods of each shop-list entry, pushed by `battleBelong`. */
+const shopGroupGoods = computed(() =>
+  groupBattleShopGoods(props.shop?.goods ?? [], shopGroups.value),
+);
+const shopGoods = computed(() => shopGroupGoods.value[shopGroupIndex.value] ?? []);
 const shopPages = computed(() => Math.max(1, Math.ceil(shopGoods.value.length / SHOP_PAGE)));
 const shopRows = computed(() =>
   shopGoods.value.slice(shopPage.value * SHOP_PAGE, (shopPage.value + 1) * SHOP_PAGE),
 );
+
+/** `doClickBattleItem`'s mBattleShopType: 1 for net battles (type 3), 2 for type 4, else 0. */
+const shopType = computed(() => {
+  const type = shopGroups.value[shopGroupIndex.value]?.type ?? 0;
+  return type === 3 ? 1 : type === 4 ? 2 : 0;
+});
+
+/** The bottom bar's currency: shopType 0 trades in 荣誉, 1 in 功勋. */
+const currencyName = computed(() =>
+  shopType.value === 0 ? i18n('Shop_ShopDialog_9_1') : i18n('Shop_ShopDialog_9_2'),
+);
+const currencyAmount = computed(() =>
+  shopType.value === 0 ? (props.shop?.honour ?? 0) : (props.shop?.gongxun ?? 0),
+);
+
+/** `doClickBattleItem`: switching a shop group resets the page. */
+function onClickShopGroup(_row: BattleShopGroup, index: number): void {
+  shopGroupIndex.value = index;
+  shopPage.value = 0;
+}
+
+/** `createGoodsTip`: the cell's BattleShopGoodsTip through ui/tooltip's goods shape. */
+function goodTip(good: BattleShopGood): TipValue {
+  return props.shop ? { goods: battleShopGoodTip(good, props.shop) } : undefined;
+}
 
 function onPrevShopPage(): void {
   if (shopPage.value > 0) shopPage.value--;
@@ -215,7 +267,7 @@ function close(): void {
         :w="141"
         :h="360"
         :row-height="20"
-        :columns="[{ header: i18n('Battle_BattleChoiceDialogSrc_1'), field: 'name', width: 141 }]"
+        :columns="[{ header: listHeader, field: 'name', width: 141 }]"
         :rows="groupBattles"
         selectable
         :selected-index="lastIndex"
@@ -237,32 +289,24 @@ function close(): void {
       </FxDataGrid>
     </FxCanvas>
 
-    <!-- detail (`switchPanel` hides it when the tab has no battle) -->
-    <!-- the 战场商城 view: the goods of the first battleBelong group, 12 per page -->
-    <FxCanvas v-if="battleType === 2" :x="21" :y="79" :w="638" :h="366" style-name="BoardListUp">
-      <FxLabel
-        :x="10"
-        :y="8"
-        :w="200"
-        style-name="ItemTitle"
-        :text="`${i18n('Shop_ShopDialog_9_1')} ${props.shop?.honour ?? 0}`"
+    <!-- the shop tab's list (initBattleGroups' mBattleShops): the goods groups -->
+    <FxCanvas v-if="battleType === 2" :x="21" :y="79" :w="147" :h="366" style-name="BoardListUp">
+      <FxDataGrid
+        :x="3"
+        :y="3"
+        :w="141"
+        :h="360"
+        :row-height="20"
+        :columns="[{ header: listHeader, field: 'name', width: 141 }]"
+        :rows="shopGroups"
+        selectable
+        :selected-index="shopGroupIndex"
+        @item-click="onClickShopGroup"
       />
-      <FxButton
-        :x="410"
-        :y="4"
-        :w="100"
-        style-name="ButtonYellow"
-        :label="i18n('Shop_ShopDialog_11_1')"
-        @click="emit('medalChange')"
-      />
-      <FxButton
-        :x="520"
-        :y="4"
-        :w="100"
-        style-name="ButtonYellow"
-        :label="i18n('Shop_ShopDialog_10_1')"
-        @click="emit('medalRecord')"
-      />
+    </FxCanvas>
+
+    <!-- the 战场商城 view (battleShop canvas): the selected group's goods, 12 per page -->
+    <FxCanvas v-if="battleType === 2" :x="176" :y="79" :w="483" :h="366" style-name="BoardListUp">
       <FxCanvas v-if="shopPages > 1" :x="10" :y="330" :w="210" :h="36">
         <FxCanvas :x="8" :y="6" :w="70" :h="25" style-name="BoardListDown">
           <FxLabel
@@ -276,35 +320,92 @@ function close(): void {
         <FxButton :x="78" :y="0" :w="65" label="" @click="onPrevShopPage" />
         <FxButton :x="141" :y="0" :w="65" label="" @click="onNextShopPage" />
       </FxCanvas>
+      <!-- the BattleShopItem cells: x 7/165/323, y 25/106/187/268 -->
       <FxCanvas
         v-for="(good, i) in shopRows"
         :key="good.id"
-        :x="12 + (i % 4) * 152"
-        :y="40 + Math.floor(i / 4) * 100"
-        :w="146"
-        :h="94"
-        style-name="BoardListDown"
+        :x="7 + (i % 3) * 158"
+        :y="25 + Math.floor(i / 3) * 81"
+        :w="153"
+        :h="75"
+        hand
+        :tip="goodTip(good)"
         @click="emit('buyGood', good)"
       >
-        <FxCanvas :x="4" :y="4" :w="68" :h="68" style-name="FramePicture">
+        <FxCanvas :x="5" :y="3" :w="68" :h="68" style-name="FramePicture">
           <FxImage :x="2" :y="2" :w="64" :h="64" :source="`images/${good.imageName}.png`" />
+          <FxLabel
+            :x="0"
+            :y="49"
+            :w="68"
+            :h="19"
+            :fx="{ textAlign: 'right', color: 16777215 }"
+            :text="String(good.pack)"
+          />
         </FxCanvas>
-        <FxLabel
-          :x="78"
-          :y="6"
-          :w="64"
-          :h="60"
-          :fx="{ textAlign: 'left', fontSize: 12 }"
-          :text="good.name"
-        />
-        <FxLabel
-          :x="4"
-          :y="74"
-          :w="138"
-          :fx="{ textAlign: 'center', fontSize: 12 }"
-          :text="`${good.medalName} ${good.medalPrice}，${i18n('Shop_ShopDialog_9_1')} ${good.creditPrice}`"
-        />
+        <FxImage v-if="good.hasLeftImage" :x="0" :y="0" source="images/mall_special.png" />
+        <FxCanvas :x="76" :y="4" :w="72" :h="20" style-name="BoardListDown">
+          <FxLabel :x="0" :y="0" :w="72" :h="20" style-name="ItemTitle" :text="good.name" />
+        </FxCanvas>
+        <FxCanvas :x="76" :y="27" :w="72" :h="20" style-name="BoardListDown">
+          <FxImage :x="2" :y="2" :w="16" :h="16" source="images/credit_goods.png" />
+          <FxLabel
+            :x="18"
+            :y="0"
+            :w="52"
+            :h="20"
+            style-name="ItemValue"
+            :fx="{ textAlign: 'center' }"
+            :text="String(good.creditPrice)"
+          />
+        </FxCanvas>
+        <FxCanvas :x="76" :y="50" :w="72" :h="20" style-name="BoardListDown">
+          <FxImage
+            :x="2"
+            :y="2"
+            :w="16"
+            :h="16"
+            :source="`images/medal_${good.medalTypeId}_goods.png`"
+          />
+          <FxLabel
+            :x="18"
+            :y="0"
+            :w="52"
+            :h="20"
+            style-name="ItemValue"
+            :fx="{ textAlign: 'center' }"
+            :text="String(good.medalPrice)"
+          />
+        </FxCanvas>
       </FxCanvas>
+    </FxCanvas>
+
+    <!-- the shop bottom bar (battleCanvas1): the currency and the medal buttons -->
+    <FxCanvas v-if="battleType === 2" :x="16" :y="448" :w="651" :h="38">
+      <FxCanvas :x="1" :y="4" :w="42" :h="26" style-name="BoardListUp">
+        <FxLabel :x="4" :y="4" :w="38" style-name="ItemTitle" :text="currencyName" />
+      </FxCanvas>
+      <FxCanvas :x="50" :y="4" :w="84" :h="26" style-name="BoardListDown">
+        <FxLabel :x="4" :y="4" :w="72" style-name="ItemValue" :text="String(currencyAmount)" />
+      </FxCanvas>
+      <FxButton
+        v-if="shopType === 0"
+        :x="180"
+        :y="0"
+        :w="76"
+        style-name="ButtonGreen"
+        :label="i18n('Shop_ShopDialog_10_1')"
+        @click="emit('medalRecord')"
+      />
+      <FxButton
+        v-if="shopType === 0"
+        :x="268"
+        :y="0"
+        :w="76"
+        style-name="ButtonYellow"
+        :label="i18n('Shop_ShopDialog_11_1')"
+        @click="emit('medalChange')"
+      />
     </FxCanvas>
 
     <!-- detail (`switchPanel` hides it when the tab has no battle) -->
