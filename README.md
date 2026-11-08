@@ -80,20 +80,20 @@ legacy/          本地生成的原版文件（不提交）
 
 阶段划分见 [开发计划](design/02-开发计划.md) 第 7 节。每完成一个功能点就单独提交并推送到 `main`，提交历史就是最细的进度记录（`git log --oneline`）。
 
-| 阶段                                                                                                        | 状态       |
-| ----------------------------------------------------------------------------------------------------------- | ---------- |
-| 0 基础设施与资料提取                                                                                        | 完成       |
-| 1 后端基础框架（命令网关、会话、用户锁、Tick、推送骨架、登录与创建角色、差分测试工具）                      | 完成       |
-| 2 前端框架（舞台、素材加载、Fx 皮肤组件、DialogManager、登录到主界面）                                      | 完成       |
-| 3 城池经济                                                                                                  | 完成       |
-| 4 将领与道具（主体完成，剩余见下）                                                                          | 完成       |
-| 5 世界与战斗（波 1–4 前后端完成并实测，占城/抓将已比对，MVP 串跑通过）                                      | 完成       |
-| 6 社交与经济（好友/聊天/联盟/市场完成；既有差分与界面细化待做）                                             | **进行中** |
-| 7 成长与荣誉（排行榜、领奖、统计、成就、计谋、抽奖、君主荣誉及客户端全部完成）                              | 完成       |
-| 8 玩法活动（过关斩将/竞技场/洛阳/婚姻完成；沙场与闹钟原版不可达，未移植）                                   | 完成       |
-| 9 独立战场（四本地 PVE 战场后端+核心客户端完成；官渡/董卓照原版关闭）                                       | 完成       |
-| 10 GM 工具（运维 API + 单页后台完成）                                                                       | 完成       |
-| 11 测试与发布（一键全栈 compose/备份恢复/部署文档/GM 补齐完成；全量浏览器走查通过；24h 对比与性能基准待做） | **进行中** |
+| 阶段                                                                                                                                         | 状态       |
+| -------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 0 基础设施与资料提取                                                                                                                         | 完成       |
+| 1 后端基础框架（命令网关、会话、用户锁、Tick、推送骨架、登录与创建角色、差分测试工具）                                                       | 完成       |
+| 2 前端框架（舞台、素材加载、Fx 皮肤组件、DialogManager、登录到主界面）                                                                       | 完成       |
+| 3 城池经济                                                                                                                                   | 完成       |
+| 4 将领与道具（主体完成，剩余见下）                                                                                                           | 完成       |
+| 5 世界与战斗（波 1–4 前后端完成并实测，占城/抓将已比对，MVP 串跑通过）                                                                       | 完成       |
+| 6 社交与经济（好友/聊天/联盟/市场完成；既有差分与界面细化待做）                                                                              | **进行中** |
+| 7 成长与荣誉（排行榜、领奖、统计、成就、计谋、抽奖、君主荣誉及客户端全部完成）                                                               | 完成       |
+| 8 玩法活动（过关斩将/竞技场/洛阳/婚姻完成；沙场与闹钟原版不可达，未移植）                                                                    | 完成       |
+| 9 独立战场（四本地 PVE 战场后端+核心客户端完成；官渡/董卓照原版关闭）                                                                        | 完成       |
+| 10 GM 工具（运维 API + 单页后台完成）                                                                                                        | 完成       |
+| 11 测试与发布（一键全栈 compose/备份恢复/部署文档/GM 补齐完成；全量浏览器走查通过；缺失接口补齐 8 波完成并全量回归；24h 对比与性能基准待做） | **进行中** |
 
 ### 阶段 3 已完成
 
@@ -114,14 +114,22 @@ legacy/          本地生成的原版文件（不提交）
 - 客栈：招募列表与刷新、招募将领、招贤榜、结交名将、市井传闻、鉴定宝藏、五铢钱商店。
 - 仓库打包资源、粮仓查看与卸下、将领「宝物」按钮（增益、倒计时、续买）。
 
-### 阶段 4 剩余（未做）
+### 阶段 4 剩余（2026-11-07 更新：原六项已按补齐波次消化）
 
-1. 君主「学习」面板、君主经验书、君主战术。
-2. 坐骑相关：粮仓的激活、强化、升级；铁匠铺的洗练、熔炼、装备升级三个页签，目前显示"暂未开放"。
-3. 客栈：查看名将详情、领取任务暂未开放；名将任务与传闻里的任务、军队依赖后续阶段；游说原版即关闭，未做。
-4. 迁城令、免战牌、离间符：服务端分支与客户端对话框都还没做；它们依赖的出征与战斗已在阶段 5 完成，可以开工。
-5. 武魂（卡在成就扣物品一步）、卡牌合成（原版单机关闭）。
-6. 将领历练的活动奇遇、君主历练的开始；活动招将（平时无活动，未做）。
+- W3 完成坐骑相关：粮仓的激活、强化、升级；铁匠铺洗练、熔炼、装备升级三个页签。
+- W4 完成迁城令、免战牌、离间符的服务端分支与客户端入口。
+- W5 完成武魂与卡牌合成（成就扣物品改走 `core/achievement-rules` 钩子），并补上占城默认宝箱的开启。
+- W6 完成君主「学习」面板、君主经验书与君主战术（`loadKingTactic` / `addUserLevelTimes`）、将领宝物赏赐（`largessHeroWithGid`）、赞扬与战报历练领取（`finishCommonExpr`）。
+- W7 完成客栈查看名将详情、领取名将任务与传闻（`askDetail` / `getHeroPublicTask` / `getTheTask`）与游说 `persuadeHero`（含原版开服时间闸门 `mem_state 6 > 1311696000` 即关闭；单机快照闸门值为 2013-12-17，默认关闭，差分夹具置 0 后验证成功迁移并回 `reply=21`）。
+- W8 完成登录奖励、签到与活动栏（沙场离线桩）；VIP 抛错桩随活动模块落地。
+
+仍未做：
+
+1. 活动招将：W8 已接入活动栏框架，但招将类活动原版平时无入口，未接入。
+2. 委托任务的独立发布 / 接受流程：原版 `getCommissions` 为注释代码、`getCommissionDetail` 缺失，当前仅接入 type 4 已接委托（`HotelRecruitPanel` 委托入口与奖励 90% 结算）。
+3. 跨服沙场连接旧外服：`joinCrossShaChang` 按原版离线语义返回 `net_error`。
+
+W5–W8 已于 2026-11-08 完成逐行核对与差分 / 浏览器走查收尾（见下方「缺失接口补齐」与阶段 11 基线）。
 
 代码里尚未移植的分支都会抛出 `... not ported` 错误或显示 `NotYetValid` 提示，可用 `rg "not ported|NotYetValid" apps` 查找。
 
@@ -146,7 +154,7 @@ legacy/          本地生成的原版文件（不提交）
 2. 名城 `check_city_type` 前置城数拒绝/通过、低官府 `delBuildings` 拆除后的建筑行已比对（随机等级仍掩码）；占领失败与城池掠夺的辎重容量、目标城扣减和军队携资源已比对；最后一城被占后的选城、迁城、秒回和军队重定向已比对。
 3. 野地 8 小时刷新：按数据表猜写，原版无源码，与原版可能不同。
 4. 政令的洛阳模式（`governLuoyangOthers`）与合城的 51SDK/防沉迷分支：属后续阶段。
-5. 掉物品（占城结算的默认宝箱掉落 roll 已移植、开启未移植）、荣誉、联盟群发与援助、洛阳出兵：未做。
+5. 掉物品、荣誉、联盟群发与援助、洛阳出兵：均已消化——占城默认宝箱开启（W5 `default-box`）、战功荣誉（阶段 9 `getBattleHonourStat`）、联盟援助（W4 `unionAssit`）、洛阳出兵（阶段 8 `luoyangTroopStart`）、联盟群发 `sendUnionMail`（2026-11-08 收尾轮移植，`MailFunc.php:395-460`，替换原「暂未开放」桩）。
 6. 数据库随机排序（`order by rand()`）需在用例里逐例固定；「释放俘虏到野地」偶尔不过。新角色地块遗留调度和占领计时导致的波动已通过固定夹具消除。
 
 ### 阶段 6 进行中（社交与经济）
@@ -164,10 +172,10 @@ legacy/          本地生成的原版文件（不提交）
 
 本轮完整回归：686 项单元测试、131/131 组差分测试通过；格式检查、Lint、类型检查和构建通过。
 
-#### 阶段 6 未完成（按优先级）
+#### 阶段 6 未完成（2026-11-08 更新）
 
-1. **既有差分补强**：其他随机分支。侦察遇巡逻兵、联盟奖励、名城前置/低官府拆除、失败掠夺、最后城迁城和攻守完整战报已比对通过。
-2. **后续界面细化**：其他未迁移面板与交互细节。
+1. **既有差分补强**：全量差分 198/198 组通过（2026-11-08 分段回归）；联盟群发已补齐，长尾随机分支按用例暴露再补。
+2. **后续界面细化**：本轮已落地 P0–P3——聊天物品链接（`game/chatLink.ts`，发送 `CTextInput.textWithItemTip` / 接收 `ArmorShow.filterTip` 协议两端对照原版，3 件上限与物品提示齐备）、装备「展示」入聊天、武魂卡牌与问答宝箱等面板；P4 经原版入口核对为白名单外死入口，不做。剩余为其他未迁移面板与交互细节。
 
 #### 已知差异与实现说明
 
@@ -239,17 +247,35 @@ legacy/          本地生成的原版文件（不提交）
 - 发布准备完成：docker/prod 一键全栈 compose（db/server/nginx web 三服务，/ws 同源代理，客户端与 GM 静态同源托管；端到端实测六项冒烟全过）；scripts/backup-db.sh（mysqldump + 裁剪）与 restore-db.sh（MyISAM→InnoDB 在线转换，沙箱实测）；docs/deploy.md 部署文档；package.json 增 prod:up/prod:down/db:backup/db:restore。
 - GM 补齐（走查前置能力）：登录公告（announce/login 查看与设置）、任务/活动开关（mem_state 读写）、史诗任务进度（sys_user_goal 查询/设置）——13 项新单测，总 41/41。
 - 全量浏览器走查通过（2026-11-05，[走查记录](docs/阶段11-浏览器走查记录.md)）：阶段 7/8/9 累积 15 项面板/链路全部验证——排行榜/统计/成就/计谋/君主信息、抽奖关闭态与 GM 开关后轮盘、过关斩将、洛阳归属、婚姻、竞技场（爵位门槛两侧）、战场大厅→新建战场→黄巾之乱大地图（含道具校验与创建成功链）、GM 后台六分区、登录公告登录页可见；发现并修复战场描述富文本渲染（FxLabel→FxText :html），竞技场 face=0 破图为原版同现数据工件不改；差分遗留战场数据触发 sys_battle_city 主键冲突按原版 PearDB 文案报错（错误路径实测确认），已清理；走查数据全部还原。
-- 未做（长时/人工项）：差分 24 小时结算对比、性能与兼容性基准、可选桌面壳。
+- 2026-11-08 回归基线与基准：全量差分 198/198 组全绿（0 失败 0 崩溃；整段运行会把 7.75GB Docker VM 上的 legacy mysqld 推到 OOM，按 86 段 + 补跑 2 段分段执行、段间重启 legacy 容器，见 [走查记录](docs/阶段11-浏览器走查记录.md) 补录）；单元测试 server 941/941、client 497/497、tools 66/66、shared 1/1 与三端 typecheck 0 错均为本日复跑核实；lint 与 format:check 复跑当前不过（`tools/src/difftest/cases.ts` 格式、`BattlePanel.vue` 未用变量、`ChatPanel.vue` v-if/v-for 顺序），与收尾报告「lint/format 过」存在出入，按复跑结果如实记录。构建基准：客户端主包 1190.71 kB / gzip 322.46 kB（构建 2.33s、1448 modules，vite 警告主 chunk 超 500 kB），GM 后台 86.03 kB / gzip 31.79 kB；镜像 hot-prod-web 256MB、hot-prod-server 658MB、mysql:8.4 1.11GB（基础镜像，与 legacy/dev 栈共用；镜像体积经 `docker images` 复核一致）。启动耗时本轮无实测数据。
+- 未做（长时/人工项）：差分 24 小时结算对比、性能与兼容性基准（含启动耗时）、可选桌面壳。
 
 ### 缺失接口补齐（进行中）
+
+[续接记录（2026-11-07）](docs/缺失接口补齐-续接记录.md)
 
 客户端引用但服务端未实现的接口按 8 波补齐，每波：读原版 → 服务端与单测 → 差分用例 → 客户端 → 全量检查 → 浏览器实测并还原数据 → 提交。
 
 - W1 完成：采集 `gatherFieldStart` / `gatherFieldEnd` / `gatherStartAll` / `gatherEndAll`（`world/gather.commands.ts`，含藏宝图、寻宝与采集活动礼包、古朴木匣、名将任务道具；原版 `gatherEndAll` 无排序、按 MyISAM 插入顺序结算，这里按部队 id 排序）、`allowAutoDiscard`、宝物合成 `goodsCompose`。客户端：军队对话框四个采集回包的提示、收获确认带采集时长、全部采集不再二次确认；合成结果框修复（原先把物品列表多包了一层，结果框为空）。差分 2 组新用例（采集时长的秒数会跨秒，比较时抹掉）。
-- W2 完成：装备仓库 `loadUserArmor` / `loadUserActivedArmor` / `sellArmor`（含回收装备活动礼包）/ `zhuangbeichaijie` / `multipAnalyzeArmor` / `loadActiveArmorSpecialGoods` / `activeArmorSpecial`（末日之刃四种特效重随），在 `hero/armor.commands.ts`。注意：原版 `0704` 作为 PHP 参数是八进制（log_goods 记 452），写在 SQL 字符串里是十进制（log_armor 记 704）；`loadUserActivedArmor` 传 0/1/2 以外的类型时原版 foreach 警告变成错误回包，这里照抄。客户端新增 `views/armor/`（ArmorDialog / UserArmorItem / ActiveArmorSpecial），信息面板「装备」按钮打开；部位、品质过滤，分页，回收、分解、特效、激活、拆解菜单，批量选择分解，全部修理 / 全部修复，武器架加栏位，蓝装以上走二级密码。「展示」需要聊天物品链接，聊天还没有，菜单项置灰。差分 1 组新用例。
+- W2 完成：装备仓库 `loadUserArmor` / `loadUserActivedArmor` / `sellArmor`（含回收装备活动礼包）/ `zhuangbeichaijie` / `multipAnalyzeArmor` / `loadActiveArmorSpecialGoods` / `activeArmorSpecial`（末日之刃四种特效重随），在 `hero/armor.commands.ts`。注意：原版 `0704` 作为 PHP 参数是八进制（log_goods 记 452），写在 SQL 字符串里是十进制（log_armor 记 704）；`loadUserActivedArmor` 传 0/1/2 以外的类型时原版 foreach 警告变成错误回包，这里照抄。客户端新增 `views/armor/`（ArmorDialog / UserArmorItem / ActiveArmorSpecial），信息面板「装备」按钮打开；部位、品质过滤，分页，回收、分解、特效、激活、拆解菜单，批量选择分解，全部修理 / 全部修复，武器架加栏位，蓝装以上走二级密码。「展示」依赖聊天物品链接，已于 2026-11-08 落地（`game/chatLink.ts`，发送/接收协议对照原版 `CTextInput.as:128-164` / `ArmorShow.as:22-54`，上限 3 件），菜单解除置灰。差分 1 组新用例。
 - W3 完成：铁匠铺洗练 `loadXilianGoods` / `doXilian`、熔炼 `loadFusionableArmor` / `loadPartArmor` / `reloadArmor` / `combineArmor`、装备升级 `doUpgradeArmor`、未激活列表 `loadUnActivePartArmor` / `loadUnActiveHorseArmor`；`doStrong` / `doEmbed` / `initHoles` 补上坐骑分支（灵通甘草、驯马技巧上限、马装孔位与专属限制）。修了 `doStrong` 失败时回包的极品属性（原版失败回 null）。客户端：铁匠铺补齐洗练、熔炼、装备升级三个页签，镶嵌页可打开装备激活列表（原版这个对话框没有入口）；马厩补齐驯服、强化、马装选择和升级，升级页与铁匠铺共用。铁匠铺和马厩对话框高度按原版改为 492，命令面板不再被裁掉，铁匠铺去掉了原版没有的「进入」按钮。差分 1 组新用例。
 - W4 实现：普通/高级迁城、免战与续期、元宝免战、休假与提前解除、离间符、宣战/讨逆圣旨、联盟援助及对战确认；宝物、君主状态和世界地图已接入对应界面，登录休假账号显示解除/退出面板。保留原版离间符全局扣忠诚、休假冷却编号等兼容行为。新增 8 组差分用例覆盖成功写库及校验顺序。
-- 待做：W5 武魂与卡牌、W6 君主学习/战术/赞扬/赏赐/战报历练、W7 名将与委托任务、W8 登录奖励/签到/活动栏与沙场、VIP 抛错桩。
+- W5 完成：武魂创建/选择/使用/升级（`goods/wuhun-card.commands.ts`，成就扣物品改走 `core/achievement-rules` 钩子）、卡牌合成 `CardMixPanel`（严格阈值、失败不耗材料；原版合成闸门 `mem_state 197` 照抄保持关闭，行为一致但未解锁为可玩功能）、问答宝箱与领奖、占城默认宝箱开启。差分 9 组新用例，目标差分 9/9（2026-11-07）。
+- W6 完成：将领宝物赏赐 `loadHeroGoods` / `largessHeroWithGid`（虎符在 `hero-item` 与 `honor` 两入口对齐，低阶换高阶放行、逆向拒绝）、赞扬 `praiseHero` 君主分支、君主学习 `loadKingTactic` / `addUserLevelTimes`（保底、失败计数、小数次数向上取整）、战报历练领取 `finishCommonExpr` 与报告正文 `getReportContent`（归属校验、已读清理）。差分 5 组新用例。
+- W7 完成：客栈名将详情 / 名将任务 / 游说（`askDetail` / `getHeroPublicTask` / `getTheTask` / `persuadeHero`，游说保留原版开服时间闸门）、专属任务领奖 `tid`/`group` 修正、空装备的 PHP 比较兼容、委托（type 4 已接委托）入口与奖励 90% 结算、备战洛阳 `reduceGoal` 203。差分 2 组新用例。
+- W8 完成：登录奖励/签到/活动栏/craftbuffer/黄巾董卓进度/将领列表（`activity/login-activity.commands.ts`；`getLoginReward` 原单机即返回 null，照抄）、跨服沙场 `joinCrossShaChang` 离线 `net_error` 桩、VIP `sendCloseMsg` 桩；公告默认打开（手动打开完成任务 292、关闭不完成），签到日期校验加固。差分 1 组新用例。
+- 额外入口：官府详情采集/收获入口（`game/field.ts` 14 项逻辑测试）、君主状态更改入口（W4 补漏保留）；`tools/src/coverage.ts` 接口注册扫描 492/507，余 15 项为原客户端 0 引用候选，留待核实产品入口。
+- 2026-11-08 收尾轮（工作流波次；W5–W8 实现零业务改动，源码改动仅差分夹具 / 用例与联盟群发）：
+  - `W5-wrap`：W5 暂存 diff 逐行对照原版 PHP 审阅通过（`useWuHun` / `genWuHunBySuipian` / `genWuHunByRumor` / `getWuhunByHid`、`useQuestion` 先抽题后扣传音符等），仓库源码零改动。
+  - `W6-wrap`：修复 largess 差分夹具漏播物品 160042（`tools/src/difftest/cases.ts` W6 largess 用例，`w4Goods` 置库存 1），服务端切片逐条核对无业务改动。
+  - `W7-wrap`：逐行对照 `HotelFunc.php` / `TaskFunc.php` 核对一致（`tryLionizeHero` 按客栈等级 ×500 金、`LionizeHero` 槽位 / 求贤诏 / 爵位闸门、`onCancelFriend` state 2/3 拒绝等）。
+  - `W8-wrap`：切片产物已在前序落盘，零文件改动，逐项对照 legacy PHP 核验一致（`finishOpenAnnounce` 完成任务 292、`getLoginReward` 原版顶部 `return` 死代码照抄等）。
+  - `union-mail`：移植 `sendUnionMail` 剩余段（`MailFunc.php:395-460`），替换原「联盟群发信暂未开放」桩——卫兵链与传音符卫兵照原版；新增差分用例（套件第 200 例）。
+  - `entry-audit`：coverage 余量 15 项逐项定性维持不做（对反编译客户端逐名 grep 引用 0 命中核实）；coverage 492/507。
+  - `final-regression`：全量回归收尾（数字见阶段 11 基线）；未做任何 git 提交，提交由主会话接管。
+  - 集成核验：`LoginActivityModule`（`app.module.ts:96`）、`WuhunCardCommands`（`goods.module.ts`）、`AchievementRules`（`core.module.ts`）、`HeroItemCommands` / `KingCommands` / `HeroExprRewardCommands`（`hero.module.ts`）注册均在位，零改动。
+- W5–W8 浏览器走查（2026-11-08，每轮经脚本 checksum 基线恢复校验：W6/W7/W8 `checksumDifferences=[]`，passtype 测后还原 `testpassport`）：W6 3/3（赞扬、君主学习、战报历练）与 W8 5/5（公告与签到、黄巾 / 董卓进度、活动栏挂载）全过；W7 4/8——通过名将详情与求贤、名将任务领奖、委托领奖、俘虏断交拒绝，未过专属任务领奖（exclusive-reward）、将领选择（hero-selection）与装备选择两分项（armor-51/52），均为选择网格行点击 6 秒超时；W5 沿用既有干净证据（目标差分 9/9）。
+- 待做：W7 走查 4 个未过项修复后重走；官府采集 / 收获与君主状态等额外入口的浏览器验收（续接记录 P5）；差分套件现有 200 例而分段回归为 198 组，差额 2 例（含联盟群发新例）未能逐一对账，需随下次全量回归覆盖；lint / format 修复（见阶段 11 基线）；按波次分批提交；15 项 coverage 候选核实。
 
 ## 开发流程
 
