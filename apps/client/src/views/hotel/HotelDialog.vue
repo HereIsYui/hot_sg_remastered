@@ -10,6 +10,7 @@ import { showAlert } from '../../ui/alert';
 import UpgradeBuildingDialog from '../building/UpgradeBuildingDialog.vue';
 import HeroRecruitDialog from './HeroRecruitDialog.vue';
 import HotelRecruitPanel from './HotelRecruitPanel.vue';
+import CommissionDialog from './CommissionDialog.vue';
 import LionizeDialog from './LionizeDialog.vue';
 import RumorDialog from './RumorDialog.vue';
 
@@ -29,6 +30,7 @@ const RUMOR_MIN_LEVEL = 5;
 const recruiting = shallowRef<HeroRecruit | null>(null);
 const showRumor = ref(false);
 const showLionize = ref(false);
+const showCommission = ref(false);
 
 /** `getBuildingParam`: the building position round-tripped with every dialog command. */
 const param = computed(() => props.building.y * 10 + props.building.x);
@@ -112,6 +114,7 @@ async function onTreasure(level: number, send: (cmd: string, args: CommandArg[])
         @reset="onReset(send)"
         @rumor="onRumor(level)"
         @make-friends="onMakeFriends()"
+        @commission="showCommission = true"
         @treasure="onTreasure(level, send)"
         @recruit="recruiting = $event"
       />
@@ -124,6 +127,7 @@ async function onTreasure(level: number, send: (cmd: string, args: CommandArg[])
         @close="recruiting = null"
       />
       <RumorDialog v-if="showRumor" :param="param" @close="showRumor = false" />
+      <CommissionDialog v-if="showCommission" @close="showCommission = false" />
       <LionizeDialog v-if="showLionize" :param="param" @close="showLionize = false" />
     </template>
   </UpgradeBuildingDialog>

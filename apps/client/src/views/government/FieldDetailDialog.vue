@@ -11,7 +11,13 @@ export interface Field {
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { serverTime, timeLeftText } from '../../core/clock';
 import { BUILDING_GROUND } from '../../game/cityGrid';
-import { canCreateCityOnField, fieldDescription, fieldTitle, wid2cid } from '../../game/field';
+import {
+  canCreateCityOnField,
+  canGatherField,
+  fieldDescription,
+  fieldTitle,
+  wid2cid,
+} from '../../game/field';
 import { useGame } from '../../game/game';
 import { i18n } from '../../i18n';
 import { useCityStore } from '../../stores/city';
@@ -26,8 +32,7 @@ import FxLabel from '../../ui/FxLabel.vue';
 /**
  * Government.FieldDetailDialog: one field's stationed troops, which can be recalled (the
  * player's) or sent away (others'). 派遣 opens the 校场's campaign dialog on this field, 筑城 sends
- * `createCityFromLand`. 采集 / 收获 (`gatherFieldStart` / `gatherFieldEnd`) are city commands the
- * server has not ported, so those two buttons stay disabled.
+ * `createCityFromLand`. Gathering uses troop commands and refreshes this field from their replies.
  */
 const props = defineProps<{ field: Field; data: unknown[] | null }>();
 const emit = defineEmits<{ close: [] }>();
@@ -52,6 +57,7 @@ const description = computed(() =>
   fieldDescription(props.field.type, props.field.level, props.field.province, global.yysType),
 );
 const canCreateCity = computed(() => canCreateCityOnField(props.field.type));
+const canGather = computed(() => canGatherField(props.field.type, props.field.level));
 
 /** `loadData`: `[troops, gathering or false]`. */
 const troops = computed<Troop[]>(() => {
@@ -85,6 +91,19 @@ const columns: { header: string; field: keyof Troop & string; width: number }[] 
   { header: t(4), field: 'position', width: 100 },
   { header: '', field: 'id', width: 84 },
 ];
+
+function refreshField(): void {
+  game.sendGlobalCommand('city', 'getFieldDetail', [props.field.wid]);
+}
+
+const unregister = game.addGlobalReceiver('troop', (command, data) => {
+  if (command === 'gatherFieldStart') {
+    refreshField();
+  } else if (command === 'gatherFieldEnd' && Array.isArray(data)) {
+    void showAlert(String(data[1] ?? ''));
+    refreshField();
+  }
+});
 
 function onTroop(troop: Troop) {
   if (troop.myTroop) {
@@ -123,9 +142,28 @@ async function onCreateCity() {
   emit('close');
 }
 
+function onGatherStart(): void {
+  game.sendGlobalCommand('troop', 'gatherFieldStart', [props.field.wid]);
+}
+
+async function onGatherEnd(): Promise<void> {
+  const elapsed = serverTime() - (gatherStart.value ?? serverTime());
+  const [head, tail] =
+    elapsed >= 3600
+      ? ['Troop_TroopDetailDialogSrc_9', 'Troop_TroopDetailDialogSrc_10']
+      : ['Troop_TroopDetailDialogSrc_11', 'Troop_TroopDetailDialogSrc_12'];
+  const prompt = '' + i18n(head) + timeLeftText(elapsed, i18n) + i18n(tail);
+  if ((await showAlert(prompt, '', ['yes', 'no'])) === 'yes') {
+    game.sendGlobalCommand('troop', 'gatherFieldEnd', [props.field.wid]);
+  }
+}
+
 let timer: ReturnType<typeof setInterval> | undefined;
 onMounted(() => (timer = setInterval(() => (now.value = serverTime()), 1000)));
-onUnmounted(() => clearInterval(timer));
+onUnmounted(() => {
+  clearInterval(timer);
+  unregister();
+});
 </script>
 
 <template>
@@ -227,9 +265,8 @@ onUnmounted(() => clearInterval(timer));
         :text="description"
         :tip="description"
       />
-      <!-- 采集 / 收获: gatherFieldStart / gatherFieldEnd are not ported on the server yet. -->
       <FxButton
-        v-if="gatherStart === null && !canCreateCity"
+        v-if="gatherStart === null && canGather"
         :w="65"
         :h="36"
         style-name="ButtonGreen"
@@ -237,10 +274,10 @@ onUnmounted(() => clearInterval(timer));
         :bottom="15"
         :fx="{ fontSize: 16 }"
         :label="t(9)"
-        :enabled="false"
+        @click="onGatherStart"
       />
       <FxButton
-        v-if="gatherStart !== null && !canCreateCity"
+        v-if="gatherStart !== null && canGather"
         :w="65"
         :h="36"
         style-name="ButtonGreen"
@@ -248,7 +285,7 @@ onUnmounted(() => clearInterval(timer));
         :bottom="15"
         :fx="{ fontSize: 16 }"
         :label="t(10)"
-        :enabled="false"
+        @click="onGatherEnd"
       />
       <template v-if="gatherStart !== null">
         <FxCanvas :x="240" :y="50" :w="64" :h="26" style-name="BoardListUp">

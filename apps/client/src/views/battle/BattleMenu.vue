@@ -5,12 +5,20 @@ import FxCanvas from '../../ui/FxCanvas.vue';
 import FxLabel from '../../ui/FxLabel.vue';
 
 /**
- * Battle.BattleMenu: the `btnBattleMenu` popup — 战场出征 (`showBattleCampaignDialog` →
- * `getCurrentCityGroundLevel2`), 战场说明 / 战场任务 / 战场成员 (the 战况 / TaskStatusPanel /
- * member slices are later-stage ports, the buttons stay disabled) and 退出战场
- * (`quitBattleField` → `getQuitResult`), 关闭 hides the menu again.
+ * Battle.BattleMenu: the `btnBattleMenu` popup — 战场说明 (`getBattleInfor` / 战况视图),
+ * 战场出征 (`getCurrentCityGroundLevel2`), 战场任务 (`getLastMainTask`), 战场成员
+ * (`getBattleFieldUsers`), 贡献排行 (`getBattleHonourStat`), 退出战场 (`getQuitResult` →
+ * `getQuitResult` reply) and 关闭 hides the menu again.
  */
-const emit = defineEmits<{ close: []; campaign: []; quit: [] }>();
+const emit = defineEmits<{
+  close: [];
+  campaign: [];
+  infor: [];
+  task: [];
+  member: [];
+  honour: [];
+  quit: [];
+}>();
 </script>
 
 <template>
@@ -20,7 +28,7 @@ const emit = defineEmits<{ close: []; campaign: []; quit: [] }>();
     :fx="{ backgroundColor: 0, backgroundAlpha: 0 }"
     @click="emit('close')"
   >
-    <FxCanvas :x="596" :y="360" :w="130" :h="222" style-name="PanelGreyGreen" @click.stop>
+    <FxCanvas :x="596" :y="304" :w="130" :h="252" style-name="PanelGreyGreen" @click.stop>
       <FxCanvas :x="8" :y="4" :w="114" :h="26" style-name="PopupTitle">
         <FxLabel
           :x="0"
@@ -44,31 +52,36 @@ const emit = defineEmits<{ close: []; campaign: []; quit: [] }>();
         :y="66"
         :w="106"
         :h="28"
-        :enabled="false"
-        :tip="i18n('Battle_BattleMenu_3_1')"
         :label="i18n('Battle_BattleMenu_3_1')"
+        @click="emit('infor')"
       />
       <FxButton
         :x="12"
         :y="96"
         :w="106"
         :h="28"
-        :enabled="false"
-        :tip="i18n('Battle_BattleMenu_4_1')"
         :label="i18n('Battle_BattleMenu_4_1')"
+        @click="emit('task')"
       />
       <FxButton
         :x="12"
         :y="126"
         :w="106"
         :h="28"
-        :enabled="false"
-        :tip="i18n('Battle_BattleMenu_5_1')"
         :label="i18n('Battle_BattleMenu_5_1')"
+        @click="emit('member')"
       />
       <FxButton
         :x="12"
         :y="156"
+        :w="106"
+        :h="28"
+        :label="i18n('Battle_BattleMenu_8_1')"
+        @click="emit('honour')"
+      />
+      <FxButton
+        :x="12"
+        :y="186"
         :w="106"
         :h="28"
         style-name="ButtonYellow"
@@ -77,7 +90,7 @@ const emit = defineEmits<{ close: []; campaign: []; quit: [] }>();
       />
       <FxButton
         :x="12"
-        :y="186"
+        :y="216"
         :w="106"
         :h="28"
         style-name="Close"

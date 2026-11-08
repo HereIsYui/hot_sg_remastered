@@ -21,6 +21,18 @@ import FxCanvas from '../../ui/FxCanvas.vue';
 import FxImage from '../../ui/FxImage.vue';
 import FxLabel from '../../ui/FxLabel.vue';
 import MySkillDialog from './MySkillDialog.vue';
+import CreateWuhunDialog from './CreateWuhunDialog.vue';
+import WuhunUserSelectDialog from './WuhunUserSelectDialog.vue';
+import CardMixPanel from './CardMixPanel.vue';
+import QuestionDialog from './QuestionDialog.vue';
+import {
+  isFragment,
+  multiUseCardArgs,
+  isPortrait,
+  isWuhun,
+  parseQuestion,
+  type Question,
+} from '../../game/wuhunCards';
 import ChangeFlagDialog from './ChangeFlagDialog.vue';
 import ChangeUserNameDialog from './ChangeUserNameDialog.vue';
 import SellGoodsPanel from './SellGoodsPanel.vue';
@@ -50,6 +62,7 @@ const TABS: { x: number; type: number; label: string }[] = [
   { x: 277, type: 4, label: t(6) },
   { x: 342, type: 5, label: t(7) },
   { x: 406, type: 7, label: i18n('SkillBook') },
+  { x: 470, type: 6, label: i18n('Hero_card_1') },
 ];
 const SKILL_TAB = 7;
 const MARKET_BID = 13;
@@ -82,6 +95,10 @@ const changeNameOpen = ref(false);
 const moving = shallowRef<GoodsItem | null>(null);
 const lijian = shallowRef<GoodsItem | null>(null);
 const stateOpen = ref(false);
+const creatingWuhun = shallowRef<GoodsItem | null>(null);
+const usingWuhun = shallowRef<GoodsItem | null>(null);
+const mixingCard = shallowRef<GoodsItem | null>(null);
+const question = shallowRef<Question | null>(null);
 
 function loadUserGoods() {
   game.sendGlobalCommand('goods', 'loadUserGoods');
@@ -121,6 +138,19 @@ function onLoadUserGoods(data: unknown) {
 }
 
 async function useGoods(item: GoodsItem) {
+  if (
+    (item.isThing && isPortrait(item.gid)) ||
+    isFragment(item.gid) ||
+    item.gid === 148 ||
+    item.gid === 149
+  ) {
+    creatingWuhun.value = item;
+    return;
+  }
+  if (isWuhun(item.gid)) {
+    usingWuhun.value = item;
+    return;
+  }
   if (item.isThing) {
     void showAlert(src(7));
     return;
@@ -206,6 +236,13 @@ function onAction(action: string, item: GoodsItem) {
   if (action === 'use') void useGoods(item);
   else if (action === 'sell') sellGoods(item);
   else if (action === 'compose') void goodCompose(item);
+  else if (action === 'mix') mixingCard.value = item;
+  else if (action === 'multi') void multiUseCard();
+}
+
+async function multiUseCard() {
+  if ((await showAlert(i18n('Hero_card_10'), '', ['yes', 'no'])) === 'yes')
+    game.sendGlobalCommand('goods', 'multiUseCard', multiUseCardArgs());
 }
 
 function doSellGoods(count: number) {
@@ -250,6 +287,7 @@ function onUseGoods(d: unknown[]) {
     const first = kind === 4 ? 1 : 4;
     void showAlert(src(first) + nobility + src(first + 1) + left + src(first + 2));
   }
+  if (kind === 6) question.value = parseQuestion(d.shift());
   if (REFRESH_CITY_GIDS.has(gid)) game.refreshResource();
   game.guide.triggerByGoods(gid);
   loadUserGoods();
@@ -260,7 +298,13 @@ const unregister = game.addGlobalReceiver('goods', (command, data) => {
   if (command === 'loadUserGoods') onLoadUserGoods(d);
   else if (command === 'useGoods') onUseGoods(d);
   else if (command === 'sellGoods') onSellGoodsSucc(d);
-  else if (command === 'goodsCompose') {
+  else if (command === 'genWuHunByRumor' || command === 'genWuHunBySuipian') {
+    gameAlert(String(d[2] ?? ''));
+    loadUserGoods();
+  } else if (command === 'mixCard' || command === 'multiUseCard') {
+    void showAlert(String(d[0] ?? ''));
+    loadUserGoods();
+  } else if (command === 'goodsCompose') {
     if (!d.shift()) gameAlert(i18n('Goods_UseGoodsDialogSrc_UseHorsewhip_fail'));
     else treasure.value = treasureItems(d.shift());
     loadUserGoods();
@@ -381,6 +425,21 @@ const remembered = { type: 0, page: 0 };
     <TreasureGetDialog v-if="treasure" :items="treasure" @close="treasure = null" />
     <SellGoodsPanel v-if="selling" :goods="selling" @sell="doSellGoods" @close="selling = null" />
   </FxCanvas>
+  <CreateWuhunDialog
+    v-if="creatingWuhun"
+    :initial="creatingWuhun"
+    :goods="goods"
+    :things="tabs[5] ?? []"
+    @close="creatingWuhun = null"
+  />
+  <WuhunUserSelectDialog v-if="usingWuhun" :goods="usingWuhun" @close="usingWuhun = null" />
+  <CardMixPanel
+    v-if="mixingCard"
+    :cards="tabs[6] ?? []"
+    :initial="mixingCard"
+    @close="mixingCard = null"
+  />
+  <QuestionDialog v-if="question" :question="question" @close="question = null" />
   <ChangeCityPositionDialog
     v-if="moving"
     :advanced="moving.gid === 82"

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import type { HallBattle } from '../../game/battlefield';
+import type { BattleShopGood, BattleShopState } from '../../game/battleShop';
 import { armBuyAgain } from '../../game/battlefieldBuyAgain';
 import { useGame } from '../../game/game';
 import { i18n } from '../../i18n';
@@ -14,21 +15,32 @@ import FxText from '../../ui/FxText.vue';
 import CreateBattleDialog from './CreateBattleDialog.vue';
 
 /**
- * Battle.BattleChoiceDialog: the 战场 hall — the 剧情战场 / 据点战场 tabs over the
- * `cfg_battle_field` rows (type 0 / 1 of the getBattleInfo reply), the selected battle's detail
- * panel (`showBattleDetail`), 新建战场 (`onCreateBattle`) and the 请战书 重置参战次数
+ * Battle.BattleChoiceDialog: the 战场 hall — the 剧情战场 / 据点战场 / 战场商城 / 战场邀请 tabs
+ * over the `cfg_battle_field` rows (type 0 / 1 of the getBattleInfo reply), the selected battle's
+ * detail panel (`showBattleDetail`), 新建战场 (`onCreateBattle`) and the 请战书 重置参战次数
  * (`onResetTodayWarCount`). 加入战场 is driven from BattlePanel (`getPVPBattleInfo` reply opens
- * the JoinBattleDialog there); the 跨服 / 赤壁 / 商店 tabs are out of the stage-9 local scope.
+ * the JoinBattleDialog there); the 跨服 / 赤壁 tabs are out of the stage-9 local scope, and the
+ * shop rows themselves arrive through the `getUserBattleShopInfo` reply on `shop`.
  */
 const props = defineProps<{
   battles: HallBattle[];
   todayWarCount: number;
+  shop: BattleShopState | null;
 }>();
-const emit = defineEmits<{ join: [bid: number] }>();
+const emit = defineEmits<{
+  join: [bid: number];
+  /** the 战场商城 tab: BattlePanel sends `getUserBattleShopInfo` */
+  shop: [];
+  /** the 战场邀请 tab: BattlePanel sends `getBattleInvite` */
+  invites: [];
+  medalChange: [];
+  medalRecord: [];
+  buyGood: [good: BattleShopGood];
+}>();
 
 const game = useGame();
 
-/** `mBattleType`: 0 剧情战场 (type-0 rows), 1 据点战场 (type-1 rows). */
+/** `mBattleType`: 0 剧情战场 (type-0 rows), 1 据点战场 (type-1 rows), 2 战场商城. */
 const battleType = ref(0);
 const lastIndex = ref(0);
 
@@ -69,9 +81,27 @@ const instructionImage = computed(() => `images/${selected.value?.id ?? 0}_battl
 function switchPanel(group: number): void {
   battleType.value = group;
   lastIndex.value = 0;
+  if (group === 2) emit('shop');
+  if (group === 3) emit('invites');
 }
 function onClickBattle(_row: HallBattle, index: number): void {
   lastIndex.value = index;
+}
+
+// ---- the 战场商城 view (mBattleShopType: the shop rows of the getUserBattleShopInfo reply) ----
+const SHOP_PAGE = 12;
+const shopPage = ref(0);
+const shopGoods = computed(() => props.shop?.goods ?? []);
+const shopPages = computed(() => Math.max(1, Math.ceil(shopGoods.value.length / SHOP_PAGE)));
+const shopRows = computed(() =>
+  shopGoods.value.slice(shopPage.value * SHOP_PAGE, (shopPage.value + 1) * SHOP_PAGE),
+);
+
+function onPrevShopPage(): void {
+  if (shopPage.value > 0) shopPage.value--;
+}
+function onNextShopPage(): void {
+  if (shopPage.value < shopPages.value - 1) shopPage.value++;
 }
 
 function onTabInstruction(): void {
@@ -118,7 +148,7 @@ function close(): void {
       :fx="{ textAlign: 'center', color: 15192461, fontWeight: 'normal' }"
       :text="i18n('Battle_BattleChoiceDialog_1_1')"
     />
-    <!-- tab row (the 跨服 / 赤壁 / 商城 tabs are out of scope) -->
+    <!-- tab row (the 跨服 / 赤壁 tabs are out of scope) -->
     <FxButton
       :x="21"
       :y="42"
@@ -136,6 +166,24 @@ function close(): void {
       :selected="battleType === 1"
       :label="i18n('Battle_BattleChoiceDialog_3_1')"
       @click="switchPanel(1)"
+    />
+    <FxButton
+      :x="169"
+      :y="42"
+      :w="75"
+      style-name="ButtonGreen"
+      :selected="battleType === 2"
+      :label="i18n('Battle_BattleChoiceDialog_4_1')"
+      @click="switchPanel(2)"
+    />
+    <FxButton
+      :x="243"
+      :y="42"
+      :w="75"
+      style-name="ButtonGreen"
+      :selected="battleType === 3"
+      :label="i18n('Battle_BattleChoiceDialog_11_1')"
+      @click="switchPanel(3)"
     />
     <FxCanvas :x="472" :y="47" :w="150" :h="25" style-name="BoardListDown">
       <FxLabel
@@ -160,7 +208,7 @@ function close(): void {
     <FxButton :x="593" :y="447" style-name="Close" :fx="{ fontSize: 16 }" @click="close" />
 
     <!-- battle list -->
-    <FxCanvas :x="21" :y="79" :w="147" :h="366" style-name="BoardListUp">
+    <FxCanvas v-if="battleType < 2" :x="21" :y="79" :w="147" :h="366" style-name="BoardListUp">
       <FxDataGrid
         :x="3"
         :y="3"
@@ -190,8 +238,78 @@ function close(): void {
     </FxCanvas>
 
     <!-- detail (`switchPanel` hides it when the tab has no battle) -->
+    <!-- the 战场商城 view: the goods of the first battleBelong group, 12 per page -->
+    <FxCanvas v-if="battleType === 2" :x="21" :y="79" :w="638" :h="366" style-name="BoardListUp">
+      <FxLabel
+        :x="10"
+        :y="8"
+        :w="200"
+        style-name="ItemTitle"
+        :text="`${i18n('Shop_ShopDialog_9_1')} ${props.shop?.honour ?? 0}`"
+      />
+      <FxButton
+        :x="410"
+        :y="4"
+        :w="100"
+        style-name="ButtonYellow"
+        :label="i18n('Shop_ShopDialog_11_1')"
+        @click="emit('medalChange')"
+      />
+      <FxButton
+        :x="520"
+        :y="4"
+        :w="100"
+        style-name="ButtonYellow"
+        :label="i18n('Shop_ShopDialog_10_1')"
+        @click="emit('medalRecord')"
+      />
+      <FxCanvas v-if="shopPages > 1" :x="10" :y="330" :w="210" :h="36">
+        <FxCanvas :x="8" :y="6" :w="70" :h="25" style-name="BoardListDown">
+          <FxLabel
+            :y="3"
+            :w="70"
+            style-name="ItemValue"
+            :fx="{ textAlign: 'center', fontWeight: 'bold' }"
+            :text="`${shopPage + 1}/${shopPages}`"
+          />
+        </FxCanvas>
+        <FxButton :x="78" :y="0" :w="65" label="" @click="onPrevShopPage" />
+        <FxButton :x="141" :y="0" :w="65" label="" @click="onNextShopPage" />
+      </FxCanvas>
+      <FxCanvas
+        v-for="(good, i) in shopRows"
+        :key="good.id"
+        :x="12 + (i % 4) * 152"
+        :y="40 + Math.floor(i / 4) * 100"
+        :w="146"
+        :h="94"
+        style-name="BoardListDown"
+        @click="emit('buyGood', good)"
+      >
+        <FxCanvas :x="4" :y="4" :w="68" :h="68" style-name="FramePicture">
+          <FxImage :x="2" :y="2" :w="64" :h="64" :source="`images/${good.imageName}.png`" />
+        </FxCanvas>
+        <FxLabel
+          :x="78"
+          :y="6"
+          :w="64"
+          :h="60"
+          :fx="{ textAlign: 'left', fontSize: 12 }"
+          :text="good.name"
+        />
+        <FxLabel
+          :x="4"
+          :y="74"
+          :w="138"
+          :fx="{ textAlign: 'center', fontSize: 12 }"
+          :text="`${good.medalName} ${good.medalPrice}，${i18n('Shop_ShopDialog_9_1')} ${good.creditPrice}`"
+        />
+      </FxCanvas>
+    </FxCanvas>
+
+    <!-- detail (`switchPanel` hides it when the tab has no battle) -->
     <FxCanvas
-      v-if="groupBattles.length > 0"
+      v-if="battleType < 2 && groupBattles.length > 0"
       :x="176"
       :y="79"
       :w="483"
@@ -223,41 +341,43 @@ function close(): void {
       />
     </FxCanvas>
 
-    <!-- bottom buttons -->
-    <FxButton
-      :x="21"
-      :y="446"
-      :w="85"
-      style-name="ButtonYellow"
-      :fx="{ fontWeight: 'bold', fontSize: 14 }"
-      :label="i18n('Battle_BattleChoiceDialog_5_1')"
-      :tip="i18n('Battle_BattleChoiceDialog_4')"
-      @click="onJoinPVPBattle"
-    />
-    <FxButton
-      :x="114"
-      :y="446"
-      :w="85"
-      style-name="ButtonYellow"
-      :fx="{ fontWeight: 'bold', fontSize: 14 }"
-      :label="i18n('Battle_BattleChoiceDialog_7_1')"
-      :tip="
-        selected?.canCreate
-          ? i18n('Battle_BattleChoiceDialogSrc_6')
-          : i18n('Battle_BattleChoiceDialogSrc_7')
-      "
-      :enabled="Boolean(selected?.canCreate)"
-      @click="onCreateBattle"
-    />
-    <FxButton
-      :x="207"
-      :y="446"
-      :w="85"
-      style-name="ButtonYellow"
-      :fx="{ fontWeight: 'bold', fontSize: 14 }"
-      :label="i18n('Battle_BattleChoiceDialog_12')"
-      @click="onTabInstruction"
-    />
+    <!-- bottom buttons (resetBottomCanvas hides them on the shop / invite tabs) -->
+    <template v-if="battleType < 2">
+      <FxButton
+        :x="21"
+        :y="446"
+        :w="85"
+        style-name="ButtonYellow"
+        :fx="{ fontWeight: 'bold', fontSize: 14 }"
+        :label="i18n('Battle_BattleChoiceDialog_5_1')"
+        :tip="i18n('Battle_BattleChoiceDialog_4')"
+        @click="onJoinPVPBattle"
+      />
+      <FxButton
+        :x="114"
+        :y="446"
+        :w="85"
+        style-name="ButtonYellow"
+        :fx="{ fontWeight: 'bold', fontSize: 14 }"
+        :label="i18n('Battle_BattleChoiceDialog_7_1')"
+        :tip="
+          selected?.canCreate
+            ? i18n('Battle_BattleChoiceDialogSrc_6')
+            : i18n('Battle_BattleChoiceDialogSrc_7')
+        "
+        :enabled="Boolean(selected?.canCreate)"
+        @click="onCreateBattle"
+      />
+      <FxButton
+        :x="207"
+        :y="446"
+        :w="85"
+        style-name="ButtonYellow"
+        :fx="{ fontWeight: 'bold', fontSize: 14 }"
+        :label="i18n('Battle_BattleChoiceDialog_12')"
+        @click="onTabInstruction"
+      />
+    </template>
 
     <!-- the dialogs over the hall -->
     <CreateBattleDialog

@@ -16,6 +16,7 @@ const emit = defineEmits<{
   rumor: [];
   makeFriends: [];
   treasure: [];
+  commission: [];
   recruit: [recruit: HeroRecruit];
 }>();
 
@@ -62,12 +63,14 @@ const buttons = [
   { x: 95, label: t('2_1'), event: 'rumor' },
   { x: 185, label: t('15_1'), event: 'makeFriends' },
   { x: 275, label: t('3_1'), event: 'treasure' },
+  { x: 365, label: i18n('Hotel_CommissionDialog_1_1'), event: 'commission' },
 ] as const;
 
 function onButton(event: (typeof buttons)[number]['event']) {
   if (event === 'reset') emit('reset');
   else if (event === 'rumor') emit('rumor');
   else if (event === 'makeFriends') emit('makeFriends');
+  else if (event === 'commission') emit('commission');
   else emit('treasure');
 }
 </script>

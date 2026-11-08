@@ -4,6 +4,9 @@ import {
   ACTIVATABLE_ARMOR_IDS,
   MORIZHIREN_ID,
   armorInfo,
+  armorItemName,
+  armorTip,
+  armorTipRow,
   dealWithOtherInfoOfArmor,
   filterStoreArmors,
   isEnhanced,
@@ -13,9 +16,11 @@ import {
   sellPrice,
   type Armor,
 } from '../../game/armor';
+import { armorShowTip } from '../../game/chatLink';
 import { useGame } from '../../game/game';
 import { PAGE_ITEM_COUNT, itemPosition, pageCount } from '../../game/goods';
 import { i18n } from '../../i18n';
+import { useChatStore } from '../../stores/chat';
 import { useCityStore } from '../../stores/city';
 import { gameAlert, showAlert } from '../../ui/alert';
 import FxButton from '../../ui/FxButton.vue';
@@ -38,6 +43,7 @@ import UserArmorItem from './UserArmorItem.vue';
  */
 const game = useGame();
 const city = useCityStore();
+const chat = useChatStore();
 
 type Row = Record<string, unknown>;
 const int = (v: unknown) => parseInt(String(v), 10) || 0;
@@ -160,6 +166,19 @@ async function onBreakUp(a: Armor) {
   }
 }
 
+/**
+ * `UserArmorItem.menuHandler` 展示: queue the piece into the bottom-bar chat input as an item
+ * link; the `UserArmorItem_Full_ArmorShow` alert fires when three pieces are already queued.
+ */
+function onShow(a: Armor) {
+  const ok = chat.addItemLink({
+    sid: a.sid,
+    name: armorItemName(a.row),
+    tip: armorShowTip(armorTip(armorInfo, armorTipRow(a)), a.imageName),
+  });
+  if (!ok) void showAlert(i18n('UserArmorItem_Full_ArmorShow'));
+}
+
 /** `UserArmorItem.onNewClickGoods`: toggles the batch selection, or opens the piece's menu. */
 async function onPick(a: Armor, e: MouseEvent) {
   if (selecting.value) {
@@ -170,8 +189,7 @@ async function onPick(a: Armor, e: MouseEvent) {
   }
   const menu: MenuItem[] = [
     { label: i18n('Armor_UserArmorItem_3_1'), data: 'sell' },
-    // 展示 links the piece into chat, which has no item links yet.
-    { label: i18n('Armor_UserArmorItem_4_1'), data: 'show', enabled: false },
+    { label: i18n('Armor_UserArmorItem_4_1'), data: 'show' },
     {
       label: i18n('Armor_UserArmorItem_5_1'),
       data: 'active',
@@ -188,6 +206,7 @@ async function onPick(a: Armor, e: MouseEvent) {
   const p = stagePoint(e.currentTarget as Element, e.clientX, e.clientY);
   const action = await showMenu(menu, p.x, p.y);
   if (action === 'sell') void onSell(a);
+  else if (action === 'show') onShow(a);
   else if (action === 'active') special.value = a;
   else if (action === 'analyze') void onAnalyze(a);
   else if (action === 'blacksmith_active') send('initHoles', city.cid, a.sid);

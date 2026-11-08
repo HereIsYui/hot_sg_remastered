@@ -2,6 +2,7 @@
 import { useSessionStore } from '../stores/session';
 import ColorFilters from '../ui/ColorFilters.vue';
 import FxButton from '../ui/FxButton.vue';
+import ActivityHub from './activity/ActivityHub.vue';
 import BattlePanel from './battle/BattlePanel.vue';
 import BottomPanel from './game/BottomPanel.vue';
 import CityInnerPanel from './game/CityInnerPanel.vue';
@@ -29,6 +30,8 @@ const session = useSessionStore();
     <TopPanel :x="264" :y="0" />
     <DialogManager :x="289" :y="54" />
     <BottomPanel :x="263" :y="555" />
+    <!-- Keep the login/activity host mounted while session.view switches scene panels. -->
+    <ActivityHub />
     <!-- `openBtn` (BloodWar.mxml 1108, combineFuncBtn at 925,476): the 功能按钮区 opener -->
     <FxButton
       :x="925"

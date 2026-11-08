@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { rewardArgs, rewardSelection, type TaskSelection } from '../../game/famousTasks';
+import SelectArmorPanel from './SelectArmorPanel.vue';
+import SelectHeroPanel from './SelectHeroPanel.vue';
 import { flexHtml } from '../../core/flexHtml';
 import { useGame } from '../../game/game';
 import {
@@ -30,9 +33,10 @@ import MultiRewardCanvas from './MultiRewardCanvas.vue';
 
 /**
  * Task.TaskDialog: task kinds as tabs, the kind's groups and their tasks, and the selected
- * one's description. The 任务进度 dialog, commission tasks, and picking a hero or gear for a
- * reward are not ported.
+ * one's description, including commissioned and famous-hero tasks and surrendering selected equipment or heroes.
  */
+const props = defineProps<{ initialType?: number; embedded?: boolean }>();
+const emit = defineEmits<{ close: [] }>();
 const game = useGame();
 const global = useGlobalStore();
 const user = useUserStore();
@@ -48,6 +52,7 @@ const TABS: { x: number; type: number; label: number }[] = [
   { x: 335, type: 5, label: 14 },
   { x: 413, type: 7, label: 15 },
   { x: 491, type: 6, label: 7 },
+  { x: 569, type: 4, label: 4 },
 ];
 const BOTTOM_BUTTON = { fontWeight: 'bold', fontSize: 14 } as const;
 
@@ -59,7 +64,7 @@ const names = computed<TaskNames>(() => ({
   nobility: global.nobilityNames,
 }));
 
-const taskType = ref(remembered.type);
+const taskType = ref(props.initialType ?? remembered.type);
 let lastTaskType = 0;
 const groups = ref<TaskGroup[]>([]);
 const groupIndex = ref(-1);
@@ -72,6 +77,8 @@ let lastTaskIndex = -1;
 const content = ref<string | null>(null);
 const contentText = ref('');
 const taskId = ref(0);
+const goals = ref<Record<string, unknown>[]>([]);
+const selection = ref<TaskSelection | null>(null);
 const canGetReward = ref(false);
 const showMulti = ref(false);
 const multiOpen = ref(false);
@@ -94,6 +101,10 @@ function setText(text: string) {
 }
 
 function getTaskGroupList() {
+  taskId.value = 0;
+  canGetReward.value = false;
+  showMulti.value = false;
+  selection.value = null;
   game.sendGlobalCommand('task', 'getTaskTypeGroupList', [taskType.value]);
 }
 
@@ -140,6 +151,8 @@ function onGetTaskList(data: unknown) {
 
 function showTaskDetail(index: number) {
   const task = tasks.value[Math.min(index, tasks.value.length - 1)];
+  canGetReward.value = false;
+  taskId.value = 0;
   if (task) game.sendGlobalCommand('task', 'getTaskDetail', [task.id]);
 }
 
@@ -147,6 +160,7 @@ function onGetTaskDetail(data: unknown) {
   const detail = taskDetail(data, taskType.value, names.value);
   if (!detail) return;
   setHtml(detail.html);
+  goals.value = detail.goals;
   taskId.value = detail.id;
   canGetReward.value = detail.finished;
   showMulti.value = detail.multi;
@@ -188,7 +202,9 @@ function switchPanel(type: number) {
 
 function onClickGetReward() {
   if (taskId.value > 0) {
-    game.sendGlobalCommand('task', 'getReward', [taskId.value, lastGroupId]);
+    selection.value = rewardSelection(taskId.value, lastGroupId, goals.value);
+    if (!selection.value)
+      game.sendGlobalCommand('task', 'getReward', rewardArgs(taskId.value, lastGroupId));
   } else {
     void showAlert(src(54));
   }
@@ -317,6 +333,7 @@ const remembered = { type: 0 };
         @click="onClickDropTask"
       />
       <FxButton
+        v-if="taskType === 7"
         :x="106"
         :bottom="10"
         :w="85"
@@ -331,7 +348,7 @@ const remembered = { type: 0 };
       :bottom="9"
       style-name="Close"
       :fx="{ fontSize: 16 }"
-      @click="game.closeDialog()"
+      @click="props.embedded ? emit('close') : game.closeDialog()"
     />
     <FxCanvas :x="21" :y="79" :w="147" :h="226" style-name="BoardListUp">
       <FxDataGrid
@@ -378,6 +395,22 @@ const remembered = { type: 0 };
         <template #cell="{ row }">{{ taskLabel(row) }}</template>
       </FxDataGrid>
     </FxCanvas>
+    <SelectArmorPanel
+      v-if="selection?.kind === 'armor'"
+      :tid="taskId"
+      :type="selection.type"
+      :armor-id="selection.armorId"
+      :value="selection.value"
+      :count="selection.count"
+      @close="selection = null"
+    />
+    <SelectHeroPanel
+      v-if="selection?.kind === 'hero'"
+      :tid="taskId"
+      :type="selection.type"
+      :level="selection.level"
+      @close="selection = null"
+    />
     <MultiRewardCanvas
       v-if="multiOpen"
       :x="130"

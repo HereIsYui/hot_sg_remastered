@@ -48,6 +48,10 @@ const columns = [
 
 /** `getHeroBuffer` reply: `[{hid, gid, name, endtime}, ...]`. */
 const unregister = game.addGlobalReceiver('hero', (command, data) => {
+  if (command === 'largessHeroWithGid') {
+    reload();
+    return;
+  }
   if (command !== 'getHeroBuffer') return;
   const arr = Array.isArray(data) ? (data as Record<string, unknown>[]) : [];
   list.value = arr.map((r) => ({
@@ -91,7 +95,7 @@ function onRenew(row: BuffRow) {
     return;
   }
   const type = RENEW_TYPE[row.gid];
-  if (type !== undefined) game.showUseGoodsDialog(0, type, []);
+  if (type !== undefined) game.showUseGoodsDialog(0, type, [row.hid]);
   else game.showUseGoodsDialog(0, row.gid, [row.hid]);
 }
 </script>

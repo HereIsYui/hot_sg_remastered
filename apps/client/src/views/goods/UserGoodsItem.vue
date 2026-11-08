@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { useGame } from '../../game/game';
 import { attrTip, type GoodsItem } from '../../game/goods';
 import { i18n } from '../../i18n';
+import { isPortrait } from '../../game/wuhunCards';
 import FxCanvas from '../../ui/FxCanvas.vue';
 import FxImage from '../../ui/FxImage.vue';
 import FxLabel from '../../ui/FxLabel.vue';
@@ -47,7 +48,10 @@ const tip = computed<TipValue>(() => ({
 }));
 
 async function onClick(e: MouseEvent) {
-  if (props.item.isThing) return;
+  if (props.item.isThing) {
+    if (isPortrait(props.item.gid)) emit('action', 'use', props.item);
+    return;
+  }
   const p = stagePoint(e.currentTarget as Element, e.clientX, e.clientY);
   let menu = MENU;
   if (game.guide.justCreatedRole) {

@@ -5,6 +5,12 @@ import { endTimeText } from '../../core/clock';
 import { BUILDING_COLLEGE } from '../../game/cityGrid';
 import { useGame } from '../../game/game';
 import {
+  heroGoodsPromptKey,
+  heroLargessArgs,
+  heroLargessReply,
+  isHeroLargessGoods,
+} from '../../game/heroGoods';
+import {
   UseGoodsType,
   parseTypeGoods,
   typeGoodsDialogWidth,
@@ -23,8 +29,8 @@ import UseLubanMojiaDialog from './UseLubanMojiaDialog.vue';
 
 /**
  * Goods.UseGoodsDialog: the items of one kind with the counts owned, to pick one to use; the
- * 鲁班传人 / 墨家弟子 finish at once for 元宝 or 礼金. 购买 needs the shop, which is not ported,
- * and so do the items for heroes, gear and the army that pass through here.
+ * 鲁班传人 / 墨家弟子 finish at once for 元宝 or 礼金. Hero buff/attribute items go directly
+ * to largessHeroWithGid; recovery and experience items retain their useTypeGoods protocol.
  */
 const props = defineProps<{ request: UseGoodsRequest }>();
 
@@ -53,6 +59,7 @@ const cost = ref(0);
 const visible = ref(false);
 const lubanMojia = ref(false);
 let lastUsed: TypeGoodsItem | null = null;
+let pendingLargess = false;
 
 const width = computed(() => typeGoodsDialogWidth(items.value.length));
 const tip = (item: TypeGoodsItem): TipValue => ({
@@ -64,6 +71,7 @@ const isSpeedUp = (type: number) => type === UseGoodsType.Building || type === U
 function loadData() {
   const { type, time } = props.request;
   visible.value = false;
+  pendingLargess = false;
   lubanMojia.value = false;
   game.sendGlobalCommand('user', 'getUserTypeGoods', isSpeedUp(type) ? [type, time] : [type]);
 }
@@ -79,9 +87,31 @@ function onGetGoods(d: unknown[]) {
   visible.value = true;
 }
 
-function send(item: TypeGoodsItem, extra: CommandArg[] = []) {
+async function send(item: TypeGoodsItem, extra: CommandArg[] = []) {
   const { type, param } = props.request;
-  if (type === 143 || type === 12) {
+  if (isHeroLargessGoods(item.gid)) {
+    const dialog = game.session.dialog;
+    const hid = Number(param[0] ?? (dialog?.name === 'heroDetail' ? dialog.hid : 0));
+    if (!Number.isInteger(hid) || hid <= 0) return;
+    if (pendingLargess) return;
+    const request = props.request;
+    pendingLargess = true;
+    visible.value = false;
+    try {
+      await game.cmd.sendGlobalCommand(
+        'hero',
+        'largessHeroWithGid',
+        heroLargessArgs(city.cid, hid, item.gid, param),
+      );
+    } finally {
+      // Success clears pending in the receiver and closes the picker. Rule/network errors
+      // have no success reply, so restore this request's controls for another attempt.
+      if (pendingLargess && props.request === request) {
+        pendingLargess = false;
+        visible.value = true;
+      }
+    }
+  } else if (type === 143 || type === 12) {
     game.useStateGoods(type, item.gid, city.cid, [...param, ...extra]);
   } else
     game.sendGlobalCommand('user', 'useTypeGoods', [type, item.gid, city.cid, ...param, ...extra]);
@@ -93,15 +123,16 @@ async function onClickGoods(item: TypeGoodsItem) {
     lubanMojia.value = true;
     return;
   }
-  const prompt = `${i18n('Goods_UseGoodsDialogSrc_10')}${item.name}?`;
-  const onlyYes = game.guide.justCreatedRole && !remembered.guideClicked;
+  const warning = heroGoodsPromptKey(item.gid);
+  const prompt = warning ? i18n(warning) : `${i18n('Goods_UseGoodsDialogSrc_10')}${item.name}?`;
+  const onlyYes = !warning && game.guide.justCreatedRole && !remembered.guideClicked;
   if (onlyYes) remembered.guideClicked = true;
-  if ((await showAlert(prompt, '', onlyYes ? ['yes'] : ['yes', 'no'])) === 'yes') send(item);
+  if ((await showAlert(prompt, '', onlyYes ? ['yes'] : ['yes', 'no'])) === 'yes') await send(item);
 }
 
 /** `useLubanMojiaImmediately`: 0 pays 元宝, 1 礼金. */
 function useMasterNow(payType: number) {
-  if (lastUsed) send(lastUsed, [payType]);
+  if (lastUsed) void send(lastUsed, [payType]);
 }
 
 function onUseGoodsSucc(d: unknown[]) {
@@ -137,6 +168,22 @@ const unregister = game.addGlobalReceiver('user', (command, data) => {
   else if (command === 'useTypeGoods') onUseGoodsSucc(d);
 });
 onUnmounted(unregister);
+
+const unregisterHero = game.addGlobalReceiver('hero', (command, data) => {
+  if (command !== 'largessHeroWithGid' || !pendingLargess) return;
+  pendingLargess = false;
+  // HeroDetailDialog already refreshes heroes/resources and announces this same reply.
+  // A picker opened elsewhere (e.g. renewing a buff) still needs those updates.
+  if (game.session.dialog?.name !== 'heroDetail') {
+    const reply = heroLargessReply(data);
+    game.onLoadHeroList(reply.heroes);
+    if (reply.tip) void showAlert(reply.tip);
+    else gameAlert(i18n('Hero_HeroDetailDialogSrc_3_2'));
+    game.refreshResource();
+  }
+  close();
+});
+onUnmounted(unregisterHero);
 </script>
 
 <script lang="ts">

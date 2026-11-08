@@ -415,6 +415,8 @@ export interface ArmorTip {
   color: string;
   stars: string[];
   text: string;
+  /** `ArmorShowTip`'s piece picture, parsed from a chat 展示 tooltip's `<image src=` tail. */
+  image?: string;
 }
 
 const QUALITY_KEYS = Array.from({ length: 7 }, (_, i) => `BlackSmith_ArmorQuailtyDesc_${i + 1}`);

@@ -1,3 +1,5 @@
+import type { ChatItemSegment } from './chatLink';
+
 export type ChatChannel = 'all' | 'world' | 'union' | 'private' | 'war';
 
 export interface ChatLine {
@@ -10,6 +12,9 @@ export interface ChatLine {
   fromdesignation: string;
   self: boolean;
   system: boolean;
+  /** Set when the line carries 装备展示 links: the rendered pieces and their tooltips. */
+  segments?: ChatItemSegment[];
+  tips?: Record<number, string>;
 }
 
 export interface ChatSend {

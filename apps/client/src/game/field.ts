@@ -23,6 +23,10 @@ export function canCreateCityOnField(type: number): boolean {
   return type === 1;
 }
 
+export function canGatherField(type: number, level: number): boolean {
+  return type > 1 && level > 0;
+}
+
 /** Per terrain: the bonus at level 0 < level, and per level (CityFunc.php::updateFieldResourceAdd). */
 const BONUS: Record<number, [base: number, per: number]> = {
   2: [3, 2],

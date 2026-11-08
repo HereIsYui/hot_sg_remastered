@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { parseChatInput, validChatMessage, type ChatChannel } from '../../game/chat';
+import { encodeChatItems } from '../../game/chatLink';
 import { useGame } from '../../game/game';
 import { useChatStore } from '../../stores/chat';
 import { useSessionStore } from '../../stores/session';
@@ -58,7 +59,6 @@ function onClick(name: (typeof FUNCTIONS)[number]): void {
   else if (name === 'ButtonAchievement') game.openUserAchievement();
 }
 
-const chatText = ref('');
 const chat = useChatStore();
 const chatOpen = ref(false);
 const lastSend = ref(0);
@@ -69,7 +69,9 @@ const channelLabel = computed(() => {
 
 function sendChat(): void {
   const current = chat.current === 'union' || chat.current === 'private' ? chat.current : 'world';
-  const send = parseChatInput(chatText.value, current, chat.privateTarget);
+  // BottomPanel.sendChatMsg: the wire message is `chatInput.textWithItemTip()`
+  const wire = encodeChatItems(chat.inputText, chat.inputItems);
+  const send = parseChatInput(wire, current, chat.privateTarget);
   if (!validChatMessage(send.msg)) {
     chat.system('不能发送空白消息。', send.channel);
     return;
@@ -100,7 +102,7 @@ function sendChat(): void {
   if (send.channel === 'private') chat.selectPrivateTarget(send.touser);
   game.push?.request(proc, { msg: send.msg, touser: send.touser });
   lastSend.value = Date.now();
-  chatText.value = '';
+  chat.clearInput();
 }
 
 function cycleChannel(): void {
@@ -162,7 +164,7 @@ const chatLines = computed(() => chat.recentLines);
         @click="chatOpen = !chatOpen"
       />
       <FxTextInput
-        v-model="chatText"
+        v-model="chat.inputText"
         :x="102"
         :y="12"
         :w="250"

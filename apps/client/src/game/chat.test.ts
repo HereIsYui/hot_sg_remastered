@@ -58,3 +58,34 @@ describe('chat store channels', () => {
     expect(chat.messages.world).toHaveLength(2);
   });
 });
+
+describe('chat input item links', () => {
+  it('queues three pieces, refuses the fourth and clears on send', () => {
+    const chat = useChatStore();
+    expect(chat.addItemLink({ sid: 11, name: '青釭剑', tip: '<t>甲</t>' })).toBe(true);
+    expect(chat.addItemLink({ sid: 12, name: '赤兔', tip: '' })).toBe(true);
+    expect(chat.addItemLink({ sid: 13, name: '的卢', tip: '' })).toBe(true);
+    expect(chat.addItemLink({ sid: 14, name: '超限', tip: '' })).toBe(false);
+    expect(chat.inputText).toBe('【青釭剑】【赤兔】【的卢】');
+    expect(chat.inputItems.map((i) => i.sid)).toEqual([11, 12, 13]);
+    chat.clearInput();
+    expect(chat.inputText).toBe('');
+    expect(chat.inputItems).toHaveLength(0);
+  });
+
+  it('decodes received item links into segments and tooltips', () => {
+    const chat = useChatStore();
+    chat.receive('world', {
+      fromuser: '乙',
+      msg: '看[item=11]【青釭剑】[/item]呀[tooltip id=11]甲[n]乙[丙]丁[/tooltip] ',
+    });
+    const line = chat.messages.world[0]!;
+    expect(line.msg).toBe('看【青釭剑】呀 ');
+    expect(line.segments).toEqual([
+      { text: '看', sid: null },
+      { text: '【青釭剑】', sid: 11 },
+      { text: '呀 ', sid: null },
+    ]);
+    expect(line.tips?.[11]).toBe('甲\n乙<丙>丁');
+  });
+});

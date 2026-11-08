@@ -2,11 +2,13 @@
 import { computed, nextTick, ref, watch } from 'vue';
 import { PushProc } from '@hot/shared';
 import type { ChatChannel, ChatLine } from '../../game/chat';
+import { parseArmorShowTip } from '../../game/chatLink';
 import { useGame } from '../../game/game';
 import { useChatStore } from '../../stores/chat';
 import FxButton from '../../ui/FxButton.vue';
 import FxCanvas from '../../ui/FxCanvas.vue';
 import FxTextInput from '../../ui/FxTextInput.vue';
+import { stagePoint, tooltip } from '../../ui/tooltip';
 
 const props = defineProps<{ x?: number; y?: number }>();
 const emit = defineEmits<{ close: [] }>();
@@ -84,6 +86,38 @@ function friend(name: string): void {
   game.sendGlobalCommand('chat_friend', 'addUserRelation', [name, 0]);
   chat.system(`已提交好友申请：${name}。`);
 }
+
+// ---- 装备展示 links (`ChatPanel.onClickLink` / `ArmorShow.clearTip`) ----
+let tipX = 0;
+let tipY = 0;
+
+/** Clicking a piece link shows its ArmorShowTip until the pointer moves 4px away. */
+function showItemTip(line: ChatLine, sid: number, e: MouseEvent): void {
+  const tip = parseArmorShowTip(line.tips?.[sid] ?? '');
+  if (!tip) return;
+  const p = stagePoint(e.currentTarget as Element, e.clientX, e.clientY);
+  tooltip.text = '';
+  tooltip.html = '';
+  tooltip.resource = null;
+  tooltip.goods = null;
+  tooltip.skill = null;
+  tooltip.armor = tip;
+  tooltip.x = p.x + 10;
+  tooltip.y = p.y + 20;
+  tooltip.visible = true;
+  tipX = e.clientX;
+  tipY = e.clientY;
+}
+
+function moveMessages(e: MouseEvent): void {
+  if (
+    tooltip.visible &&
+    tooltip.armor &&
+    Math.abs(e.clientX - tipX) + Math.abs(e.clientY - tipY) >= 4
+  ) {
+    tooltip.visible = false;
+  }
+}
 </script>
 
 <template>
@@ -120,14 +154,33 @@ function friend(name: string): void {
     />
     <FxButton :x="315" :y="33" :w="45" :h="22" label="关闭" @click="emit('close')" />
 
-    <div v-if="!settings" ref="messageList" class="messages" :class="{ line: mode === 'line' }">
+    <div
+      v-if="!settings"
+      ref="messageList"
+      class="messages"
+      :class="{ line: mode === 'line' }"
+      @mousemove="moveMessages"
+    >
       <div v-for="line in lines" :key="line.id" class="message" :class="{ self: line.self }">
         <template v-if="line.system">{{ line.msg }}</template>
         <template v-else>
           <button v-if="line.fromuser" class="username" @click="selectedUser = line.fromuser">
             {{ linePrefix(line) }}
           </button>
-          <span v-if="line.fromuser">: </span>{{ line.msg }}
+          <span v-if="line.fromuser">: </span>
+          <template v-if="line.segments">
+            <template v-for="(seg, i) in line.segments" :key="i">
+              <button
+                v-if="seg.sid !== null"
+                class="item-link"
+                @click.stop="showItemTip(line, seg.sid, $event)"
+              >
+                {{ seg.text }}
+              </button>
+              <template v-else>{{ seg.text }}</template>
+            </template>
+          </template>
+          <template v-else>{{ line.msg }}</template>
         </template>
       </div>
     </div>
@@ -254,6 +307,15 @@ function friend(name: string): void {
   color: #9de7ff;
   background: none;
   font: inherit;
+  cursor: pointer;
+}
+.item-link {
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: none;
+  font: inherit;
+  text-decoration: underline;
   cursor: pointer;
 }
 .settings {

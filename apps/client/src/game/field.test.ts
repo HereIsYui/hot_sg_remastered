@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { setStrings } from '../i18n';
 import {
   canCreateCityOnField,
+  canGatherField,
   fieldDescription,
   fieldTitle,
   wid2cid,
@@ -41,6 +42,12 @@ describe('field helpers', () => {
     expect(canCreateCityOnField(1)).toBe(true);
     expect(canCreateCityOnField(0)).toBe(false);
     expect(canCreateCityOnField(4)).toBe(false);
+  });
+
+  it('only gatherable wild fields have resources', () => {
+    expect(canGatherField(4, 1)).toBe(true);
+    expect(canGatherField(1, 3)).toBe(false);
+    expect(canGatherField(4, 0)).toBe(false);
   });
 
   it('describes the production bonus', () => {

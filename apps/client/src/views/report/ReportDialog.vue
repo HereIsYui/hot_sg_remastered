@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useGame } from '../../game/game';
+import { commonExprRewardId } from '../../game/heroPraise';
+import { finishCommonExprArgs } from '../../game/heroExpr';
 import {
   parseReportDetail,
   parseReportList,
@@ -22,7 +24,7 @@ import KingRewardPanel from './KingRewardPanel.vue';
  * report (`battleid > 0`) fetches its rounds via `getReportDetail` and offers 查看战报 to open the
  * live 战斗 view, a plain report shows its HTML `content`. 领取奖励 (KingRewardPanel) sits on the
  * list. finishMeetWife claims a 情缘 report's reward through the `yes,<id>` body link (the 婚姻
- * module); finishCommonExpr (历练 rewards) is not ported server-side yet.
+ * module); numeric body links claim public 历练 rewards through finishCommonExpr.
  */
 const game = useGame();
 const d = (n: number) => i18n(`Report_ReportDialog_${n}_1`);
@@ -49,6 +51,7 @@ const kingReward = ref(false);
 /** The report opened in the detail panel. */
 const detail = ref<ReportItem | null>(null);
 const detailHtml = ref('');
+const claiming = ref(false);
 
 const pageText = computed(() => reportPageLabel(pageCount.value, page.value));
 
@@ -100,6 +103,7 @@ function openDetail(item: ReportItem): void {
   detailHtml.value = item.content;
   view.value = 'detail';
   if (item.battleid > 0) game.sendGlobalCommand('report', 'getReportDetail', [item.battleid]);
+  else game.sendGlobalCommand('report', 'getReportContent', [item.id]);
 }
 
 function backToList(): void {
@@ -114,16 +118,28 @@ function viewBattle(): void {
   }
 }
 
-/**
- * `ReportDetailPanel.clickReport` (AS3:748): the report body's `event:` links — `yes,<id>` is a
- * 情缘战报 claiming its reward through `MarrySystem/finishMeetWife` (the reply surfaces as the
- * thrown marry.become_girlfriend message on the failure path); other links (the 历练
- * finishCommonExpr rewards) are not ported server-side yet and stay inert.
- */
-function onReportLink(text: string): void {
+/** Original event links: yes,<id> is marriage, a single numeric id is a public reward. */
+async function onReportLink(text: string): Promise<void> {
   const parts = text.split(',');
   if (parts.length === 2 && parts[0] === 'yes') {
     game.sendGlobalCommand('MarrySystem', 'finishMeetWife', [Number(parts[1])]);
+    return;
+  }
+  const id = commonExprRewardId(text);
+  if (id === null || claiming.value) return;
+  claiming.value = true;
+  try {
+    // PHP signals even a successful claim through the global failure/alert path.
+    // Await routing before refreshing; a successful receiver will never run here.
+    await game.cmd.sendGlobalCommand('report', 'finishCommonExpr', finishCommonExprArgs(id));
+    game.refreshResource();
+    game.loadUserInfo();
+    void game.cmd.sendCityCommand(1);
+    void game.cmd.sendCityCommand(2);
+    game.sendGlobalCommand('goods', 'loadUserGoods');
+    loadList();
+  } finally {
+    claiming.value = false;
   }
 }
 
@@ -135,6 +151,9 @@ const unregister = game.addGlobalReceiver('report', (command, data) => {
     items.value = reply.items;
   } else if (command === 'getReportDetail') {
     detailHtml.value = parseReportDetail(data).html;
+  } else if (command === 'getReportContent') {
+    detailHtml.value = String(data ?? '');
+    if (detail.value) detail.value.read = 1;
   }
 });
 

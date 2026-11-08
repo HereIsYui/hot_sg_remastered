@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import type { CommandArg } from '@hot/shared';
 import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue';
+import { friendDetails } from '../../game/famousTasks';
+import HeroFriendDetailDialog from './HeroFriendDetailDialog.vue';
+import HeroPublicTaskDialog from './HeroPublicTaskDialog.vue';
 import { serverTime } from '../../core/clock';
 import { useGame } from '../../game/game';
 import {
@@ -26,8 +29,7 @@ import FxToggle from '../../ui/FxToggle.vue';
  * is pursuing (游说), owns (自己人) or holds captive (俘虏), joined to the hero's current master.
  * `param` round-trips the 客栈's building position so the reply is addressed back here.
  *
- * 查看 (`showFriendDetailDialog` → `PersuadeHero`) and 领取任务 (`showHeroPublicTaskDialog`) open
- * dialogs whose commands are a later stage and are not ported yet, so they show NotYetValid.
+ * 查看 opens the friendship details; 领取任务 opens the available public tasks.
  */
 const props = defineProps<{ param: number }>();
 const emit = defineEmits<{ close: [] }>();
@@ -36,6 +38,10 @@ const game = useGame();
 const now = ref(serverTime());
 const heroes = shallowRef<LionizeHero[]>([]);
 const selectedHid = ref(0);
+const detailHero = shallowRef<LionizeHero | null>(null);
+const taskHero = shallowRef<LionizeHero | null>(null);
+const details = shallowRef(new Map<number, Record<string, unknown>>());
+const persuadeClosed = ref(false);
 
 function send(cmd: string, args: CommandArg[], ttype = 0) {
   game.sendDialogCommand(cmd, ID_BUILDING_HOTEL, props.param, args, ttype);
@@ -51,7 +57,10 @@ const unregister = game.addDialogReceiver({
   isTarget: (id, p) => id === ID_BUILDING_HOTEL && p === props.param,
   onData(reply, ttype) {
     if (ttype !== 13 || !Array.isArray(reply)) return;
-    heroes.value = parseLionizeData(reply).heroes;
+    const parsed = parseLionizeData(reply);
+    heroes.value = parsed.heroes;
+    persuadeClosed.value = parsed.persuadeClose;
+    details.value = friendDetails(reply);
   },
 });
 
@@ -108,7 +117,7 @@ function onSelect(hero: LionizeHero) {
 const selected = computed(() => heroes.value.find((h) => h.hid === selectedHid.value) ?? null);
 const canTask = computed(() => selected.value?.state === LIONIZE_STATE.PURSUING);
 
-/** `onShowPublicTaskDialog`: the 名将任务 dialog is a later stage. */
+/** `onShowPublicTaskDialog`: only a pursuing friendship has public tasks. */
 function onTask() {
   if (!selected.value) {
     void showAlert(i18n('Hotel_LionizeDialogSrc_1_1'));
@@ -118,12 +127,11 @@ function onTask() {
     void showAlert(i18n('Hotel_LionizeDialogSrc_2_1'));
     return;
   }
-  void showAlert(i18n('NotYetValid'));
+  taskHero.value = selected.value;
 }
 
-/** `showDetailDialog`: the 名将详情 / 游说 dialog is a later stage. */
-function onDetail() {
-  void showAlert(i18n('NotYetValid'));
+function onDetail(hero: LionizeHero) {
+  detailHero.value = hero;
 }
 
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -181,7 +189,7 @@ onUnmounted(() => {
               :h="25"
               style-name="ButtonRed"
               :label="t(3)"
-              @click="onDetail()"
+              @click="onDetail(row.hero)"
             />
             <template v-else>{{ row[column.field] }}</template>
           </template>
@@ -199,5 +207,21 @@ onUnmounted(() => {
       />
       <FxButton :x="582" :bottom="18" :w="65" :h="36" style-name="Close" @click="emit('close')" />
     </FxCanvas>
+    <HeroFriendDetailDialog
+      v-if="detailHero"
+      :param="param"
+      :hero="detailHero"
+      :detail="details.get(detailHero.hid) ?? {}"
+      :persuade-closed="persuadeClosed"
+      @changed="reload"
+      @close="detailHero = null"
+    />
+    <HeroPublicTaskDialog
+      v-if="taskHero"
+      :param="param"
+      :hid="taskHero.hid"
+      :friendship="taskHero.friend"
+      @close="taskHero = null"
+    />
   </FxCanvas>
 </template>

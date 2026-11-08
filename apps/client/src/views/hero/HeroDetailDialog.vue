@@ -31,11 +31,12 @@ import IntroduceDialog from './IntroduceDialog.vue';
 import { useHeroArmor } from './heroArmor';
 import { useHeroSkill } from './heroSkill';
 import LargessDialog from './LargessDialog.vue';
+import PraiseDialog from './PraiseDialog.vue';
+import KingInfo from './KingInfo.vue';
 
 /**
  * Hero.HeroDetailDialog: the city's heroes, the chosen one's attributes, upgrading, spending
- * and clearing potential, renaming, rewards, dismissal, gear and skills. Item bonuses, the
- * 君主 panel and summoning captives are not ported.
+ * and clearing potential, renaming, rewards, dismissal, gear, skills and 君主 learning.
  */
 const props = defineProps<{ hid: number }>();
 
@@ -45,7 +46,6 @@ const global = useGlobalStore();
 const user = useUserStore();
 const t = (n: number | string) => i18n(`Hero_HeroDetailDialog_${n}_1`);
 const src = (n: number | string) => i18n(`Hero_HeroDetailDialogSrc_${n}`);
-const notYet = () => void showAlert(i18n('NotYetValid'));
 
 const int = (v: unknown) => parseInt(String(v), 10) || 0;
 
@@ -183,7 +183,9 @@ async function onDismiss() {
   }
 }
 
-const panel = ref<'changeName' | 'kingName' | 'largess' | 'buffer' | null>(null);
+const panel = ref<'changeName' | 'kingName' | 'largess' | 'praise' | 'kingStudy' | 'buffer' | null>(
+  null,
+);
 
 /** `onShowChangeNamePanel`: the king opens the 君主改名 dialog (changeUserName), others rename the hero. */
 function onShowChangeName() {
@@ -285,6 +287,14 @@ const unregister = game.addGlobalReceiver('hero', (command, data) => {
   }
   if (command === 'getNpcIntroduce') {
     introduce.value = (d[0] ?? null) as Record<string, unknown> | null;
+    return;
+  }
+  if (command === 'praiseHero' || command === 'largessHeroWithGid') {
+    const tip = typeof d.at(-1) === 'string' ? String(d.pop()) : '';
+    game.onLoadHeroList(d);
+    if (tip) void showAlert(tip);
+    else gameAlert(src('3_2'));
+    game.refreshResource();
     return;
   }
   if (!(command in done)) return;
@@ -599,7 +609,16 @@ const points = computed(() => {
           style-name="ButtonGreen"
           :label="t(51)"
           :enabled="hero.king"
-          @click="notYet"
+          @click="panel = 'kingStudy'"
+        />
+        <FxButton
+          :x="80"
+          :y="339"
+          :w="60"
+          :h="32"
+          :label="i18n('Hero_PraiseDialog_1_1')"
+          :enabled="inCity && !hero.king && hero.healthy"
+          @click="panel = 'praise'"
         />
         <FxButton
           :x="198"
@@ -652,6 +671,8 @@ const points = computed(() => {
       @largess="(typeidx) => send('largessHero', hero!.hid, typeidx)"
       @close="panel = null"
     />
+    <PraiseDialog v-if="panel === 'praise' && hero" :hero="hero" @close="panel = null" />
+    <KingInfo v-if="panel === 'kingStudy'" @close="panel = null" />
     <HeroBufferDialog
       v-if="panel === 'buffer' && hero"
       :hid="hero.hid"

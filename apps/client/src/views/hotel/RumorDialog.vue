@@ -18,6 +18,8 @@ import FxLabel from '../../ui/FxLabel.vue';
 import FxText from '../../ui/FxText.vue';
 import FxTextInput from '../../ui/FxTextInput.vue';
 import AskDetailDialog from './AskDetailDialog.vue';
+import CreateWuhunDialog from '../goods/CreateWuhunDialog.vue';
+import { parseUserGoods, type GoodsItem } from '../../game/goods';
 
 /**
  * Hotel.RumorDialog: the 市井传闻 board. A clicked rumor expands to the right pane; 更多传闻
@@ -33,6 +35,23 @@ const detail = ref<RumorDetail | null>(null);
 const description = ref(i18n('RumorDescription'));
 const searchText = ref('');
 const showAsk = ref(false);
+const wuhunLoading = ref(false);
+const wuhunInventory = shallowRef<{ goods: GoodsItem[]; things: GoodsItem[] } | null>(null);
+function openWuhun() {
+  wuhunLoading.value = true;
+  game.sendGlobalCommand('goods', 'loadUserGoods');
+}
+const unregisterGoods = game.addGlobalReceiver('goods', (command, data) => {
+  if (command === 'loadUserGoods' && wuhunLoading.value) {
+    const parsed = parseUserGoods(data);
+    wuhunInventory.value = { goods: parsed.goods, things: parsed.tabs[5] ?? [] };
+    wuhunLoading.value = false;
+  } else if (command === 'genWuHunByRumor' || command === 'genWuHunBySuipian') {
+    if (Array.isArray(data)) void showAlert(String(data[2] ?? ''));
+    wuhunInventory.value = null;
+  }
+});
+onUnmounted(unregisterGoods);
 
 function send(cmd: string, args: CommandArg[], ttype = 0) {
   game.sendDialogCommand(cmd, ID_BUILDING_HOTEL, props.param, args, ttype);
@@ -221,6 +240,20 @@ onUnmounted(unregister);
       />
     </FxCanvas>
 
+    <FxButton
+      :x="20"
+      :y="300"
+      :w="105"
+      label="合成武魂"
+      :enabled="!wuhunLoading"
+      @click="openWuhun"
+    />
+    <CreateWuhunDialog
+      v-if="wuhunInventory"
+      :goods="wuhunInventory.goods"
+      :things="wuhunInventory.things"
+      @close="wuhunInventory = null"
+    />
     <AskDetailDialog
       v-if="showAsk && detail"
       :rumor-id="detail.id"

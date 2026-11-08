@@ -1,5 +1,33 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { PushProc } from '@hot/shared';
+import {
+  parseBattleInforReply,
+  parseBattleNewsReply,
+  parseBattleTaskRows,
+  type BattleInforState,
+  type BattleNewsItem,
+  type BattleTaskRow,
+} from '../../game/battleInfor';
+import {
+  battleInviteChatMessage,
+  memberCountStr,
+  parseBattleFieldUsers,
+  parseBattleInviteRows,
+  parseCancelBattleInviteReply,
+  parseInviteBattleUserReply,
+  type BattleInviteRow,
+  type BattleMemberRow,
+} from '../../game/battleInvite';
+import {
+  parseBattleShopInfo,
+  parseMedalExchangeInfo,
+  parseMedalRecord,
+  type BattleShopState,
+  type MedalExchangeRow,
+  type MedalRecordRow,
+} from '../../game/battleShop';
+import { parseBattleHonourStat, type HonourStatList } from '../../game/battleHonour';
 import {
   battleGridPos,
   BUILDING_IMAGES,
@@ -30,15 +58,23 @@ import FxImage from '../../ui/FxImage.vue';
 import FxLabel from '../../ui/FxLabel.vue';
 import BattleActionDialog from './BattleActionDialog.vue';
 import BattleAttackDialog from './BattleAttackDialog.vue';
+import BattleBuyGoodsDialog from './BattleBuyGoodsDialog.vue';
 import BattleCampaignDialog from './BattleCampaignDialog.vue';
 import BattleChoiceDialog from './BattleChoiceDialog.vue';
 import BattleFiledViewDialog from './BattleFiledViewDialog.vue';
+import BattleHonourStatDialog from './BattleHonourStatDialog.vue';
+import BattleInforDialog from './BattleInforDialog.vue';
+import BattleMedalChangeDialog from './BattleMedalChangeDialog.vue';
+import BattleMedalRecordDialog from './BattleMedalRecordDialog.vue';
 import BattleMenu from './BattleMenu.vue';
+import BattleInviteDialog from './BattleInviteDialog.vue';
+import BattleTaskDialog from './BattleTaskDialog.vue';
 import BattleTroopDetailDialog from './BattleTroopDetailDialog.vue';
 import BattleTroopEmptyItem from './BattleTroopEmptyItem.vue';
 import BattleTroopItem from './BattleTroopItem.vue';
 import BattleTroopViewDialog from './BattleTroopViewDialog.vue';
 import CallArmyDialog from './CallArmyDialog.vue';
+import InviteUserDialog from './InviteUserDialog.vue';
 import JoinBattleDialog from './JoinBattleDialog.vue';
 
 /**
@@ -88,6 +124,39 @@ const chatQueue = ref<unknown[]>([]);
 // ---- campaign (getCurrentCityGroundLevel1/2) ----
 const showCampaign = ref(false);
 const campaignGroundLevel = ref(0);
+
+// ---- 战场说明 (Battle.BattleInfor: getBattleInfor / getBattleNews) ----
+const showInfor = ref(false);
+const inforState = ref<BattleInforState | null>(null);
+const newsItems = ref<BattleNewsItem[]>([]);
+const newsPage = ref(0);
+const newsPageCount = ref(0);
+const newsUnionid = ref(0);
+
+// ---- 战场任务 (TaskStatusPanel over getLastMainTask) ----
+const showTask = ref(false);
+const taskRows = ref<BattleTaskRow[]>([]);
+
+// ---- 战场成员 + 邀请 (InviteUserDialog / BattleInviteDialog) ----
+const showMember = ref(false);
+const memberRows = ref<BattleMemberRow[]>([]);
+const memberCount = ref(0);
+const memberIsCreator = ref(false);
+const showInviteList = ref(false);
+const inviteRows = ref<BattleInviteRow[]>([]);
+
+// ---- 贡献排行 (BattleHonourStatDialog over getBattleHonourStat) ----
+const showHonour = ref(false);
+const honourLists = ref<HonourStatList[]>([]);
+
+// ---- 战场商城 (BattleChoiceDialog 商店 tab over getUserBattleShopInfo / buyBattleGoods) ----
+const shopState = ref<BattleShopState | null>(null);
+const showBuy = ref(false);
+const buyGood = ref<BattleShopState['goods'][number] | null>(null);
+const showMedalChange = ref(false);
+const medalRows = ref<MedalExchangeRow[]>([]);
+const showMedalRecord = ref(false);
+const medalRecordRows = ref<MedalRecordRow[]>([]);
 
 // ---- callArmy dialog ----
 const showCallArmy = ref(false);
@@ -521,8 +590,102 @@ const unregister = game.addGlobalReceiver('battle', (command, data) => {
       if (msg) void showAlert(msg);
       break;
     }
+    case 'getBattleInfor': {
+      inforState.value = parseBattleInforReply(d, battle.value?.bid ?? 0);
+      newsItems.value = [];
+      newsPage.value = 0;
+      showInfor.value = true;
+      break;
+    }
+    case 'getBattleNews': {
+      const parsed = parseBattleNewsReply(d, newsUnionid.value);
+      newsItems.value = parsed.items;
+      newsPageCount.value = parsed.pageCount;
+      showInfor.value = true;
+      break;
+    }
+    case 'getLastMainTask': {
+      taskRows.value = parseBattleTaskRows(d);
+      showTask.value = true;
+      break;
+    }
+    case 'getBattleFieldUsers': {
+      const parsed = parseBattleFieldUsers(d);
+      memberRows.value = parsed.rows;
+      memberCount.value = parsed.count;
+      memberIsCreator.value = parsed.isCreator;
+      showMember.value = true;
+      break;
+    }
+    case 'inviteBattleUser': {
+      const parsed = parseInviteBattleUserReply(d);
+      if (parsed.message) void showAlert(parsed.message);
+      memberCount.value = parsed.count;
+      if (parsed.row) {
+        memberRows.value = [...memberRows.value, parsed.row];
+        // sendBattleInvite: the invited player gets a private-chat line
+        game.push?.request(PushProc.CHAT_PRIVATE_CHAT, {
+          msg: battleInviteChatMessage(
+            String(battle.value?.name ?? ''),
+            Number(battle.value?.battlefieldid ?? 0),
+          ),
+          touser: parsed.row.name,
+        });
+      }
+      showMember.value = true;
+      break;
+    }
+    case 'cancelBattleInvite': {
+      const parsed = parseCancelBattleInviteReply(d);
+      if (parsed.message) void showAlert(parsed.message);
+      if (parsed.id > 0) {
+        memberRows.value = memberRows.value.filter((r) => r.id !== parsed.id);
+      }
+      showMember.value = true;
+      break;
+    }
+    case 'getBattleInvite':
+    case 'ignoreBattle': {
+      inviteRows.value = parseBattleInviteRows(d);
+      showInviteList.value = true;
+      break;
+    }
+    case 'getBattleHonourStat': {
+      const lists = parseBattleHonourStat(d);
+      if (lists.length > 0) {
+        honourLists.value = lists;
+        showHonour.value = true;
+      }
+      break;
+    }
+    case 'getUserBattleShopInfo': {
+      shopState.value = parseBattleShopInfo(d, true);
+      showHall.value = true;
+      break;
+    }
+    case 'buyBattleGoods': {
+      d.shift();
+      void showAlert(i18n('Shop_ShopDialogSrc_2'));
+      showBuy.value = false;
+      game.sendGlobalCommand('battle', 'getUserBattleShopInfo');
+      break;
+    }
+    case 'medalChange': {
+      void showAlert(i18n('Shop_ShopDialogSrc_3'));
+      showMedalChange.value = false;
+      break;
+    }
+    case 'getMedalExchangeInfo': {
+      medalRows.value = parseMedalExchangeInfo(d);
+      showMedalChange.value = true;
+      break;
+    }
+    case 'getMedalRecord': {
+      medalRecordRows.value = parseMedalRecord(d);
+      showMedalRecord.value = true;
+      break;
+    }
     default:
-      // 勋章 / 商店 / 邀请 slices (priorities 13/15) are out of this round's scope.
       break;
   }
 });
@@ -562,6 +725,65 @@ function onPoll(): void {
   }
 }
 
+// ---- the 战场菜单 entries (BattleMenu's 说明 / 任务 / 成员 / 贡献排行 buttons) ----
+
+/** `BattleInfor.getBattleInfor` over `currentBattleInfo`. */
+function openInfor(): void {
+  if (!battle.value) return;
+  newsUnionid.value = battle.value.unionid;
+  newsItems.value = [];
+  newsPage.value = 0;
+  game.sendGlobalCommand('battle', 'getBattleInfor', [
+    battle.value.bid,
+    battle.value.battlefieldid,
+    battle.value.unionid,
+  ]);
+}
+
+/** `BattleInfor.getBattleNews [battlefieldid, unionid, page, PAGE_COUNT]`. */
+function openNews(page: number): void {
+  if (!battle.value) return;
+  newsUnionid.value = battle.value.unionid;
+  newsPage.value = page;
+  game.sendGlobalCommand('battle', 'getBattleNews', [
+    battle.value.battlefieldid,
+    battle.value.unionid,
+    page,
+    10,
+  ]);
+}
+
+/** `TaskStatusPanel.onShow` — `getLastMainTask [9001]`. */
+function openTask(): void {
+  game.sendGlobalCommand('battle', 'getLastMainTask', [9001]);
+}
+
+/** `BattleMenu.showInviteUseDialog` → `getBattleFieldUsers [battlefieldid]`. */
+function openMembers(): void {
+  if (!battle.value) return;
+  game.sendGlobalCommand('battle', 'getBattleFieldUsers', [battle.value.battlefieldid]);
+}
+
+/** `BattleMenu.displayHonourStat` → `getBattleHonourStat`. */
+function openHonour(): void {
+  game.sendGlobalCommand('battle', 'getBattleHonourStat');
+}
+
+/** `InviteUserDialog.inviteUser` → `inviteBattleUser [battlefieldid, name, username]`. */
+function inviteMember(name: string): void {
+  if (!battle.value) return;
+  game.sendGlobalCommand('battle', 'inviteBattleUser', [
+    battle.value.battlefieldid,
+    name,
+    game.user.username,
+  ]);
+}
+
+/** The hall's 战场邀请 tab opener (`onShowBattleInvite`). */
+function openBattleInvites(): void {
+  game.sendGlobalCommand('battle', 'getBattleInvite');
+}
+
 onMounted(() => {
   // the entry the 战况 button fires (`TopPanel.gotoBattle` → getUserBattleState)
   game.sendGlobalCommand('battle', 'getUserBattleState');
@@ -584,11 +806,17 @@ const bgSource = computed(() => `images/battle_map_${bid.value}.png`);
       v-if="showHall && !field"
       :battles="hallBattles"
       :today-war-count="hallTodayWarCount"
+      :shop="shopState"
       @join="
         ((showHall = false),
         (joinBid = $event),
         game.sendGlobalCommand('battle', 'getPVPBattleInfo', [$event]))
       "
+      @shop="game.sendGlobalCommand('battle', 'getUserBattleShopInfo')"
+      @invites="openBattleInvites"
+      @medal-change="game.sendGlobalCommand('battle', 'getMedalExchangeInfo')"
+      @medal-record="game.sendGlobalCommand('battle', 'getMedalRecord')"
+      @buy-good="((showBuy = true), (buyGood = $event))"
     />
     <JoinBattleDialog
       v-if="showJoin"
@@ -813,8 +1041,75 @@ const bgSource = computed(() => `images/battle_map_${bid.value}.png`);
           ((showMenu = false),
           game.sendGlobalCommand('battle', 'getCurrentCityGroundLevel2', [game.city.cid]))
         "
+        @infor="((showMenu = false), openInfor())"
+        @task="((showMenu = false), openTask())"
+        @member="((showMenu = false), openMembers())"
+        @honour="((showMenu = false), openHonour())"
         @quit="((showMenu = false), game.sendGlobalCommand('battle', 'getQuitResult'))"
       />
+      <BattleInforDialog
+        v-if="showInfor && inforState"
+        :infor="inforState"
+        :news="newsItems"
+        :news-page="newsPage"
+        :news-page-count="newsPageCount"
+        @close="showInfor = false"
+        @news="openNews(newsPage)"
+        @prev-page="newsPage > 0 && openNews(newsPage - 1)"
+        @next-page="newsPage < newsPageCount - 1 && openNews(newsPage + 1)"
+      />
     </template>
+
+    <!-- the menu / hall sub-dialogs (all of them self-contained over their flags) -->
+    <BattleTaskDialog v-if="showTask" :tasks="taskRows" @close="showTask = false" />
+    <InviteUserDialog
+      v-if="showMember"
+      :rows="memberRows"
+      :count-str="
+        memberCountStr(memberCount, Number(battle?.maxpeople ?? 0), Number(battle?.bid ?? 0))
+      "
+      :is-creator="memberIsCreator"
+      @close="showMember = false"
+      @invite="inviteMember"
+      @cancel="(id) => game.sendGlobalCommand('battle', 'cancelBattleInvite', [id])"
+    />
+    <BattleInviteDialog
+      v-if="showInviteList"
+      :rows="inviteRows"
+      @close="showInviteList = false"
+      @join="
+        (id) => {
+          showInviteList = false;
+          game.sendGlobalCommand('battle', 'joinToBattle', [id]);
+        }
+      "
+      @ignore="(id) => game.sendGlobalCommand('battle', 'ignoreBattle', [id])"
+    />
+    <BattleHonourStatDialog v-if="showHonour" :lists="honourLists" @close="showHonour = false" />
+    <BattleMedalChangeDialog
+      v-if="showMedalChange"
+      :rows="medalRows"
+      @close="showMedalChange = false"
+      @change="(count, tid) => game.sendGlobalCommand('battle', 'medalChange', [count, tid])"
+    />
+    <BattleMedalRecordDialog
+      v-if="showMedalRecord"
+      :rows="medalRecordRows"
+      @close="showMedalRecord = false"
+    />
+    <BattleBuyGoodsDialog
+      v-if="showBuy && buyGood"
+      :good="buyGood"
+      @close="showBuy = false"
+      @buy="
+        (count) =>
+          game.sendGlobalCommand('battle', 'buyBattleGoods', [
+            buyGood?.id ?? 0,
+            count,
+            buyGood?.battleGoodsType ?? 0,
+            game.city.cid,
+          ])
+      "
+    />
   </FxCanvas>
 </template>

@@ -9,6 +9,7 @@ import FxDataGrid from '../../ui/FxDataGrid.vue';
 import FxImage from '../../ui/FxImage.vue';
 import FxLabel from '../../ui/FxLabel.vue';
 import ChangeDesignationDialog from './ChangeDesignationDialog.vue';
+import ChangeStateDialog from './ChangeStateDialog.vue';
 import ChangeFlagDialog from '../goods/ChangeFlagDialog.vue';
 import ChangeUserNameDialog from '../goods/ChangeUserNameDialog.vue';
 
@@ -17,7 +18,7 @@ import ChangeUserNameDialog from '../goods/ChangeUserNameDialog.vue';
  * board shows the lord's ranks; the right board lists the cities (clicking switches). 更改 opens
  * the ChangeNameDialog (名帖), 旗号's 更改 the ChangeFlagDialog (旌旗), 称号 the
  * ChangeDesignationDialog (`loadDetailInfo` refreshes 总人口/将领数/状态, AS3 1059-1061). The
- * 免战 更改 of ChangeStateDialog is not ported yet.
+ * 状态更改 opens ChangeStateDialog for protection, recovery and vacation.
  */
 const game = useGame();
 const user = useUserStore();
@@ -35,6 +36,7 @@ const userState = computed(() =>
 );
 
 const popup = ref<'name' | 'flag' | 'designation' | null>(null);
+const stateOpen = ref(false);
 
 const cityColumns = [
   { header: i18n('UserInfo_UserInfoDialog_16_1') || '城池', field: 'name' as const, width: 140 },
@@ -61,7 +63,7 @@ const unregister = game.addGlobalReceiver('user', (command, data) => {
   allPeople.value = parseInt(String(arr.shift() ?? 0), 10) || 0;
   allHeroes.value = parseInt(String(arr.shift() ?? 0), 10) || 0;
   arr.shift(); // the account state; the dialog reads User.ustate for the button visibility
-  arr.shift(); // the 免战 endtime of ChangeStateDialog (not ported)
+  arr.shift(); // ChangeStateDialog loads the latest protection end time itself
   user.cities = parseCities(arr.shift());
 });
 onUnmounted(unregister);
@@ -300,6 +302,16 @@ onUnmounted(unregister);
             :text="userState"
           />
         </FxCanvas>
+        <FxButton
+          v-if="user.ustate !== 1"
+          :x="170"
+          :y="268"
+          :w="72"
+          :h="26"
+          style-name="ButtonGreen"
+          label="更改"
+          @click="stateOpen = true"
+        />
         <FxCanvas :x="10" :y="298" :w="70" :h="26" style-name="BoardListUp">
           <FxLabel
             :x="3"
@@ -368,4 +380,5 @@ onUnmounted(unregister);
       @close="popup = null"
     />
   </FxCanvas>
+  <ChangeStateDialog v-if="stateOpen" @close="stateOpen = false" />
 </template>
