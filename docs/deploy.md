@@ -146,6 +146,29 @@ WantedBy=timers.target
 
 `backups/` 下产物被 .gitignore 的 `*.sql.gz` 排除；恢复脚本对差分基线库（docker/legacy）没有也不应有入口，理由见上文表格。
 
+## TLS / 域名（可选）
+
+对外用域名 + HTTPS 时有两条路径，都已实战验证（2026-11-09，ai.08151945.xyz）：
+
+1. **compose 内置 caddy**（`--profile tls`）：`.env` 设 `TLS_DOMAIN=<域名>` 与
+   `HOT_WEB_PUBLISH=127.0.0.1:8080`（让 web 只绑回环），caddy 容器占 80/443 反代
+   `web:80` 并自动签发 Let's Encrypt 证书（HTTP-01，需 80/443 可达）。
+2. **复用宿主机已有 caddy/nginx**（机器上还有别的站点时）：宿主配置加站点块
+   `reverse_proxy 127.0.0.1:8080`（`HOT_WEB_PUBLISH=127.0.0.1:8080`），compose 不启用
+   tls profile。注意自定义日志文件要先 `chown caddy:`，否则 reload 失败。
+
+服务器要求：任意能跑 Docker 的机器（x86_64 或 ARM64 均可——生产镜像
+mysql:8.4 / node:22-alpine / nginx / caddy 全部有原生 arm64；amd64-only 的只有
+不随生产部署的差分 oracle 容器）。部署机无需 Node：构建在容器内完成；数据库
+初始化用 `pnpm db:migrate`（在有素材/Node 的机器）转出的 8.4 dump 走
+`scripts/restore-db.sh` 直接导入。仓库树（含 `apps/client/public/assets` 素材、
+`legacy/lang` 文案与 `legacy/db/bloodwar_mysql84.sql`）用 rsync 送到部署机
+`/opt/hot`，每日备份用 crontab：
+
+```cron
+17 4 * * * cd /opt/hot && bash scripts/backup-db.sh >> backups/backup.log 2>&1
+```
+
 ## 环境变量
 
 `docker/prod/.env.example` 是完整清单，分三类：
