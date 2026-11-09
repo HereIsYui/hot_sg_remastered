@@ -9,6 +9,7 @@ import FxCanvas from '../../ui/FxCanvas.vue';
 import FxComboBox from '../../ui/FxComboBox.vue';
 import FxImage from '../../ui/FxImage.vue';
 import FxLabel from '../../ui/FxLabel.vue';
+import ActivityBar from '../activity/ActivityBar.vue';
 
 /** UserInfo.InfoPanel: lord info, current city summary, resources and the city list. */
 const game = useGame();
@@ -405,6 +406,12 @@ const cityIndex = computed({
         :fx="{ fontSize: 12, textAlign: 'center', fontWeight: 'normal' }"
       />
     </FxCanvas>
+
+    <!-- activityPanel (InfoPanel.as:1478-1492): left/right 6, bottom 6, height 113, alpha .5 —
+        the sys_activity notices (getActivityList) anchor to the left board's bottom. -->
+    <div class="activity-panel">
+      <ActivityBar :x="0" :y="0" :w="252" :h="113" />
+    </div>
   </FxCanvas>
 </template>
 
@@ -412,6 +419,15 @@ const cityIndex = computed({
 .portrait {
   position: absolute;
   inset: 0;
+}
+
+.activity-panel {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 6px;
+  height: 113px;
+  opacity: 0.5;
 }
 
 .glow {

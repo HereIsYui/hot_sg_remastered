@@ -1,5 +1,6 @@
 import { timeLeftText } from '../core/clock';
 import { i18n } from '../i18n';
+import type { BuildingState } from '../stores/city';
 import type { ResourceTip, ResourceTipRow } from '../ui/tooltip';
 import { BUILDING_GOVERNMENT } from './cityGrid';
 
@@ -196,4 +197,66 @@ export function destroyBuildingTip(
     time: duration(current.upgradeTime / 2),
     rows,
   };
+}
+
+// ---- top bar building queue (TopPanel.buildingListPanel / Bar.BuildingItem) ----
+
+/** `BuildingItem.init` level label colors: green while upgrading, red while demolishing. */
+export const BUILDING_LEVEL_UP_COLOR = 65280;
+export const BUILDING_LEVEL_DOWN_COLOR = 16711680;
+
+/** One `BuildingItem` row of the queue panel. */
+export interface BuildingQueueRow {
+  state: BuildingState;
+  /** `bname` + the ↑ / ↓ marker of `BuildingItem.init`. */
+  name: string;
+  /** `cur→dst` (`mCurLevel + Bar_BuildingItem_3_1 + mDstLevel`). */
+  levelText: string;
+  levelColor: number;
+  /** `state_endtime - now` in seconds (`mLeftTime`). */
+  left: number;
+  leftText: string;
+}
+
+/** `BuildingItem.init` (BuildingItem.as:332): one row's texts from a building state. */
+export function buildingQueueRow(state: BuildingState, now: number): BuildingQueueRow {
+  const dst = state.state === 1 ? state.level + 1 : state.level - 1;
+  const upgrading = state.level < dst;
+  return {
+    state,
+    name: state.bname + (upgrading ? i18n('Bar_BuildingItem_4') : i18n('Bar_BuildingItem_6')),
+    levelText: `${state.level}${i18n('Bar_BuildingItem_3_1')}${dst}`,
+    levelColor: upgrading ? BUILDING_LEVEL_UP_COLOR : BUILDING_LEVEL_DOWN_COLOR,
+    left: state.state_endtime - now,
+    leftText: timeLeftText(state.state_endtime - now, i18n),
+  };
+}
+
+/**
+ * `TopPanel.updateBuilding` (TopPanel.as:864): the `state > 0` rows in city order; the panel has
+ * six row slots, further ones stay hidden like the original's fixed item array.
+ */
+export function buildingQueueRows(
+  buildings: BuildingState[],
+  now: number,
+  cap = 6,
+): BuildingQueueRow[] {
+  const rows: BuildingQueueRow[] = [];
+  for (const state of buildings) {
+    if (state.state <= 0) continue;
+    if (rows.length >= cap) break;
+    rows.push(buildingQueueRow(state, now));
+  }
+  return rows;
+}
+
+/**
+ * `UpgradeBuildingItem.cancel`'s confirmations, applied to a queue row (`stopUpgradeBuilding` /
+ * `stopDestroyBuilding` ask before stopping; texts are the same strings that dialog uses).
+ */
+export function cancelQueueText(state: BuildingState): string {
+  const t = (n: number) => i18n(`Building_UpgradeBuildingItemSrc_${n}`);
+  return state.state === 1
+    ? `${t(18)}${state.bname}${t(19)}${state.level + 1})?`
+    : `${t(20)}${state.bname}${t(21)}${state.level})?`;
 }

@@ -1,11 +1,22 @@
 <script setup lang="ts">
-import { Application, Container, Graphics, Text, TextStyle } from 'pixi.js';
+import {
+  Application,
+  Assets,
+  Container,
+  Graphics,
+  Sprite,
+  Text,
+  TextStyle,
+  Texture,
+} from 'pixi.js';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { assets } from '../../assets/registry';
 import { useGame } from '../../game/game';
 import {
   blocksForWindow,
   cidToXY,
   cellToScreen,
+  GRID_IMAGE_HEIGHT,
   GRID_OFFSET_X,
   GRID_OFFSET_Y,
   inRange,
@@ -19,6 +30,7 @@ import {
   parseUserFields,
   parseWorldCityInfo,
   screenToCell,
+  terrainImageName,
   worldTypeName,
   xyToCid,
   type MapCity,
@@ -34,9 +46,10 @@ import FxTextInput from '../../ui/FxTextInput.vue';
 
 /**
  * World/WorldPanel: the 500x500 map, rendered in 10x10 blocks with PixiJS. Only the cells inside
- * the view window are drawn (one Graphics diamond + optional label each), blocks already loaded
- * are cached in the world store, and the detailed city info for nearby cities is fetched lazily.
- * Drag pans the view, the 位置 inputs jump to a coordinate and 查找 searches a city by name.
+ * the view window are drawn (one terrain bitmap sprite + optional label each, the original
+ * `showGridImage` blit), blocks already loaded are cached in the world store, and the detailed
+ * city info for nearby cities is fetched lazily. Drag pans the view, the 位置 inputs jump to a
+ * coordinate and 查找 searches a city by name.
  */
 const PANEL_W = 736;
 const PANEL_H = 556;
@@ -44,17 +57,9 @@ const PANEL_H = 556;
 const VIEW_W = 560;
 const VIEW_H = 540;
 
-/** Terrain fill colours (city handled via flag below). Index by `type`. */
-const TYPE_COLOR: Record<number, number> = {
-  1: 0x6b8e3d, // 平地 flatland
-  2: 0x4a7a3a,
-  3: 0x8a7a3a,
-  4: 0x3a6a8a,
-  5: 0x7a9a4a,
-  6: 0x3a5a9a, // 湖 lake
-  7: 0x9a6a3a,
-};
-/** City fill by relationship flag (0 self .. 8 war-pending). */
+/** Fill for cells whose block data (or bitmap) is still missing. */
+const PLACEHOLDER_COLOR = 0x2b2b2b;
+/** City tint by relationship flag (0 self .. 8 war-pending), translucent over the city bitmap. */
 const FLAG_COLOR: Record<number, number> = {
   0: 0x2e8b57, // self — green
   1: 0x1e90ff, // ally — blue
@@ -66,6 +71,28 @@ const FLAG_COLOR: Record<number, number> = {
   7: 0xdaa520, // no flag — gold
   8: 0xdc143c,
 };
+
+// ---- terrain bitmaps (`WorldPanel.terrainImages`) ----
+
+/** Textures keyed by cell type, built once (Pixi caches by URL via Assets + Texture.from). */
+let terrainTextures: Map<number, Texture> | undefined;
+let terrainTexturesLoading: Promise<void> | undefined;
+
+/** Load every `terrainImages[type]` bitmap once (`WorldPanel.as:19768-19775`). */
+function ensureTerrainTextures(): Promise<void> {
+  terrainTexturesLoading ??= (async () => {
+    const types = [0, 1, 2, 3, 4, 5, 6, 7];
+    const entries = await Promise.all(
+      types.map(async (type) => {
+        const url = assets.url(`images/terrain_${terrainImageName(type)}.png`);
+        await Assets.load(url);
+        return [type, Texture.from(url)] as const;
+      }),
+    );
+    terrainTextures = new Map(entries);
+  })();
+  return terrainTexturesLoading;
+}
 
 const game = useGame();
 const world = useWorldStore();
@@ -125,34 +152,34 @@ function onGetWorldCityInfo(data: unknown): void {
 
 // ---- rendering (only the visible cells) ----
 
-function cellColor(type: number, flag: number | undefined): number {
-  if (type === 0) return FLAG_COLOR[flag ?? 7] ?? FLAG_COLOR[7]!;
-  return TYPE_COLOR[type] ?? 0x555555;
-}
-
-/** Draw one isometric diamond for a cell. */
-function drawCell(g: Graphics, sx: number, sy: number, color: number, highlight: boolean): void {
-  const ox = GRID_OFFSET_X;
-  const oy = GRID_OFFSET_Y;
-  g.moveTo(sx + ox, sy)
-    .lineTo(sx + ox * 2, sy + oy)
-    .lineTo(sx + ox, sy + oy * 2)
-    .lineTo(sx, sy + oy)
-    .lineTo(sx + ox, sy)
-    .fill({ color, alpha: 0.85 })
-    .stroke({ color: highlight ? 0xffff00 : 0x1a1a1a, width: highlight ? 2 : 1 });
+/**
+ * Traces the playable diamond of a cell whose 107x75 terrain bitmap has its top-left at (sx, sy).
+ * The bitmap's top-left is the `cellToScreen` spot the original blits it at (showGridImage,
+ * WorldPanel.as:21533/21609, `Matrix(1,0,0,1,_loc29_,_loc30_)`), and the diamond centre sits where
+ * the original hit test expects it (getCidByMousePosition, WorldPanel.as:17748-17751):
+ * bitmap top-left + (GRID_OFFSET_X, GRID_IMAGE_HEIGHT - GRID_OFFSET_X + GRID_OFFSET_Y).
+ */
+function traceCellDiamond(g: Graphics, sx: number, sy: number): Graphics {
+  const cx = sx + GRID_OFFSET_X;
+  const cy = sy + GRID_IMAGE_HEIGHT - GRID_OFFSET_X + GRID_OFFSET_Y;
+  return g
+    .moveTo(cx, cy - GRID_OFFSET_Y)
+    .lineTo(cx + GRID_OFFSET_X, cy)
+    .lineTo(cx, cy + GRID_OFFSET_Y)
+    .lineTo(cx - GRID_OFFSET_X, cy)
+    .lineTo(cx, cy - GRID_OFFSET_Y);
 }
 
 /** `showGridImage` + `showFlagImage`: redraw the visible window from the cached cells. */
 function redraw(): void {
   if (!app || !gridLayer) return;
   gridLayer.removeChildren();
-  const g = new Graphics();
-  gridLayer.addChild(g);
-
   const c = world.centre;
   const spanX = Math.ceil(VIEW_W / (GRID_OFFSET_X * 2)) + 2;
   const spanY = Math.ceil(VIEW_H / (GRID_OFFSET_Y * 2)) + 2;
+  // sprites first, then the tint/placeholder diamonds above them, then dots and labels
+  const tints = new Graphics();
+  const dots: Graphics[] = [];
   const labels: Text[] = [];
 
   for (let my = c.y - spanY; my <= c.y + spanY; my++) {
@@ -169,32 +196,46 @@ function redraw(): void {
       }
       const cid = xyToCid(mx, my);
       const cell = world.cells.get(cid);
-      if (!cell) {
-        drawCell(g, screen.x, screen.y, 0x2b2b2b, false);
-        continue;
+      const texture = cell ? terrainTextures?.get(cell.type) : undefined;
+      if (texture) {
+        const sprite = new Sprite(texture);
+        sprite.position.set(screen.x, screen.y);
+        gridLayer.addChild(sprite);
+      } else {
+        traceCellDiamond(tints, screen.x, screen.y).fill(PLACEHOLDER_COLOR);
       }
-      const info = world.cityInfo.get(cid);
-      drawCell(g, screen.x, screen.y, cellColor(cell.type, info?.flag), false);
       // mark / own-field / event overlays
       if (
-        cell.marktype > 0 ||
-        world.userFieldCids.includes(cid) ||
-        world.actionFieldCids.includes(cid)
+        cell &&
+        (cell.marktype > 0 ||
+          world.userFieldCids.includes(cid) ||
+          world.actionFieldCids.includes(cid))
       ) {
         const dot = new Graphics();
         const dotColor =
           cell.marktype > 0 ? 0xff00ff : world.actionFieldCids.includes(cid) ? 0x00ffff : 0x00ff00;
         dot.circle(screen.x + GRID_OFFSET_X, screen.y + GRID_OFFSET_Y, 4).fill(dotColor);
-        gridLayer.addChild(dot);
+        dots.push(dot);
       }
-      if (cell.type === 0 && info) {
-        const label = new Text({ text: info.cityname, style: labelStyle });
-        label.x = screen.x + GRID_OFFSET_X - label.width / 2;
-        label.y = screen.y + GRID_OFFSET_Y - 6;
-        labels.push(label);
+      if (cell?.type === 0) {
+        // relationship tint over the shared city base image keeps 敌我 readable (this round
+        // replaces the original flagImages sprites; the name label is unchanged)
+        const info = world.cityInfo.get(cid);
+        traceCellDiamond(tints, screen.x, screen.y).fill({
+          color: FLAG_COLOR[info?.flag ?? 7] ?? FLAG_COLOR[7]!,
+          alpha: 0.4,
+        });
+        if (info) {
+          const label = new Text({ text: info.cityname, style: labelStyle });
+          label.x = screen.x + GRID_OFFSET_X - label.width / 2;
+          label.y = screen.y + GRID_OFFSET_Y - 6;
+          labels.push(label);
+        }
       }
     }
   }
+  gridLayer.addChild(tints);
+  for (const d of dots) gridLayer.addChild(d);
   for (const l of labels) gridLayer.addChild(l);
 }
 
@@ -387,6 +428,12 @@ onMounted(async () => {
   gridLayer = new Container();
   app.stage.addChild(gridLayer);
   host.value?.appendChild(app.canvas);
+  // blit the original terrain bitmaps (placeholders if the export is missing)
+  try {
+    await ensureTerrainTextures();
+  } catch (err) {
+    console.warn('missing terrain images', err);
+  }
   // centre on the player's current city if known
   if (game.city.cid > 0) {
     const { x, y } = cidToXY(game.city.cid);

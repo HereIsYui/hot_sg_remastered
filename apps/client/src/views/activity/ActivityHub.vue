@@ -8,7 +8,6 @@ import {
 } from '../../game/loginActivity';
 import FxButton from '../../ui/FxButton.vue';
 import Announcement from '../game/Announcement.vue';
-import ActivityBar from './ActivityBar.vue';
 import ProgressDialog from './ProgressDialog.vue';
 /** GameView owns this host; scene changes must not remount its login announcement. */
 const props = withDefaults(defineProps<{ autoOpen?: boolean }>(), { autoOpen: true });
@@ -30,8 +29,6 @@ defineExpose({
 </script>
 <template>
   <div class="activity-hub">
-    <!-- Use the existing clock strip, above the city building interactions. -->
-    <ActivityBar :x="274" :y="65" :w="250" :h="32" />
     <FxButton
       :x="748"
       :y="67"

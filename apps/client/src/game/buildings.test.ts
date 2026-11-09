@@ -1,7 +1,11 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { timeLeftText } from '../core/clock';
 import { i18n, setStrings } from '../i18n';
+import { parseBuilding, type BuildingState } from '../stores/city';
 import {
+  buildingQueueRow,
+  buildingQueueRows,
+  cancelQueueText,
   createBuildingTip,
   destroyBuildingTip,
   maxBuildingLevel,
@@ -45,7 +49,14 @@ beforeAll(() => {
     _Utils_5: '小时',
     _Utils_6: '分',
     _Utils_7: '秒',
+    Bar_BuildingItem_3_1: '→',
+    Bar_BuildingItem_4: '↑',
+    Bar_BuildingItem_6: '↓',
     Building_UpgradeBuildingItem_2_1: 'top',
+    Building_UpgradeBuildingItemSrc_18: '取消建造只会返还部分资源。是否取消建造',
+    Building_UpgradeBuildingItemSrc_19: '(等级',
+    Building_UpgradeBuildingItemSrc_20: '是否取消拆除',
+    Building_UpgradeBuildingItemSrc_21: '(等级',
     Building_UpgradeBuildingItemSrc_31: '拆除到:',
     Building_UpgradeBuildingItemSrc_32: '(等级',
   });
@@ -102,5 +113,78 @@ describe('building tips', () => {
     expect(tip.title).toBe('拆除到:民居(等级1)');
     expect(tip.time).toBe('01分02秒');
     expect(tip.rows.map((r) => r.need)).toEqual(['2个', '10', '33', '0', '0']);
+  });
+});
+
+describe('building queue (TopPanel.buildingListPanel)', () => {
+  const state = (over: Partial<BuildingState>): BuildingState => ({
+    bid: 5,
+    bname: '民居',
+    description: '',
+    inner: 1,
+    x: 2,
+    y: 3,
+    level: 2,
+    state: 0,
+    state_starttime: 0,
+    state_endtime: 0,
+    state_timeleft: 0,
+    ...over,
+  });
+
+  it('marks an upgrade green with the ↑ marker and cur→dst (BuildingItem.init)', () => {
+    const row = buildingQueueRow(state({ level: 2, state: 1, state_endtime: 3909 }), 0);
+    expect(row.name).toBe('民居↑');
+    expect(row.levelText).toBe('2→3');
+    expect(row.levelColor).toBe(65280);
+    expect(row.left).toBe(3909);
+    expect(row.leftText).toBe('1小时05分09秒');
+  });
+
+  it('marks a demolition red with the ↓ marker and the level below', () => {
+    const row = buildingQueueRow(state({ level: 5, state: 2, state_endtime: 309 }), 9);
+    expect(row.name).toBe('民居↓');
+    expect(row.levelText).toBe('5→4');
+    expect(row.levelColor).toBe(16711680);
+    expect(row.leftText).toBe('05分00秒');
+  });
+
+  it('filters state>0 in city order and fills the six row slots', () => {
+    const buildings: BuildingState[] = [
+      state({ bid: 1, state: 0 }),
+      state({ bid: 2, state: 1, state_endtime: 100 }),
+      state({ bid: 3, state: 2, state_endtime: 200 }),
+      state({ bid: 4, state: 1, state_endtime: 300 }),
+      state({ bid: 6, state: 1, state_endtime: 400 }),
+      state({ bid: 7, state: 1, state_endtime: 500 }),
+      state({ bid: 8, state: 1, state_endtime: 600 }),
+      state({ bid: 9, state: 1, state_endtime: 700 }),
+    ];
+    const rows = buildingQueueRows(buildings, 0);
+    expect(rows.map((r) => r.state.bid)).toEqual([2, 3, 4, 6, 7, 8]);
+    expect(buildingQueueRows(buildings, 0, 3).map((r) => r.state.bid)).toEqual([2, 3, 4]);
+    expect(buildingQueueRows([], 0)).toEqual([]);
+  });
+
+  it('asks the UpgradeBuildingItem confirmation before stopping', () => {
+    expect(cancelQueueText(state({ level: 2, state: 1 }))).toBe(
+      '取消建造只会返还部分资源。是否取消建造民居(等级3)?',
+    );
+    expect(cancelQueueText(state({ level: 5, state: 2 }))).toBe('是否取消拆除民居(等级5)?');
+  });
+
+  it('builds rows from parsed sys_building rows', () => {
+    const parsed = parseBuilding({
+      bid: '6',
+      bname: '官府',
+      description: '',
+      xy: '123',
+      level: '4',
+      state: '1',
+      state_starttime: '0',
+      state_endtime: '65',
+      state_timeleft: '0',
+    });
+    expect(buildingQueueRow(parsed, 5).leftText).toBe('01分00秒');
   });
 });

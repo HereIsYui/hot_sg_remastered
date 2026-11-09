@@ -21,6 +21,7 @@ import {
   parseWorldFieldInfo,
   provinceName,
   screenToCell,
+  terrainImageName,
   wid2cid,
   worldStateName,
   worldTypeName,
@@ -31,7 +32,8 @@ beforeAll(() => {
   setStrings({
     _Define_1: '城池',
     _Define_2: '平地',
-    _Define_6: '草原',
+    _Define_5: '草原',
+    _Define_6: '山地',
     _Define_9: '平静',
     _Define_10: '战乱',
     _Define_11: '废墟',
@@ -116,13 +118,26 @@ describe('range', () => {
 describe('names', () => {
   it('names terrain, state and province', () => {
     expect(worldTypeName(0)).toBe('城池');
-    expect(worldTypeName(5)).toBe('草原');
+    expect(worldTypeName(5)).toBe('山地');
     expect(worldTypeName(9)).toBe('');
     expect(worldStateName(0)).toBe('平静');
     expect(worldStateName(1)).toBe('战乱');
     expect(worldStateName(3)).toBe('');
     expect(provinceName(1)).toBe('司隶');
     expect(provinceName(0)).toBe('');
+  });
+
+  it('maps each cell type to its original terrain bitmap (terrainImages[type])', () => {
+    // WorldPanel.as:19768-19775 — [0]=city, [1]=land ... [7]=swamp
+    expect(terrainImageName(0)).toBe('city');
+    expect(terrainImageName(1)).toBe('land');
+    expect(terrainImageName(2)).toBe('desert');
+    expect(terrainImageName(3)).toBe('forest');
+    expect(terrainImageName(4)).toBe('grass');
+    expect(terrainImageName(5)).toBe('hill');
+    expect(terrainImageName(6)).toBe('lake');
+    expect(terrainImageName(7)).toBe('swamp');
+    expect(terrainImageName(8)).toBe('');
   });
 });
 

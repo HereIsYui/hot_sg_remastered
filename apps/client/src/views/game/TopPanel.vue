@@ -5,6 +5,8 @@ import { useSessionStore } from '../../stores/session';
 import FxButton from '../../ui/FxButton.vue';
 import FxCanvas from '../../ui/FxCanvas.vue';
 import FxImage from '../../ui/FxImage.vue';
+import BuildingListPanel from './BuildingListPanel.vue';
+import InformBar from './InformBar.vue';
 
 /** Bar.TopPanel: view switch (inner city / city / world / battle) and the function buttons. */
 defineProps<{ x?: number; y?: number }>();
@@ -87,5 +89,9 @@ const user = game.user;
       :enabled="user.openLottery === 0"
       @click="game.openLottery()"
     />
+    <!-- buildingListPanel (TopPanel.as:442): the upgrading queue at x=2, y=34 -->
+    <BuildingListPanel />
+    <!-- informBar (BloodWar.as:1157): the scrolling notice bar at x=1, y=34 -->
+    <InformBar />
   </FxCanvas>
 </template>

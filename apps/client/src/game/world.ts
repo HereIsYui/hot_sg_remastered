@@ -141,6 +141,18 @@ export function worldStateName(state: number): string {
   return state >= 0 && state <= 2 ? i18n(`_Define_${state + 9}`) : '';
 }
 
+/**
+ * `WorldPanel.terrainImages` indexed by cell type (`WorldPanel.as:19768-19775`): index 0 is the
+ * city base image, 1..7 are land / desert / forest / grass / hill / lake / swamp. The panel loads
+ * each as `images/terrain_<name>.png` and blits it per grid cell.
+ */
+const TERRAIN_IMAGE_NAME = ['city', 'land', 'desert', 'forest', 'grass', 'hill', 'lake', 'swamp'];
+
+/** The exported bitmap name for a cell type (`terrainImages[type]`); empty for unknown types. */
+export function terrainImageName(type: number): string {
+  return TERRAIN_IMAGE_NAME[type] ?? '';
+}
+
 /** Province name (`_Global_1..19`). Province 0 is unused in the original. */
 export function provinceName(province: number): string {
   return province >= 1 && province <= 19 ? i18n(`_Global_${province}`) : '';

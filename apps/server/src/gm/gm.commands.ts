@@ -493,8 +493,10 @@ export class GmCommands {
   // ---------------------------------------------------------------- announce
 
   /**
-   * 系统公告: a sys_inform scrolling row (utils.php::sendSysInform semantics); the client's
-   * inform bar picks it up on its next poll.
+   * 系统公告: a sys_inform scrolling row (utils.php::sendSysInform semantics). The original
+   * closed-source backend pushed the row to every online client as proc 15 NOTIFY_INFORM
+   * (ChatPanel.as:3134 onNotifyInform → type 1 feeds the InformBar) — broadcast the same frame
+   * here so the ported InformBar actually receives GM announcements.
    */
   async sendInform(input: {
     msg: string;
@@ -502,16 +504,28 @@ export class GmCommands {
     seconds?: number;
     type?: number;
   }): Promise<{ ok: true }> {
+    const type = input.type ?? 1;
+    const color = input.color ?? 14972979;
+    const scrollcount = 1;
     await this.users.sendSysInform({
-      type: input.type ?? 1,
+      type,
       inuse: 1,
       starttime: 0,
       endtime: input.seconds ?? 3600,
       interval: 50000,
-      scrollcount: 1,
-      color: input.color ?? 14972979,
+      scrollcount,
+      color,
       msg: input.msg,
     });
+    this.push.broadcast(PushProc.NOTIFY_INFORM, [
+      {
+        id: 0,
+        type,
+        scrollTimes: scrollcount,
+        color,
+        msg: input.msg,
+      },
+    ]);
     return { ok: true };
   }
 

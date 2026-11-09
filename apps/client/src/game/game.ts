@@ -20,6 +20,15 @@ import { cityPosition, parseCities, useUserStore } from '../stores/user';
 import { gameAlert, setAlertLabels, showAlert } from '../ui/alert';
 import { BUILDING_COLLEGE } from './cityGrid';
 import { chatReplyError } from './chat';
+import {
+  addInform,
+  dispatchInform,
+  INFORM_COLOR_YELLOW,
+  InformType,
+  parseGMSpeek,
+  parseInformFrame,
+  type InformSink,
+} from './informBar';
 import { UseGoodsType } from './goods';
 import { GuideManager } from './guide';
 import { loadLoginPrefs, saveLoginPrefs, type LoginPrefs } from './loginPrefs';
@@ -288,8 +297,46 @@ export class Game {
       chat.setKeywords((data as Record<string, unknown> | null)?.keywords);
       chat.system(chatReplyError(data));
     });
+    // `ChatPanel.onNotifyGMSpeek` (proc 14, ChatPanel.as:728): the GM 喊话 lands in the global
+    // chat as a type 3 entry; a sys_inform broadcast on the same proc keeps the original inform
+    // semantics instead (0 chat tip, 1 scrolling bar, 2 popup).
+    this.push.on(PushProc.NOTIFY_ADMIN_SPEEK, (data) => {
+      const frame = parseGMSpeek(data);
+      if (!frame) return;
+      if (
+        frame.type === InformType.Chat ||
+        frame.type === InformType.Scroll ||
+        frame.type === InformType.Popup
+      ) {
+        dispatchInform(
+          {
+            id: 0,
+            type: frame.type,
+            scrollTimes: frame.scrollTimes ?? 1,
+            color: frame.color ?? INFORM_COLOR_YELLOW,
+            msg: frame.msg,
+          },
+          this.informSink(),
+        );
+      } else chat.receive('world', frame);
+    });
+    // `ChatPanel.onNotifyInform` (proc 15, ChatPanel.as:3134): the sys_inform list the original
+    // chat server polled from MySQL and pushed as [count]{[id][type][times][color][msg]}.
+    this.push.on(PushProc.NOTIFY_INFORM, (data) => {
+      for (const item of parseInformFrame(data)) dispatchInform(item, this.informSink());
+    });
     this.push.request(PushProc.CHAT_LOGIN, {});
     this.push.request(PushProc.CHAT_GET_KEY_WORDS, {});
+  }
+
+  /** The per-type routing targets of the original `onNotifyInform`. */
+  private informSink(): InformSink {
+    const chat = useChatStore(this.pinia);
+    return {
+      scroll: addInform,
+      popup: (msg) => void showAlert(msg),
+      tip: (msg) => chat.system(msg, 'world'),
+    };
   }
 
   loadUserInfo(): void {
