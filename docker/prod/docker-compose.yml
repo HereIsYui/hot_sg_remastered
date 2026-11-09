@@ -102,11 +102,34 @@ services:
         VITE_HOME_LABEL: ${VITE_HOME_LABEL:-}
         VITE_HOME_URL: ${VITE_HOME_URL:-}
     ports:
-      - ${HOT_WEB_PORT:-8080}:80
+      # HOT_WEB_BIND lets the TLS setup keep 8080 loopback-only (caddy fronts 80/443).
+      - ${HOT_WEB_BIND:-}${HOT_WEB_PORT:-8080}:80
     depends_on:
       server:
         condition: service_healthy
     restart: unless-stopped
 
+  # Optional automatic-HTTPS front (docker/prod/caddy/Caddyfile). Started only with
+  # `--profile tls` and TLS_DOMAIN in .env; when it runs, set HOT_WEB_BIND=127.0.0.1
+  # so the game entry is exclusively https://<TLS_DOMAIN>.
+  caddy:
+    image: ${HOT_DOCKER_MIRROR:-}caddy:2
+    profiles: ['tls']
+    environment:
+      TLS_DOMAIN: ${TLS_DOMAIN:-}
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - web
+    restart: unless-stopped
+
 volumes:
   db-data:
+  caddy-data:
+  caddy-config:

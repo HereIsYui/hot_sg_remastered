@@ -1,0 +1,7 @@
+# Automatic-HTTPS front for the prod stack. Started only with `--profile tls`
+# and TLS_DOMAIN set in docker/prod/.env; certificate for the domain is issued
+# via the HTTP-01 challenge (ports 80/443 must be reachable from the internet).
+{$TLS_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy web:80
+}
