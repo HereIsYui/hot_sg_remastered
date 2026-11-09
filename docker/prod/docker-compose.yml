@@ -102,8 +102,9 @@ services:
         VITE_HOME_LABEL: ${VITE_HOME_LABEL:-}
         VITE_HOME_URL: ${VITE_HOME_URL:-}
     ports:
-      # HOT_WEB_BIND lets the TLS setup keep 8080 loopback-only (caddy fronts 80/443).
-      - ${HOT_WEB_BIND:-}${HOT_WEB_PORT:-8080}:80
+      # HOT_WEB_PUBLISH is the whole host-side binding ("8080" or "127.0.0.1:8080"); the TLS
+      # setup sets it to 127.0.0.1:8080 so caddy fronts 80/443 exclusively.
+      - ${HOT_WEB_PUBLISH:-8080}:80
     depends_on:
       server:
         condition: service_healthy
