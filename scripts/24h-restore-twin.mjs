@@ -72,7 +72,9 @@ async function restoreSide(label, uri) {
       await conn.query(`alter table ${q(t)} auto_increment = ${Number(ai)}`);
       aiApplied++;
     }
-    console.log(`[${label}] restored ${names.length} table(s), ${aiApplied} auto_increment reset(s)`);
+    console.log(
+      `[${label}] restored ${names.length} table(s), ${aiApplied} auto_increment reset(s)`,
+    );
   } finally {
     await conn.end();
   }

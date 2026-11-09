@@ -590,8 +590,9 @@ export class TroopTick {
 
   /**
    * UtilsExtend.php::check_inwar: whether the arriving troop's path is blocked (`result` false) and
-   * the friend/enemy `relation`. For the ported tasks (0 运输 / 1 派遣) the original only ever sets
-   * `relation` (0 = self/union, 1 = other) and leaves `result` truthy, so arrivals proceed.
+   * the friend/enemy `relation`. The original's tail decides `result` purely from `$msg`
+   * (`if (empty($msg)) result=true else false`), so the branch-local `$result['result']=0` writes
+   * are dead code and only the message assignments matter.
    */
   private async checkInwar(cid: number, targetcid: number, task: number): Promise<InwarResult> {
     const uid = phpNum(await this.cell(sql<Row>`select uid from sys_city where cid = ${cid}`));
@@ -613,10 +614,10 @@ export class TroopTick {
       targetuid = phpIntval(targetCityInfo.uid);
     }
 
+    const myUser =
+      (await this.one(sql<Row>`select * from sys_user where uid = ${uid}`)) || ({} as Row);
     const result: InwarResult = { relation: 1, result: true, msg: '' };
     if (!phpEmpty(targetuid)) {
-      const myUser =
-        (await this.one(sql<Row>`select * from sys_user where uid = ${uid}`)) || ({} as Row);
       const targetUser =
         (await this.one(sql<Row>`select * from sys_user where uid = ${targetuid}`)) || ({} as Row);
       const targetunion = targetUser.union_id;
@@ -641,6 +642,42 @@ export class TroopTick {
         }
       }
     }
+
+    // The tail (UtilsExtend.php:459-487): the arrival is refused when `msg` ends up non-empty.
+    // 运输 only reaches own/allied cities, 派遣 only own/allied cities that allow union troops,
+    // and every other task refuses self/allied targets (only_towards_enemy). The texts are read
+    // raw from the StartTroop group (PHP `$GLOBALS[StartTroop][k]`): `lang.t` would sprintf the
+    // placeholder away, and a missing key reads as PHP's unset index (empty message → pass).
+    const startTroop = this.lang.value<Record<string, string>>('StartTroop') ?? {};
+    const msgOf = (key: string): string => startTroop[key] ?? '';
+    const mystate = phpIntval(myUser.state);
+    if (task === 0) {
+      if (!(targetIsUnion && phpIntval(worldinfo.type) === 0)) {
+        result.msg = msgOf('only_transport_to_friendly');
+      } else if (phpNum(targetuid) !== phpNum(uid) && (mystate === 2 || mystate === 1)) {
+        result.msg = msgOf('transport_in_peace_or_protection');
+      }
+    } else if (task === 1) {
+      if (!targetIsUnion) {
+        result.msg = msgOf('only_send_to_friendly');
+      } else if (phpNum(targetuid) !== phpNum(uid)) {
+        if (mystate === 2 || mystate === 1) {
+          result.msg = msgOf('send_in_peace_or_protection');
+        }
+        // getAllowUnionTroop: the target's 允许盟友驻军 switch (a missing row counts as off).
+        const allowUnionTroop = await this.cell(
+          sql<Row>`select \`allow\` from sys_allow_union_troop where uid = ${targetuid}`,
+        );
+        if (phpEmpty(allowUnionTroop)) {
+          result.msg = msgOf('not_allow_union_troop');
+        }
+      }
+    } else if (targetIsUnion) {
+      // $taskname has five entries (0-4); a higher task indexes undefined → sprintf renders ''.
+      const tasknameKeys = ['transport', 'send', 'detect', 'harry', 'occupy'];
+      result.msg = sprintf(msgOf('only_towards_enemy'), msgOf(tasknameKeys[task] ?? ''));
+    }
+    result.result = phpEmpty(result.msg);
     return result;
   }
 

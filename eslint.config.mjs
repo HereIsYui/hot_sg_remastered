@@ -38,7 +38,7 @@ export default tseslint.config(
     rules: { 'vue/no-v-html': 'off' },
   },
   {
-    files: ['apps/server/**', 'tools/**', 'packages/**', '*.mjs'],
+    files: ['apps/server/**', 'tools/**', 'packages/**', 'scripts/**', '*.mjs'],
     languageOptions: { globals: globals.node },
   },
   {

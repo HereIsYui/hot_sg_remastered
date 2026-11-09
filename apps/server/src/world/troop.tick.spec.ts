@@ -27,13 +27,41 @@ const lang = new LangService({
   battle: { patrol_report_soldier: { '1': '民夫', '3': '斥候' } },
 });
 
+/** The same table plus the StartTroop strings check_inwar's tail reads. */
+const langTroop = new LangService({
+  report: {
+    br: '<br/>',
+    empty: '无',
+    title: '%s %s，%s',
+    heroname: '[%s]%s%s(%d)',
+    troopback: '%s%s%s',
+    resource: '%s金%s粮%s木%s石%s铁%s',
+    title_2row: { '4': '已到达', '5': '运输到达' },
+    type: { '0': '运输', '1': '派遣' },
+  },
+  battle: { patrol_report_soldier: { '1': '民夫', '3': '斥候' } },
+  StartTroop: {
+    transport: '运输',
+    send: '派遣',
+    detect: '侦察',
+    harry: '掠夺',
+    occupy: '占领',
+    only_towards_enemy: '只能%s非同盟的城池或野地。',
+    only_transport_to_friendly: '只能运输到同盟的城池。',
+    only_send_to_friendly: '只能派遣到同盟的城池。',
+    transport_in_peace_or_protection: '和平保护中不能运输。',
+    send_in_peace_or_protection: '和平保护中不能派遣。',
+    not_allow_union_troop: '对方不允许盟友驻军。',
+  },
+});
+
 const random = { rand: () => 0, randRange: () => 0, mtRand: () => 0 } as unknown as RandomService;
 
-function build(rules: Respond[]) {
+function build(rules: Respond[], table: LangService = lang) {
   const db = new FakeDb(rules);
   const arrival = new BattleArrivalService(
     db.scope,
-    lang,
+    table,
     new CityRules(db.scope),
     new HeroRules(db.scope),
     new TaskRules(db.scope, new UserRules(db.scope)),
@@ -42,13 +70,13 @@ function build(rules: Respond[]) {
   );
   const tick = new TroopTick(
     db.scope,
-    lang,
+    table,
     new CityRules(db.scope),
     new HeroRules(db.scope),
     new ReportService(db.scope, new MailService(db.scope)),
     new ScoutService(
       db.scope,
-      lang,
+      table,
       new ReportService(db.scope, new MailService(db.scope)),
       new TaskRules(db.scope, new UserRules(db.scope)),
       new CityRules(db.scope),
@@ -362,5 +390,144 @@ describe('TroopTick.handleTroop', () => {
     expect(db.executed.some((e) => /update sys_battle_city/i.test(e.sql))).toBe(true);
     const report = db.executed.find((e) => /insert into sys_report/i.test(e.sql))!;
     expect(report.parameters[5]).toBe(37);
+  });
+});
+
+describe('TroopTick.checkInwar arrival gate (UtilsExtend.php:459-487)', () => {
+  /** The troop under settlement; the arrival target is city/field 5005 from city 3003. */
+  const troop = (over: Record<string, unknown>): Record<string, unknown> => ({
+    id: 10,
+    uid: 1001,
+    hid: 0,
+    cid: 3003,
+    targetcid: 5005,
+    task: 0,
+    state: 0,
+    battlefieldid: 0,
+    soldiers: '1,3,10',
+    resource: '0',
+    people: 0,
+    fooduse: 0,
+    ...over,
+  });
+  const returns = (db: FakeDb): boolean =>
+    db.executed.some((e) =>
+      /update sys_troops set state = 1, starttime = unix_timestamp\(\),\s*endtime = pathtime \+ unix_timestamp\(\)\s*where id = \?/i.test(
+        e.sql,
+      ),
+    );
+  const reportText = (db: FakeDb): string => {
+    const report = db.executed.find((e) => /insert into sys_report/i.test(e.sql));
+    return report ? JSON.stringify(report.parameters) : '';
+  };
+
+  it('refuses a scout (task 2) bound for an own field with only_towards_enemy', async () => {
+    // The 24h settlement comparison caught this: mem_world.ownercid == the origin city, so the
+    // original refuses the arrival ("只能侦察非同盟的城池或野地。") and sends the troop home.
+    const { tick, db } = build(
+      [
+        { match: /from sys_troops\s+where endtime > 0/i, rows: [troop({ task: 2 })] },
+        {
+          match: /select \* from mem_world where wid = \?/i,
+          rows: [{ wid: 1, type: 4, ownercid: 3003 }],
+        },
+        { match: /select uid from sys_city where cid = \?/i, rows: [{ uid: 1001 }] },
+        { match: /select \* from sys_city where cid = \?/i, rows: [] },
+        { match: /select \* from sys_user where uid = \?/i, rows: [{ union_id: 0, state: 0 }] },
+        NO(/.*/),
+      ],
+      langTroop,
+    );
+    await tick.handleTroop();
+    expect(returns(db)).toBe(true);
+    expect(reportText(db)).toContain('只能侦察非同盟的城池或野地。');
+    // The scout never settled (no maneuvre, no scout report branch).
+    expect(db.executed.some((e) => /mem_maneuver/i.test(e.sql))).toBe(false);
+  });
+
+  it('refuses a transport (task 0) bound for a non-friendly city with only_transport_to_friendly', async () => {
+    const { tick, db } = build(
+      [
+        { match: /from sys_troops\s+where endtime > 0/i, rows: [troop({ task: 0 })] },
+        {
+          match: /select \* from mem_world where wid = \?/i,
+          rows: [{ wid: 1, type: 0, ownercid: 5005 }],
+        },
+        {
+          match: /select uid from sys_city where cid = \?/i,
+          params: [5005],
+          rows: [{ uid: 1002 }],
+        },
+        {
+          match: /select uid from sys_city where cid = \?/i,
+          params: [3003],
+          rows: [{ uid: 1001 }],
+        },
+        {
+          match: /select \* from sys_city where cid = \?/i,
+          params: [5005],
+          rows: [{ uid: 1002, type: 0 }],
+        },
+        {
+          match: /select \* from sys_user where uid = \?/i,
+          params: [1002],
+          rows: [{ union_id: 0, state: 0 }],
+        },
+        {
+          match: /select \* from sys_user where uid = \?/i,
+          params: [1001],
+          rows: [{ union_id: 0, state: 0 }],
+        },
+        NO(/.*/),
+      ],
+      langTroop,
+    );
+    await tick.handleTroop();
+    expect(returns(db)).toBe(true);
+    expect(reportText(db)).toContain('只能运输到同盟的城池。');
+  });
+
+  it('refuses a send (task 1) to an ally that forbids union troops with not_allow_union_troop', async () => {
+    const { tick, db } = build(
+      [
+        { match: /from sys_troops\s+where endtime > 0/i, rows: [troop({ task: 1 })] },
+        {
+          match: /select \* from mem_world where wid = \?/i,
+          rows: [{ wid: 1, type: 0, ownercid: 5005 }],
+        },
+        {
+          match: /select uid from sys_city where cid = \?/i,
+          params: [5005],
+          rows: [{ uid: 1002 }],
+        },
+        {
+          match: /select uid from sys_city where cid = \?/i,
+          params: [3003],
+          rows: [{ uid: 1001 }],
+        },
+        {
+          match: /select \* from sys_city where cid = \?/i,
+          params: [5005],
+          rows: [{ uid: 1002, type: 0 }],
+        },
+        {
+          match: /select \* from sys_user where uid = \?/i,
+          params: [1002],
+          rows: [{ union_id: 7, state: 0 }],
+        },
+        {
+          match: /select \* from sys_user where uid = \?/i,
+          params: [1001],
+          rows: [{ union_id: 7, state: 0 }],
+        },
+        // getAllowUnionTroop: the target has no sys_allow_union_troop row → not allowed.
+        NO(/select `allow` from sys_allow_union_troop/i),
+        NO(/.*/),
+      ],
+      langTroop,
+    );
+    await tick.handleTroop();
+    expect(returns(db)).toBe(true);
+    expect(reportText(db)).toContain('对方不允许盟友驻军。');
   });
 });

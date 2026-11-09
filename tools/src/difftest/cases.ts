@@ -4425,6 +4425,44 @@ export const cases: DiffCase[] = [
     },
   },
   {
+    // The check_inwar arrival gate (UtilsExtend.php:459-487): a scout (task 2) whose target field
+    // is held by the SCOUTING PLAYER'S OWN CITY (mem_world.ownercid == the troop's origin cid). The
+    // original refuses the arrival at the send-side rule's mirror image — 侦察 of a self/allied
+    // target is only_towards_enemy — so the troop turns home (state 1) and the report carries
+    // 「只能侦察非同盟的城池或野地。」 instead of the 对方未发觉 settlement. Found by the 24h
+    // settlement comparison. The report and the returning troop are left in place so the net delta
+    // (unlike the settles-an-empty-field case, which deletes them and therefore cannot see the
+    // difference) actually compares the outcome; later cases delete this player's rows on entry.
+    name: 'troop tick refuses a scout of an own field (only_towards_enemy)',
+    run: async (s) => {
+      const session = await s.login(EXISTING_PLAYER);
+      const uid = session.uid;
+      const cid = await lastCity(s, uid);
+      await s.query('delete from sys_troops where uid = ?', [uid]);
+      await s.query('delete from sys_report where uid = ?', [uid]);
+      await s.query(
+        'insert into sys_alarm (uid, report) values (?, 1) on duplicate key update report = 1',
+        [uid],
+      );
+      const [tile] = await s.query<{ wid: string }>(
+        'select wid from mem_world where ownercid = 0 and type > 1 and state = 0 order by wid limit 1',
+      );
+      const fieldWid = Number(tile?.wid ?? 0);
+      const targetCid = wid2cid(fieldWid);
+      // The field belongs to the scouting player's own city → check_inwar sets targetIsUnion.
+      await s.query('update mem_world set ownercid = ? where wid = ?', [cid, fieldWid]);
+      await s.query(
+        `insert into sys_troops
+          (uid, cid, hid, targetcid, task, state, starttime, pathtime, endtime, soldiers, resource, people, fooduse)
+         values (?, ?, 0, ?, 2, 0, unix_timestamp() - 600, 600, unix_timestamp() - 1, '1,3,100', '0', 0, 0)`,
+        [uid, cid, targetCid],
+      );
+      await s.tick('HandleTroop');
+      await s.query('update mem_world set ownercid = 0 where wid = ?', [fieldWid]);
+    },
+    tables: SCOUT_RESOURCE_IGNORE,
+  },
+  {
     // checkSodier via the SCOUT path (cfg_js.php line 129: `if($field['uid']<1000) checkSodier`).
     // A 侦察 (task 2) of an UNOWNED NPC wild field (uid<1000): HandleTroop respawns the NPC garrison
     // on arrival, then the scout's 军队状况 intel tier reports the respawned troop. The scripted RNG

@@ -120,16 +120,6 @@ async function tableColumns(conn, table) {
   return { q, columns: cols.map((r) => String(r.c)) };
 }
 
-async function primaryKey(conn, table) {
-  const [rows] = await conn.query(
-    `select column_name as c from information_schema.key_column_usage
-     where table_schema = database() and constraint_name = 'PRIMARY' and table_name = ?
-     order by ordinal_position`,
-    [table],
-  );
-  return rows.map((r) => String(r.c));
-}
-
 async function autoIncrements(conn) {
   const [rows] = await conn.query(
     `select table_name as name, auto_increment as ai from information_schema.tables
@@ -164,7 +154,9 @@ const devTables = await businessTables(dev);
 const onlyLegacy = legacyTables.filter((t) => !devTables.includes(t));
 const onlyDev = devTables.filter((t) => !legacyTables.includes(t));
 const tables = legacyTables.filter((t) => devTables.includes(t));
-console.log(`business tables: legacy ${legacyTables.length}, dev ${devTables.length}, common ${tables.length}`);
+console.log(
+  `business tables: legacy ${legacyTables.length}, dev ${devTables.length}, common ${tables.length}`,
+);
 if (onlyLegacy.length) console.log(`only on legacy: ${onlyLegacy.join(', ')}`);
 if (onlyDev.length) console.log(`only on dev: ${onlyDev.join(', ')}`);
 
